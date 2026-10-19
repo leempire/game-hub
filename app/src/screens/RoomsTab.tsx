@@ -251,6 +251,7 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
               value={roomName}
               onChangeText={setRoomName}
               placeholder="房间名称（可选）"
+              maxLength={20}
               placeholderTextColor={colors.textFaint}
             />
             <TextInput
@@ -258,6 +259,7 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
               value={roomPwd}
               onChangeText={setRoomPwd}
               placeholder="房间密码（可选）"
+              maxLength={32}
               placeholderTextColor={colors.textFaint}
               secureTextEntry
             />

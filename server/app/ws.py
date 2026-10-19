@@ -893,6 +893,21 @@ async def _handle_leave(code: str, user_id: int):
             pass
 
 
+async def kick_user(user_id: int, reason: str):
+    """断开某个用户在所有房间里的连接（封号用）。
+
+    关闭码 4001 = 未授权：客户端 `RoomSocket` 见到它不再重连。断开后照常走
+    `ws_room` 的掉线流程（对局中的会起判负计时），和他自己掉线一样处理。"""
+    for code, conns in list(_connections.items()):
+        ws = conns.get(user_id)
+        if ws is None:
+            continue
+        try:
+            await ws.close(code=4001, reason=reason)
+        except Exception:
+            pass
+
+
 async def _broadcast(code: str, message: dict, exclude: set[int] | None = None):
     """Send a message to all connected players in a room."""
     conns = _connections.get(code, {})

@@ -227,6 +227,7 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
               value={newNickname}
               onChangeText={setNewNickname}
               placeholder="输入新昵称（留空清除）"
+              maxLength={16}
               placeholderTextColor={colors.textFaint}
             />
             <TouchableOpacity
@@ -264,6 +265,7 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
               value={newPwd}
               onChangeText={setNewPwd}
               placeholder="新密码（至少6位）"
+              maxLength={32}
               placeholderTextColor={colors.textFaint}
               secureTextEntry
             />

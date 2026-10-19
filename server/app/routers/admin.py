@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.database import get_conn, row_to_user
 from app.security import get_current_user_id
 from app.schemas import BanRequest, RoleRequest
+from app import ws
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -56,7 +57,7 @@ def list_users(
 
 
 @router.post("/users/{uid}/ban")
-def ban_user(uid: int, req: BanRequest, admin_id: int = Depends(_require_admin)):
+async def ban_user(uid: int, req: BanRequest, admin_id: int = Depends(_require_admin)):
     if uid == admin_id:
         raise HTTPException(400, "不能封禁自己")
     conn = get_conn()
@@ -69,9 +70,13 @@ def ban_user(uid: int, req: BanRequest, admin_id: int = Depends(_require_admin))
         )
         conn.commit()
         row = conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
-        return row_to_user(row)
     finally:
         conn.close()
+    if req.banned:
+        # token 从此验不过（security._verify 查 banned），但已经连着的 WS 不会
+        # 再验一次 —— 当场断开，4001 让客户端别再重连
+        await ws.kick_user(uid, "账号已被封禁")
+    return row_to_user(row)
 
 
 @router.post("/users/{uid}/role")
