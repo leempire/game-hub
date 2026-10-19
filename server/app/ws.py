@@ -2,6 +2,7 @@
 
 import json
 import asyncio
+import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -119,7 +120,14 @@ async def ws_room(websocket: WebSocket, code: str):
             conns = _connections.setdefault(code, {})
             if user_id not in conns:
                 conns[user_id] = websocket
-            await _handle_message(code, user_id, data)
+            # 处理器自己的异常只作废这一条消息：不隔离的话它冒到下面的 except，
+            # 一声不吭地走掉线流程（玩家被判断线、对局里还会起 120s 判负计时）。
+            try:
+                await _handle_message(code, user_id, data)
+            except Exception:
+                logging.exception("处理消息异常 code=%s user=%s type=%s",
+                                  code, user_id, data.get("type")
+                                  if isinstance(data, dict) else None)
     except (WebSocketDisconnect, Exception):
         pass
     finally:
@@ -165,7 +173,7 @@ async def _handle_message(code: str, user_id: int, data: dict):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "pong"})
+            await _send_ws(ws, {"type": "pong"})
     elif msg_type == "ready":
         await _handle_ready(code, user_id)
     elif msg_type == "unready":
@@ -284,7 +292,7 @@ async def _handle_start(code: str, user_id: int):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": "无法开始游戏"})
+            await _send_ws(ws, {"type": "error", "message": "无法开始游戏"})
         return
     if room["game"] == "minesweeper":
         players_info = rm._get_players_info(room)
@@ -344,7 +352,7 @@ async def _handle_start(code: str, user_id: int):
                 sync_game = _connect4_state_for_sync(gs, pid)
             else:
                 sync_game = _game_state_for_sync(gs, pid)
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "game_start",
                 "game": sync_game,
                 "first": first_color,
@@ -380,7 +388,7 @@ async def _handle_move(code: str, user_id: int, data: dict):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     await _broadcast(code, {"type": "move", **result["move"]})
     if result["game_over"]:
@@ -396,7 +404,7 @@ async def _handle_connect4_move(code: str, user_id: int, col: int):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     await _broadcast(code, {"type": "move", **result["move"]})
     if result["game_over"]:
@@ -413,7 +421,7 @@ async def _handle_reversi_move(code: str, user_id: int, x: int, y: int):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     room = rm.get_room(code)
     # Broadcast the move to all players (includes flipped positions)
@@ -449,7 +457,7 @@ async def _handle_xiangqi_move(code: str, user_id: int, data: dict):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     room = rm.get_room(code)
     await _broadcast(code, {"type": "move", **result["move"]})
@@ -468,7 +476,7 @@ async def _handle_dots_move(
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     room = rm.get_room(code)
     await _broadcast(code, {"type": "move", **result["move"]})
@@ -543,7 +551,7 @@ async def _handle_reveal(code: str, user_id: int, data: dict):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     await _broadcast_mine_reveal(code, seat, player, result)
 
@@ -584,7 +592,7 @@ async def _handle_flag(code: str, user_id: int, data: dict):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     await _broadcast(code, {
         "type": "flagged",
@@ -603,7 +611,7 @@ async def _send_ludo_start(code: str, room: dict, gs: dict):
     for p in room["players"]:
         ws = conns.get(p["id"])
         if ws:
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "game_start",
                 "game": {**base_sync, "your_seat": rm._get_player_seat(room, p["id"])},
             })
@@ -620,7 +628,7 @@ async def _handle_roll(code: str, user_id: int):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     payload = {
         "type": "dice_rolled",
@@ -661,7 +669,7 @@ async def _handle_move_piece(code: str, user_id: int, data: dict):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     await _broadcast(code, {
         "type": "piece_moved",
@@ -724,7 +732,7 @@ async def _handle_surrender(code: str, user_id: int):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "tetris_state",
                 **tetris_game_to_sync(gs, user_id),
                 "user_id": user_id,
@@ -737,7 +745,7 @@ async def _handle_surrender(code: str, user_id: int):
                 continue
             other = conns.get(pid)
             if other:
-                await other.send_json({
+                await _send_ws(other, {
                     "type": "tetris_leaderboard",
                     "leaderboard": leaderboard,
                 })
@@ -1052,7 +1060,7 @@ async def _send_battleship_to_all(code: str, gs: dict, msg: dict):
     for pid in gs["player_colors"]:
         ws = _connections.get(code, {}).get(pid)
         if ws:
-            await ws.send_json({**msg, "game": bs_game_to_sync(gs, pid)})
+            await _send_ws(ws, {**msg, "game": bs_game_to_sync(gs, pid)})
 
 
 async def _broadcast_battleship_action(
@@ -1079,7 +1087,7 @@ async def _broadcast_battleship_action(
         if result.get("radar") is not None:
             ws = _connections.get(code, {}).get(user_id)
             if ws:
-                await ws.send_json({
+                await _send_ws(ws, {
                     "type": "radar_result",
                     "x": result["x"],
                     "y": result["y"],
@@ -1140,7 +1148,7 @@ async def _handle_move2048(code: str, user_id: int, data: dict):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     room = rm.get_room(code)
     if not room:
@@ -1169,7 +1177,7 @@ async def _handle_move2048(code: str, user_id: int, data: dict):
             payload["board"] = result["board"]
             payload["spawned"] = result["spawned"]
             payload["trace"] = result["trace"]
-        await ws.send_json(payload)
+        await _send_ws(ws, payload)
     if result["game_over"]:
         await _broadcast(code, {"type": "game_over", **result["game_over"]})
 
@@ -1192,7 +1200,7 @@ async def _handle_tetris_actions(code: str, user_id: int, data: dict):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": result["error"]})
+            await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     room = rm.get_room(code)
     if not room:
@@ -1205,7 +1213,7 @@ async def _handle_tetris_actions(code: str, user_id: int, data: dict):
     if result["locked"]:
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "tetris_state",
                 **tetris_game_to_sync(gs, user_id),
                 "user_id": user_id,
@@ -1228,7 +1236,7 @@ async def _handle_tetris_actions(code: str, user_id: int, data: dict):
         # 「盘面冻住、再也不出新的方块」。正常对局走不到这里。
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "tetris_state",
                 **tetris_game_to_sync(gs, user_id),
                 "user_id": user_id,
@@ -1241,7 +1249,7 @@ async def _handle_tetris_actions(code: str, user_id: int, data: dict):
         ws = conns.get(vid)
         if not ws:
             continue
-        await ws.send_json({
+        await _send_ws(ws, {
             "type": "tetris_state",
             **tetris_game_to_sync(gs, vid),
             "user_id": vid,
@@ -1263,7 +1271,7 @@ async def _handle_tetris_actions(code: str, user_id: int, data: dict):
             continue
         ws = conns.get(pid)
         if ws:
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "tetris_leaderboard",
                 "leaderboard": leaderboard,
             })
@@ -1278,7 +1286,7 @@ async def _broadcast_tetris_start(code: str, room: dict, gs: dict):
     for pid in gs["player_colors"]:
         ws = conns.get(pid)
         if ws:
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "game_start",
                 "game": tetris_game_to_sync(gs, pid),
             })
@@ -1291,7 +1299,7 @@ async def _broadcast_2048_start(code: str, room: dict, gs: dict):
         ws = conns.get(pid)
         if ws:
             sync_game = g2048_game_to_sync(gs, pid)
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "game_start",
                 "game": sync_game,
             })
@@ -1347,7 +1355,7 @@ async def _luzhanqi_send_view(code: str, room: dict, gs: dict,
         ws = _connections.get(code, {}).get(pid)
         if not ws:
             continue
-        await ws.send_json({"type": msg_type, "game": luzhanqi_view_for(gs, color)})
+        await _send_ws(ws, {"type": msg_type, "game": luzhanqi_view_for(gs, color)})
 
 
 async def _luzhanqi_broadcast_begin(code: str, room: dict, gs: dict):
@@ -1356,7 +1364,7 @@ async def _luzhanqi_broadcast_begin(code: str, room: dict, gs: dict):
         ws = _connections.get(code, {}).get(pid)
         if not ws:
             continue
-        await ws.send_json({"type": "luzhanqi_begin", "game": luzhanqi_view_for(gs, color)})
+        await _send_ws(ws, {"type": "luzhanqi_begin", "game": luzhanqi_view_for(gs, color)})
     _maybe_schedule_bot_turn(code, room, gs)
 
 
@@ -1391,7 +1399,7 @@ async def _broadcast_luzhanqi_move(code: str, room: dict, move: dict):
         ws = _connections.get(code, {}).get(pid)
         if not ws:
             continue
-        await ws.send_json({
+        await _send_ws(ws, {
             "type": "move",
             "from": move["from"],
             "to": move["to"],
@@ -1437,7 +1445,7 @@ async def _handle_add_bot(code: str, user_id: int, data: dict | None = None):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": str(e)})
+            await _send_ws(ws, {"type": "error", "message": str(e)})
         return
     room = rm.get_room(code)
     if room:
@@ -1452,7 +1460,7 @@ async def _handle_remove_bot(code: str, user_id: int, data: dict):
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
         if ws:
-            await ws.send_json({"type": "error", "message": str(e)})
+            await _send_ws(ws, {"type": "error", "message": str(e)})
         return
     room = rm.get_room(code)
     if room:
@@ -1548,7 +1556,7 @@ async def _broadcast_battleship_start(code: str, room: dict, gs: dict):
         ws = conns.get(pid)
         if ws:
             sync_game = bs_game_to_sync(gs, pid)
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "game_start",
                 "game": sync_game,
             })
@@ -1563,7 +1571,7 @@ async def _broadcast_uno_start(code: str, room: dict, gs: dict):
     for pid in gs["player_colors"]:
         ws = conns.get(pid)
         if ws:
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "game_start",
                 "game": uno_game_to_sync(gs, pid),
             })
@@ -1582,7 +1590,7 @@ async def _send_uno_state(code: str, room: dict):
     for pid in gs["player_colors"]:
         ws = conns.get(pid)
         if ws:
-            await ws.send_json({
+            await _send_ws(ws, {
                 "type": "uno_state",
                 **uno_game_to_sync(gs, pid),
             })
@@ -1657,7 +1665,7 @@ async def _send_uno_error(code: str, user_id: int, message: str | None):
         return
     ws = _connections.get(code, {}).get(user_id)
     if ws:
-        await ws.send_json({"type": "error", "message": message})
+        await _send_ws(ws, {"type": "error", "message": message})
 
 
 async def _handle_uno_play(code: str, user_id: int, data: dict):
@@ -2301,6 +2309,18 @@ async def _send_ordered(ws, message: dict):
         _stasis_enqueue(ws, message)
         return
     await ws.send_json(message)
+
+
+async def _send_ws(ws, message: dict):
+    """处理器里给**某一个连接**发消息一律走这里：发失败就算了。
+
+    对方的连接可能刚断、他那边的接收循环还没注销（`_connections` 里还挂着），
+    这时 `send_json` 会抛。不吞掉的话异常顺着 `_handle_message` 冒到**正在操作
+    的这个人**的接收循环里，把他踢下线 —— 而他自己的连接毫无问题。"""
+    try:
+        await _send_ordered(ws, message)
+    except Exception:
+        pass
 
 
 def _stasis_send_all(code: str, message: dict, droppable: bool = False):
