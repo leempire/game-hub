@@ -676,6 +676,7 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
 scripts/status.sh                    # 看进程、端口、HTTP 探活、日志位置
 scripts/start.sh                     # 拉起没在跑的服务（已在跑的跳过，不重启）
 scripts/start.sh web --clear         # expo 加 --clear（Metro 漏更时）
+scripts/start.sh web --dev           # 默认是生产模式 bundle（--no-dev --minify，玩家连的就是它）；调试才加 --dev
 scripts/restart.sh backend           # 改 server/ 代码或 config.json 后必须执行（配置在 import 时加载）
 scripts/stop.sh                      # 停全部
 tail -f tmp/log/backend.log          # 服务日志；pid 在 tmp/run/*.pid

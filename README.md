@@ -66,7 +66,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 50541
 
 # 前端 Web（手机浏览器/PC）
 cd app && npm install
-npm run web            # expo start --web --port 50540
+npm run web            # expo start --web --port 50540（开发模式；对外服务请用 scripts/start.sh，默认生产模式 bundle）
 
 # 前端原生开发（Expo Go 扫码）
 cd app && npm start
