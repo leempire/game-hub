@@ -211,6 +211,14 @@ export const PLAYER_SPEED = 3.6;
 /** 预演与权威位置的容差（格）：超过就直接吸附，否则按比例插值。 */
 export const RECONCILE_SNAP = 0.9;
 export const RECONCILE_LERP = 0.22;
+/** 服务端 tick 间隔（ms），与 `stasis.TICK_MS` 一致。远端单位的插值按它定段长的上下限。 */
+export const TICK_MS = 200;
+/**
+ * 远端单位（队友/静默体）一个 tick 内位移超过多少**格**就直接吸附、不插值。
+ * 正常移动一个 tick 最多 0.72 格（3.6 格/秒 × 0.2 秒）；超过 2 格只可能是
+ * 开局传送进舱室或重连，插值反而会画出一段穿墙的滑行。
+ */
+export const REMOTE_SNAP = 2;
 
 /** 移动输入的上行最小间隔。服务端 tick 是 200ms，80ms 保证它每次积分拿到的
  *  方向不早于半个 tick；再密只是白费上行带宽。起始/停止两个边沿不受它限制。 */
