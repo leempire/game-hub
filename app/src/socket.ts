@@ -1,11 +1,36 @@
+import { AppState } from 'react-native';
 import { WS_BASE } from './config';
+import { onWebOnline } from './backGuard';
 
 export type SocketMessage = Record<string, unknown> & { type: string };
 
 type MessageHandler = (msg: SocketMessage) => void;
 
+const PING_MS = 25000;
+// 多久一条消息都没收到就认定连接已经「半死」：TCP 没报错、对端却早没了（切网络、
+// 息屏后系统回收了 socket）。服务端每个 ping 都回 pong，活着的连接最多 PING_MS
+// 就有一条消息进来；留两个周期的余量。
+const STALE_MS = PING_MS * 2 + 10000;
+// 服务端的拒绝（未授权 / 不在房间里 / 房间不存在）：重连多少次结果都一样
+const FATAL_CLOSE = new Set([4001, 4003, 4004]);
+
+// 回到前台、网络恢复时要叫醒的连接（connect 时登记，close 时注销）
+const live = new Set<RoomSocket>();
+let wakeInstalled = false;
+
+function installWake(): void {
+  if (wakeInstalled) return;
+  wakeInstalled = true;
+  AppState.addEventListener('change', (state) => {
+    if (state === 'active') live.forEach((s) => s.wake());
+  });
+  onWebOnline(() => live.forEach((s) => s.wake()));
+}
+
 // RoomSocket: manages a single WS connection for a room.
-// Features: auto token, heartbeat ping every 25s, exponential backoff reconnect (max 10).
+// Features: auto token, heartbeat ping every 25s (+ stale watchdog), exponential
+// backoff reconnect (capped at 30s, never gives up unless the server refuses),
+// immediate reconnect when the app returns to foreground / the network comes back.
 export class RoomSocket {
   private ws: WebSocket | null = null;
   private code: string;
@@ -14,7 +39,7 @@ export class RoomSocket {
   private anyHandlers: Set<MessageHandler> = new Set();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempts = 0;
-  private maxReconnect = 10;
+  private lastMessageAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private paused = false;
@@ -33,6 +58,8 @@ export class RoomSocket {
     this.onOpenCallback = onOpen ?? null;
     this.onCloseCallback = onClose ?? null;
     this.closed = false;
+    live.add(this);
+    installWake();
     this.doConnect();
   }
 
@@ -48,12 +75,14 @@ export class RoomSocket {
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
+      this.lastMessageAt = Date.now();
       this.startPing();
       this.flushPending();
       this.onOpenCallback?.();
     };
 
     this.ws.onmessage = (event) => {
+      this.lastMessageAt = Date.now();
       // **`try` 只包 `JSON.parse`，不包 `dispatch`。**
       //
       // 原来是一个 `try { parse; dispatch } catch {}`，本意是「服务端偶尔发了
@@ -71,9 +100,14 @@ export class RoomSocket {
       this.dispatch(msg);
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       this.stopPing();
       this.onCloseCallback?.();
+      if (FATAL_CLOSE.has(event.code)) {
+        this.closed = true;
+        live.delete(this);
+        return;
+      }
       if (!this.closed) {
         this.scheduleReconnect();
       }
@@ -87,8 +121,14 @@ export class RoomSocket {
   private startPing(): void {
     this.stopPing();
     this.pingTimer = setInterval(() => {
+      // 暂停的连接不查：它可能正被同一用户的新连接顶替着，收不到 pong 是正常的，
+      // 这时重连会把槽位抢回来（见 pause()）
+      if (!this.paused && Date.now() - this.lastMessageAt > STALE_MS) {
+        this.reconnect();
+        return;
+      }
       this.send({ type: 'ping' });
-    }, 25000);
+    }, PING_MS);
   }
 
   private stopPing(): void {
@@ -100,8 +140,9 @@ export class RoomSocket {
 
   private scheduleReconnect(): void {
     if (this.closed || this.paused) return;
-    if (this.reconnectAttempts >= this.maxReconnect) return;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+    // 不设上限：原来 10 次（约 3.5 分钟）后就永远不再连，地铁里断一会儿回来
+    // 只能退出重进；封顶 30 秒一次的代价可以忽略
+    const delay = Math.min(1000 * Math.pow(2, Math.min(this.reconnectAttempts, 5)), 30000);
     this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.doConnect();
@@ -339,6 +380,15 @@ export class RoomSocket {
     }
   }
 
+  // 回到前台 / 网络恢复：没连上（或连接早已半死）就立刻重连，不等退避计时器
+  wake(): void {
+    if (this.closed || this.paused) return;
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
+    if (!this.isConnected || Date.now() - this.lastMessageAt > STALE_MS) {
+      this.reconnect();
+    }
+  }
+
   // 恢复自动重连：重新聚焦时调用；若当前没连上则立刻重连一次
   resume(): void {
     if (!this.paused) return;
@@ -351,6 +401,7 @@ export class RoomSocket {
   // Close permanently - no reconnect
   close(): void {
     this.closed = true;
+    live.delete(this);
     this.pendingLobby = [];
     this.stopPing();
     if (this.reconnectTimer) {

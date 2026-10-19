@@ -159,6 +159,13 @@ export function onConfirmLeave(handler: () => void): () => void {
   return () => window.removeEventListener('gh:confirm-leave', handler);
 }
 
+// 网络恢复（浏览器 `online` 事件）：socket.ts 借它立刻重连。原生端 no-op。
+export function onWebOnline(handler: () => void): () => void {
+  if (!IS_WEB) return () => {};
+  window.addEventListener('online', handler);
+  return () => window.removeEventListener('online', handler);
+}
+
 // 弹窗打开期间，返回键优先关闭弹窗
 export function useModalBackGuard(visible: boolean, close: () => void): void {
   const closeRef = useRef(close);
