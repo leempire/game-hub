@@ -132,6 +132,16 @@ def main():
         assert board_text(pa) != btn_before, 'A 走 3 步后棋盘无变化（move 未生效）'
         ok('A 方向按钮走子生效，棋盘更新')
 
+        # 网页键盘（v1.14.x）：方向键 / WASD 也能走（四个方向依次试，理由同下）
+        kb_before = board_text(pa)
+        for key in ('ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft'):
+            pa.keyboard.press(key)
+            pa.wait_for_timeout(700)
+            if board_text(pa) != kb_before:
+                break
+        assert board_text(pa) != kb_before, 'A 按方向键后棋盘无变化（键盘未生效）'
+        ok('网页键盘：方向键走子生效')
+
         # B 也能独立走子（各自棋盘互不干扰）。
         # 不能只点一个方向：起始盘是随机种子出的，某个方向「走不动」是正常情况
         # （服务端静默忽略），单方向断言会 flaky。依次试四个方向直到盘面变化。

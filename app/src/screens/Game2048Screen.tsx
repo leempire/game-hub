@@ -12,7 +12,7 @@ import { RoomSocket, SocketMessage } from '../socket';
 import { colors, spacing, radius, fontSize, g2048Tile, playerColors, withAlpha } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
-import { useModalBackGuard, onConfirmLeave } from '../backGuard';
+import { useModalBackGuard, onConfirmLeave, useWebKeys } from '../backGuard';
 import { GameHelpButton } from '../help';
 
 interface LeaderRow {
@@ -503,6 +503,18 @@ export default function Game2048Screen({ code, onLeave }: Props) {
     if (!game || game.winner || game.game_over) return;
     socketRef.current?.send({ type: 'move2048', direction });
   }, [game]);
+
+  // 网页键盘：方向键 / WASD。一次按键只走一步（按住不连发，2048 连发等于乱走）
+  const KEY_DIR: Record<string, string> = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    w: 'up', s: 'down', a: 'left', d: 'right',
+  };
+  useWebKeys((key, e) => {
+    const dir = KEY_DIR[key];
+    if (!dir) return false;
+    if (!e.repeat) sendMove(dir);
+    return true;
+  }, !!game && !game.winner && !game.game_over && confirm === null);
 
   // ── 排行榜浮层：可拖动 ───────────────────────────────────
   // 浮层展开后会盖住棋盘一角，所以允许拖走。拖动只由「胶囊」和「面板标题行」两个

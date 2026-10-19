@@ -16,7 +16,7 @@ import {
 } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
-import { useModalBackGuard, onConfirmLeave } from '../backGuard';
+import { useModalBackGuard, onConfirmLeave, useWebKeys } from '../backGuard';
 import { GameHelpButton } from '../help';
 import {
   TetrisPiece, TetrisRules, TetrisLeaderRow, gravityMs, GARBAGE_LABEL,
@@ -253,6 +253,20 @@ export default function TetrisScreen({ code, onLeave }: Props) {
     const id = setInterval(() => stepRef.current(), gravityMs(level));
     return () => clearInterval(id);
   }, [playing, awaiting, level]);
+
+  // ── 网页键盘：←→ 移动、↑ 旋转（Z 反转）、↓ 软降、空格落底 ────────
+  // 按住方向键靠系统的自动连发；落底不连发（按住空格会把后面几块全砸下去）
+  useWebKeys((key, e) => {
+    switch (key) {
+      case 'ArrowLeft': case 'a': act('left'); return true;
+      case 'ArrowRight': case 'd': act('right'); return true;
+      case 'ArrowUp': case 'w': case 'x': act('rotate_cw'); return true;
+      case 'z': act('rotate_ccw'); return true;
+      case 'ArrowDown': case 's': stepAndMaybeLock(); return true;
+      case ' ': if (!e.repeat) act('hard_drop'); return true;
+      default: return false;
+    }
+  }, playing && confirm === null);
 
   // ── WS ────────────────────────────────────────────────────
   useEffect(() => {

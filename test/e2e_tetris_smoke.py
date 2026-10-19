@@ -47,17 +47,22 @@ def register(page, username):
     page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
 
 
+# 一次 evaluate 读完整盘：逐格 get_attribute 是 200 次往返（Windows 上要好几秒），
+# 读的过程中重力已经推了好几格，读到的是撕裂态，后面的手势用例在顶部找不到方块
+_READ_JS = """() => Array.from(document.querySelectorAll('[data-testid^="t-c-"]'))
+  .map((e) => [e.getAttribute('data-testid'), e.getAttribute('aria-label')])"""
+
+
 def read_board(page):
     """读当前盘面：20×10 的标签矩阵（`empty` / `I`..`L` / `garbage`）。"""
-    cells = page.locator('[data-testid^="t-c-"]')
-    n = cells.count()
+    cells = page.evaluate(_READ_JS)
+    n = len(cells)
     assert n == ROWS * COLS, f'棋盘格子数应为 {ROWS * COLS}，实际 {n}'
     labels = []
-    for i in range(n):
+    for i, (tid, label) in enumerate(cells):
         r, c = divmod(i, COLS)
-        assert cells.nth(i).get_attribute('data-testid') == f't-c-{r}-{c}', \
-            '棋盘格子顺序被打乱（渲染顺序必须等于盘面顺序）'
-        labels.append(cells.nth(i).get_attribute('aria-label'))
+        assert tid == f't-c-{r}-{c}',             '棋盘格子顺序被打乱（渲染顺序必须等于盘面顺序）'
+        labels.append(label)
     return [labels[r * COLS:(r + 1) * COLS] for r in range(ROWS)]
 
 
@@ -77,18 +82,10 @@ def click(page, testid, wait=280):
 
 
 def top_cells(page, rows=6):
-    """只读顶部几行里有色格子的坐标（手势用例够用）。
-
-    手势用例要在一秒内读好几次盘面，逐格读 200 个节点会跨过重力 tick；
-    而且下落中的方块必然在顶部，读 6 行足够。
-    """
-    out = []
-    for r in range(rows):
-        for c in range(COLS):
-            label = page.locator(f'[data-testid="t-c-{r}-{c}"]').get_attribute('aria-label')
-            if label not in ('empty', 'garbage'):
-                out.append((r, c))
-    return sorted(out)
+    """只看顶部几行里有色格子的坐标（下落中的方块必然在顶部，手势用例够用）。"""
+    board = read_board(page)
+    return sorted((r, c) for r in range(rows) for c in range(COLS)
+                  if board[r][c] not in ('empty', 'garbage'))
 
 
 def main():
@@ -216,6 +213,20 @@ def main():
                   for c in range(COLS) if bb[r][c] != 'empty']
         assert not leaked, f'B 的盘面出现了落定的块（应各玩各的）：{leaked}'
         ok('A 落子不影响 B 的盘面（各玩各的）')
+
+        # 网页键盘（v1.14.x）：← 左移、空格落底 —— 和按钮走同一条 act() 路径
+        kb0 = top_cells(pa)
+        pa.keyboard.press('ArrowLeft')
+        pa.wait_for_timeout(200)
+        kb1 = top_cells(pa)
+        assert min(c for _, c in kb1) < min(c for _, c in kb0) or min(c for _, c in kb0) == 0,             f'按 ← 方块没有左移（{kb0} → {kb1}）'
+        pa.keyboard.press('ArrowUp')
+        pa.wait_for_timeout(200)
+        pa.keyboard.press('Space')
+        pa.wait_for_timeout(900)
+        cells3 = named_cells(read_board(pa))
+        assert len(cells3) == 12, f'按空格应再落定一块并出下一块（共 12 格）：{cells3}'
+        ok('网页键盘：方向键移动 / 旋转，空格直接落底')
 
         # 实时排行榜：默认收起，点胶囊展开；两个玩家都要在榜上
         pa.get_by_label('排行榜').click()
