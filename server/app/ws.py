@@ -893,7 +893,7 @@ async def _broadcast(code: str, message: dict, exclude: set[int] | None = None):
         if uid in exclude:
             continue
         try:
-            await ws.send_json(message)
+            await _send_ordered(ws, message)
         except Exception:
             pass
 
@@ -1027,7 +1027,7 @@ async def _send_error(code: str, user_id: int, message: str):
     """Send an error back to just the acting player."""
     ws = _connections.get(code, {}).get(user_id)
     if ws:
-        await ws.send_json({"type": "error", "message": message})
+        await _send_ordered(ws, {"type": "error", "message": message})
 
 
 async def _send_to(code: str, user_id: int, message: dict):
@@ -1039,7 +1039,7 @@ async def _send_to(code: str, user_id: int, message: dict):
     ws = _connections.get(code, {}).get(user_id)
     if ws:
         try:
-            await ws.send_json(message)
+            await _send_ordered(ws, message)
         except Exception:
             pass
 
@@ -2244,12 +2244,76 @@ async def _bot_do_placement(code: str, bot_id: int):
 # 全员同一份会让客户端认不出自己（同飞行棋 your_seat、2048 your_color 的教训）。
 
 
+# ── 深空休眠的逐连接发送链 ────────────────────────────────────
+#
+# 原来 tick 循环 `await _broadcast(...)` 逐个连接发：**只要有一个连接卡住**
+# （手机切后台 / 弱网，对端不读 → 发送缓冲涨到 64KB 高水位 → `send` 卡在
+# drain 上），整个房间的 tick 循环就停在那一行，所有人一起冻住，直到那条 TCP
+# 超时。5 Hz × 1.5~3KB 的 tick 大约 10~40 秒就能把缓冲填满。
+#
+# 现在每个连接一条**发送链**（后一条等前一条发完再发），tick 循环只负责往链上
+# 挂，不等任何人：
+#   - 状态 / 事件 / 终局 **必达、保序**，一律排队；
+#   - tick 是快照，**链上还有没发完的就丢掉这一帧**（下一帧会覆盖它）——
+#     卡住的连接不再越积越多，恢复后直接拿到最新一帧。
+# 链按 websocket 对象记（不按 uid）：同一个人重连换了新连接，旧链不该挡新连接。
+# 正常情况下链尾早已发完，`await` 一个已完成的 task 不让出，顺序与原来逐条
+# `await` 完全一致。
+_send_tails: dict[int, asyncio.Task] = {}
+
+
+def _stasis_enqueue(ws, message: dict, droppable: bool = False) -> bool:
+    """把一条消息挂到这个连接的发送链上。返回是否真的挂上了（tick 可能被丢）。"""
+    key = id(ws)
+    prev = _send_tails.get(key)
+    if prev is not None and prev.done():
+        prev = None
+    if droppable and prev is not None:
+        return False
+
+    async def _send():
+        if prev is not None:
+            try:
+                await prev
+            except BaseException:
+                pass
+        try:
+            await ws.send_json(message)
+        except Exception:
+            pass
+
+    task = asyncio.get_running_loop().create_task(_send())
+    _send_tails[key] = task
+
+    def _cleanup(t, key=key):
+        if _send_tails.get(key) is t:
+            _send_tails.pop(key, None)
+    task.add_done_callback(_cleanup)
+    return True
+
+
+async def _send_ordered(ws, message: dict):
+    """通用的单条发送：这个连接的发送链上还有没发完的（只有深空休眠会有），就
+    **排到链尾**，否则照旧直接发。不这样的话「终局挂上链 → 紧接着直接发 lobby」
+    会让 lobby 抢在 game_over 前面到。其余游戏从不建链，行为与原来逐字相同。"""
+    tail = _send_tails.get(id(ws))
+    if tail is not None and not tail.done():
+        _stasis_enqueue(ws, message)
+        return
+    await ws.send_json(message)
+
+
+def _stasis_send_all(code: str, message: dict, droppable: bool = False):
+    for ws in list(_connections.get(code, {}).values()):
+        _stasis_enqueue(ws, message, droppable)
+
+
 async def _broadcast_stasis_start(code: str, room: dict, gs: dict):
     conns = _connections.get(code, {})
     for pid in gs["players"]:
         ws = conns.get(pid)
         if ws:
-            await ws.send_json({
+            _stasis_enqueue(ws, {
                 "type": "game_start",
                 "game": stasis_engine.game_to_sync(gs, pid),
             })
@@ -2268,7 +2332,7 @@ async def _broadcast_stasis_state(code: str, room: dict):
     for pid in gs["players"]:
         ws = conns.get(pid)
         if ws:
-            await ws.send_json({
+            _stasis_enqueue(ws, {
                 "type": "stasis_state",
                 **stasis_engine.game_to_sync(gs, pid),
             })
@@ -2279,23 +2343,23 @@ async def broadcast_stasis_tick(code: str, room: dict):
     gs = room.get("game_state")
     if not gs:
         return
-    await _broadcast(code, {
+    _stasis_send_all(code, {
         "type": "stasis_tick",
         **stasis_engine.dynamic_snapshot(gs),
-    })
+    }, droppable=True)
 
 
 async def broadcast_stasis_events(code: str, events: list[dict]):
     """离散事件立即广播。由 tick 循环调用。"""
     if not events:
         return
-    await _broadcast(code, {"type": "stasis_events", "events": events})
+    _stasis_send_all(code, {"type": "stasis_events", "events": events})
 
 
 async def broadcast_stasis_game_over(room: dict, ranking: list[dict]):
     """终局广播（tick 路径与动作/离开路径共用）。"""
     gs = room.get("game_state") or {}
-    await _broadcast(room["code"], {
+    _stasis_send_all(room["code"], {
         "type": "game_over",
         "winner": gs.get("winner"),
         "reason": gs.get("reason"),
