@@ -25,7 +25,9 @@ export async function apiFetch<T = unknown>(
     ...options,
     headers,
   });
-  if (res.status === 401) {
+  // 只有「带着 token 的请求」被拒才是会话失效；登录接口密码错也回 401，
+  // 那时要显示服务端的原话（「用户名或密码错误」），不是「登录已过期」
+  if (res.status === 401 && token) {
     onUnauthorized?.();
     throw new Error('登录已过期，请重新登录');
   }
