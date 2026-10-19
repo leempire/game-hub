@@ -79,6 +79,13 @@ def _apply_env(cfg: dict) -> None:
         admin["password"] = os.environ["ADMIN_PASSWORD"].strip()
 
 
+if not os.path.exists(_CONFIG_PATH):
+    # 全新克隆的第一次启动 —— 给一句能照做的提示，而不是一个 FileNotFoundError
+    raise SystemExit(
+        f"缺少配置文件 {_CONFIG_PATH}\n"
+        f"  首次部署：cp {_CONFIG_PATH}.example {_CONFIG_PATH} 然后填好 public_base 与 admin"
+    )
+
 with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
     config = json.load(f)
 
