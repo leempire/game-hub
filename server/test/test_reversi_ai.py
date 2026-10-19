@@ -9,12 +9,12 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.reversi import (
+from app.game.reversi import (
     create_board, get_legal_moves, apply_move, count_stones,
     is_valid_move, opponent,
     BOARD_SIZE, EMPTY, BLACK, WHITE,
 )
-from app.reversi_ai import best_move
+from app.game.reversi_ai import best_move
 
 
 # ── corner taking ─────────────────────────────────────────────────

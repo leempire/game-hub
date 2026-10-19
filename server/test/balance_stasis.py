@@ -38,9 +38,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import stasis as st
-from app import stasis_ai as ai
-from app import stasis_map as M
+from app.game import stasis as st
+from app.game import stasis_ai as ai
+from app.game import stasis_map as M
 
 TICK_MS = st.TICK_MS
 DECIDE_EVERY = 5                    # 对局阶段 1 秒决策一次（与 room_manager 一致）

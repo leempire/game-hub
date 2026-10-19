@@ -318,7 +318,7 @@ class TestRegistryGuards:
 
     def test_adding_a_wild_rule_needs_no_client_change(self):
         """UNO 的 7 条是**遍历 `RULE_META` 生成**的 —— 引擎加一条房规，客户端零改动。"""
-        from app import uno_rules
+        from app.game import uno_rules
         keys = [s.key for s in rs.specs_for("uno")]
         assert keys[1:] == [m["key"] for m in uno_rules.RULE_META]
 

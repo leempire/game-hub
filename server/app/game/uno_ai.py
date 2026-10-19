@@ -34,7 +34,7 @@ v1.14 起房规可配（`uno_rules`），AI 跟着多两条判断：
 import random
 from collections import Counter
 
-from app.uno import (
+from app.game.uno import (
     COLORS, SKIP, REVERSE, DRAW2, SKIP_ALL, DISCARD_ALL, MERCY_LIMIT,
     active_seats, best_color, card_color, card_kind, is_wild,
     jumpable_cards, playable_cards, roulette_seat, team_of,

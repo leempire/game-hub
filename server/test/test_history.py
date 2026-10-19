@@ -414,8 +414,8 @@ def _room_stasis(ts, *, reason="wiped", winner="entity"):
 
     v2 没有「投票选舱室」了（跑动阶段是走过去占），所以这里直接派房。
     """
-    from app import stasis
-    from app import stasis_map as M
+    from app.game import stasis
+    from app.game import stasis_map as M
 
     DORM = M.get_map("dorm")
 

@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import tetris as t
+from app.game import tetris as t
 
 
 # ── 工具 ──────────────────────────────────────────────────────

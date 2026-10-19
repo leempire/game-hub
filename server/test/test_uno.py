@@ -19,9 +19,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import uno as u
-from app import uno_ai as ai
-from app import uno_rules
+from app.game import uno as u
+from app.game import uno_ai as ai
+from app.game import uno_rules
 
 
 # ── 工具 ──────────────────────────────────────────────────────

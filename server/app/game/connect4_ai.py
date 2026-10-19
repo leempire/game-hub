@@ -11,7 +11,7 @@ Board: list[list[int]] (6×7), board[row][col], EMPTY=0 / BLACK=1 / WHITE=2.
 import random
 import time
 
-from app.connect4 import (
+from app.game.connect4 import (
     COLS, ROWS, EMPTY, BLACK, WHITE,
     landing_row, check_win, legal_columns, would_win_at,
 )

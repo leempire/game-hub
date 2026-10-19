@@ -9,8 +9,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import ludo_ai
-from app.ludo import create_game, roll_dice, move_piece, get_global_position
+from app.game import ludo_ai
+from app.game.ludo import create_game, roll_dice, move_piece, get_global_position
 
 
 def _state(seat=0, dice=3, movable=None, pieces=None, opponents=None):

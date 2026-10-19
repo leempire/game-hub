@@ -13,7 +13,7 @@ Single-step decision must complete in <100ms — 热力图是 O(舰数 × 100格
 """
 
 import random
-from app.battleship import (
+from app.game.battleship import (
     EMPTY, MISS, HIT, SALVO_SHOTS, board_size_of, fleet_of,
     get_ship_cells,
 )

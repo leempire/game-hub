@@ -1,7 +1,7 @@
 """Unit tests for the Aeroplane Chess (飞行棋) engine."""
 
 import pytest
-from app.ludo import (
+from app.game.ludo import (
     create_game,
     roll_dice,
     move_piece,

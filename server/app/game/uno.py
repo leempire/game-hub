@@ -39,7 +39,7 @@ tick（同深空休眠「引擎只认识 `dt_ms`」那条纪律）。抢出与 7
 import random
 from collections import Counter
 
-from app import uno_rules
+from app.game import uno_rules
 
 # 牌面颜色（黑牌用 W，出牌后由出牌者指定四色之一）
 COLORS = ["R", "G", "B", "Y"]

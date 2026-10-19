@@ -11,7 +11,7 @@ from __future__ import annotations
 import random
 import time
 
-from app.luzhanqi import (
+from app.game.luzhanqi import (
     BLACK, COLS, DILEI, GONGBING, HQ_CELLS, JUNQI, JUNZHANG, LIANZHANG, LVZHANG,
     PAIZHANG, PIECE_COUNTS, RANKS, RANK_VALUE, RED, ROWS, SHIZHANG, SILING,
     TUANZHANG, YINGZHANG, ZHADAN, back_two_rows, other, piece_moves, resolve_combat,

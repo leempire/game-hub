@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.gomoku import (
+from app.game.gomoku import (
     create_board,
     is_valid_move,
     place_stone,

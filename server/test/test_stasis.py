@@ -29,8 +29,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import stasis as st
-from app import stasis_map as M
+from app.game import stasis as st
+from app.game import stasis_map as M
 
 # 几何查询全部走**编译好的地图对象**（v9 起 `stasis_map` 不再有模块级常量，
 # 因为地图不止一张）。这里的用例绝大多数是「标准货舱区」的行为，所以固定用它；

@@ -27,7 +27,7 @@ from __future__ import annotations
 import random
 import time
 
-from app.luzhanqi import (
+from app.game.luzhanqi import (
     CAMP_CELLS, COLS, DILEI, GONGBING, HQ_CELLS, IMMOBILE, JUNQI,
     JUNZHANG, LIANZHANG, LVZHANG, NEIGHBORS, PAIZHANG, PIECE_COUNTS, RANKS,
     RANK_VALUE, RED, ROWS, SHIZHANG, SILING, TUANZHANG, YINGZHANG, ZHADAN,

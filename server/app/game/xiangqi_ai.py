@@ -14,7 +14,7 @@
 import random
 import time
 
-from app.xiangqi import (
+from app.game.xiangqi import (
     ROWS,
     all_legal_moves,
     apply_move,
