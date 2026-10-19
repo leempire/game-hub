@@ -1,0 +1,16 @@
+{
+    "port": 50541,
+    "host": "0.0.0.0",
+    "jwt_secret": "",
+    "db_path": "data/gamehub.db",
+    "reconnect_timeout": 120,
+    "admin": {
+        "username": "",
+        "password": ""
+    },
+    "public_base": "",
+    "app": {
+        "version_code": 0,
+        "version_name": "0.0.0"
+    }
+}

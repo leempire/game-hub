@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GameHub 图标草稿</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700;900&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root {
+    --bg: #F6F6FA;
+    --card: #FFFFFF;
+    --text: #16182A;
+    --muted: #5B5F75;
+    --line: #E4E5EF;
+    --accent: #4F46E5;
+    --accent-soft: #EEF0FF;
+    --stage: #F3F4F6;   /* 预览台恒定浅灰：图标评审在两个主题下用同一底色，保证公平比较 */
+    --stage-line: #E5E7EB;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121320;
+      --card: #1B1D2E;
+      --text: #E8E9F2;
+      --muted: #9CA0B8;
+      --line: #2A2D42;
+      --accent: #818CF8;
+      --accent-soft: #232640;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121320;
+    --card: #1B1D2E;
+    --text: #E8E9F2;
+    --muted: #9CA0B8;
+    --line: #2A2D42;
+    --accent: #818CF8;
+    --accent-soft: #232640;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    line-height: 1.65;
+    padding: 40px 20px 64px;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; }
+
+  header { display: flex; align-items: center; gap: 20px; margin-bottom: 8px; flex-wrap: wrap; }
+  header svg { flex: none; }
+  h1 {
+    font-family: 'Noto Serif SC', serif; font-weight: 900; font-size: 30px;
+    letter-spacing: 0.02em; text-wrap: balance;
+  }
+  .lede { color: var(--muted); font-size: 14.5px; max-width: 640px; margin: 10px 0 4px; }
+  .lede strong { color: var(--text); font-weight: 700; }
+
+  .hint {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent-soft); color: var(--accent);
+    border-radius: 999px; padding: 6px 16px; font-size: 13px; font-weight: 500;
+    margin: 14px 0 6px;
+  }
+  .hint code { font-family: 'IBM Plex Mono', monospace; font-weight: 600; }
+
+  section { margin-top: 44px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .sec-head h2 { font-family: 'Noto Serif SC', serif; font-weight: 700; font-size: 21px; }
+  .sec-head .eyebrow {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; font-weight: 600;
+    color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .sec-head .note { color: var(--muted); font-size: 13px; width: 100%; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 18px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .card-label { display: flex; align-items: center; gap: 10px; }
+  .tag {
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;
+    color: #fff; background: var(--accent); border-radius: 6px; padding: 2px 9px;
+    letter-spacing: 0.04em;
+  }
+  .card-label .name { font-weight: 700; font-size: 15.5px; }
+
+  .stage {
+    background: var(--stage); border: 1px solid var(--stage-line); border-radius: 12px;
+    padding: 18px 14px; display: flex; align-items: center; justify-content: center; gap: 20px;
+    flex-wrap: wrap;
+  }
+  .stage .main { flex: none; }
+  .sizes { display: flex; align-items: flex-end; gap: 12px; }
+  .sizes figure { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .sizes figcaption { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); }
+
+  .why { color: var(--muted); font-size: 13px; }
+  .why b { color: var(--text); font-weight: 700; }
+
+  .tab-mock {
+    display: inline-flex; align-items: center; gap: 7px; background: #DEE1E6; color: #202124;
+    border-radius: 8px 8px 0 0; padding: 6px 14px; font-size: 12px; max-width: 200px;
+  }
+  .tab-mock span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  footer {
+    margin-top: 48px; border-top: 1px solid var(--line); padding-top: 20px;
+    color: var(--muted); font-size: 13px;
+  }
+  footer h3 { color: var(--text); font-size: 14px; margin-bottom: 8px; }
+  footer ul { padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+
+<!-- ===== SVG 符号库（所有草稿的几何定义，页面各处 <use> 引用） ===== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="lgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#4338CA"/>
+    </linearGradient>
+
+    <!-- Logo A 线条版：六芒星恰好内接于外接圆（R=r=32），纯线框 -->
+    <symbol id="logo-a" viewBox="0 0 96 96">
+      <circle cx="48" cy="48" r="32" fill="none" stroke="#4F46E5" stroke-width="3.2"/>
+      <polygon points="48,16 20.3,64 75.7,64" fill="none" stroke="#4F46E5" stroke-width="3.2" stroke-linejoin="round"/>
+      <polygon points="48,80 75.7,32 20.3,32" fill="none" stroke="#4F46E5" stroke-width="3.2" stroke-linejoin="round"/>
+    </symbol>
+
+    <!-- Logo B 实心徽章版：靛蓝圆底 + 白色六芒星镂空 -->
+    <symbol id="logo-b" viewBox="0 0 96 96">
+      <circle cx="48" cy="48" r="34" fill="#4F46E5"/>
+      <polygon points="48,16 20.3,64 75.7,64" fill="#FFFFFF"/>
+      <polygon points="48,80 75.7,32 20.3,32" fill="#FFFFFF"/>
+    </symbol>
+
+    <!-- Logo C 渐变应用版：圆角方形渐变底（Android 自适应图标安全区内），白线星+圆 -->
+    <symbol id="logo-c" viewBox="0 0 96 96">
+      <rect x="4" y="4" width="88" height="88" rx="20" fill="url(#lgGrad)"/>
+      <circle cx="48" cy="48" r="30" fill="none" stroke="#FFFFFF" stroke-width="2.6" opacity="0.92"/>
+      <polygon points="48,18 22,63 74,63" fill="#FFFFFF" fill-opacity="0.14" stroke="#FFFFFF" stroke-width="2.6" stroke-linejoin="round"/>
+      <polygon points="48,78 74,33 22,33" fill="#FFFFFF" fill-opacity="0.14" stroke="#FFFFFF" stroke-width="2.6" stroke-linejoin="round"/>
+    </symbol>
+
+    <!-- 五子棋 A 交点版：木色棋盘 + 黑三连（斜）+ 两端白子封堵 -->
+    <symbol id="gom-a" viewBox="0 0 64 64">
+      <rect x="4" y="4" width="56" height="56" rx="12" fill="#DEB887"/>
+      <g stroke="#8B6914" stroke-width="1.6" opacity="0.7">
+        <line x1="18" y1="14" x2="18" y2="50"/><line x1="32" y1="14" x2="32" y2="50"/><line x1="46" y1="14" x2="46" y2="50"/>
+        <line x1="14" y1="18" x2="50" y2="18"/><line x1="14" y1="32" x2="50" y2="32"/><line x1="14" y1="46" x2="50" y2="46"/>
+      </g>
+      <circle cx="18" cy="18" r="7" fill="#F5F5F5" stroke="#D4D4D4" stroke-width="1.2"/>
+      <circle cx="46" cy="46" r="7" fill="#F5F5F5" stroke="#D4D4D4" stroke-width="1.2"/>
+      <circle cx="18" cy="46" r="7" fill="#1A1A1A"/>
+      <circle cx="32" cy="32" r="7" fill="#1A1A1A"/>
+      <circle cx="46" cy="18" r="7" fill="#1A1A1A"/>
+    </symbol>
+
+    <!-- 五子棋 B 斜五连：无底板极简版，5 黑子斜连一线 + 2 白子 -->
+    <symbol id="gom-b" viewBox="0 0 64 64">
+      <line x1="8" y1="56" x2="56" y2="8" stroke="#8B6914" stroke-width="2" opacity="0.45" stroke-linecap="round"/>
+      <circle cx="21" cy="21" r="5.6" fill="#F5F5F5" stroke="#D4D4D4" stroke-width="1.2"/>
+      <circle cx="43" cy="43" r="5.6" fill="#F5F5F5" stroke="#D4D4D4" stroke-width="1.2"/>
+      <circle cx="10" cy="54" r="5.6" fill="#1A1A1A"/>
+      <circle cx="21" cy="43" r="5.6" fill="#1A1A1A"/>
+      <circle cx="32" cy="32" r="5.6" fill="#1A1A1A"/>
+      <circle cx="43" cy="21" r="5.6" fill="#1A1A1A"/>
+      <circle cx="54" cy="10" r="5.6" fill="#1A1A1A"/>
+    </symbol>
+
+    <!-- 五子棋 C 对峙版：2×2 网格 + 黑白两颗大子对角相抵 -->
+    <symbol id="gom-c" viewBox="0 0 64 64">
+      <rect x="4" y="4" width="56" height="56" rx="12" fill="#F0DDBE"/>
+      <g stroke="#8B6914" stroke-width="1.6" opacity="0.55">
+        <line x1="24" y1="12" x2="24" y2="52"/><line x1="40" y1="12" x2="40" y2="52"/>
+        <line x1="12" y1="24" x2="52" y2="24"/><line x1="12" y1="40" x2="52" y2="40"/>
+      </g>
+      <circle cx="24" cy="40" r="12" fill="#1A1A1A"/>
+      <circle cx="40" cy="24" r="12" fill="#F5F5F5" stroke="#D4D4D4" stroke-width="1.5"/>
+    </symbol>
+
+    <!-- 扫雷 A 经典地雷：圆体 + 8 尖刺 + 高光 -->
+    <symbol id="mine-a" viewBox="0 0 64 64">
+      <g stroke="#1A1A1A" stroke-width="3.4" stroke-linecap="round">
+        <line x1="32" y1="14" x2="32" y2="52"/>
+        <line x1="32" y1="14" x2="32" y2="52" transform="rotate(45 32 33)"/>
+        <line x1="32" y1="14" x2="32" y2="52" transform="rotate(90 32 33)"/>
+        <line x1="32" y1="14" x2="32" y2="52" transform="rotate(135 32 33)"/>
+      </g>
+      <circle cx="32" cy="33" r="12.5" fill="#1A1A1A"/>
+      <circle cx="27.5" cy="28.5" r="3.4" fill="#FFFFFF" opacity="0.9"/>
+    </symbol>
+
+    <!-- 扫雷 B 旗格：立体斜面砖格 + 红旗（复刻游戏内标旗动作） -->
+    <symbol id="mine-b" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="6" fill="#C7CDD6"/>
+      <path d="M 8 56 L 8 8 L 56 8" fill="none" stroke="#EDF1F5" stroke-width="3.2"/>
+      <path d="M 56 8 L 56 56 L 8 56" fill="none" stroke="#98A2B3" stroke-width="3.2"/>
+      <line x1="30" y1="16" x2="30" y2="47" stroke="#374151" stroke-width="3" stroke-linecap="round"/>
+      <path d="M 31.5 17 L 47 23 L 31.5 29 Z" fill="#EF4444"/>
+      <rect x="22" y="46" width="18" height="4" rx="2" fill="#374151"/>
+    </symbol>
+
+    <!-- 黑白棋 A 翻转碟：绿棋盘 + 半黑半白翻转中的棋子 -->
+    <symbol id="rev-a" viewBox="0 0 64 64">
+      <rect x="4" y="4" width="56" height="56" rx="12" fill="#157A46"/>
+      <g stroke="#FFFFFF" stroke-width="1.4" opacity="0.22">
+        <line x1="18" y1="12" x2="18" y2="52"/><line x1="32" y1="12" x2="32" y2="52"/><line x1="46" y1="12" x2="46" y2="52"/>
+        <line x1="12" y1="18" x2="52" y2="18"/><line x1="12" y1="32" x2="52" y2="32"/><line x1="12" y1="46" x2="52" y2="46"/>
+      </g>
+      <path d="M 32 19 A 13 13 0 0 0 32 45 Z" fill="#1A1A1A"/>
+      <path d="M 32 19 A 13 13 0 0 1 32 45 Z" fill="#F5F5F5"/>
+      <circle cx="32" cy="32" r="13" fill="none" stroke="#0B4A2A" stroke-width="1.2" opacity="0.5"/>
+    </symbol>
+
+    <!-- 黑白棋 B 半黑半白极简：无底板，翻转中的棋子倾斜 15° -->
+    <symbol id="rev-b" viewBox="0 0 64 64">
+      <g transform="rotate(-15 32 32)">
+        <path d="M 32 12 A 20 20 0 0 0 32 52 Z" fill="#1A1A1A"/>
+        <path d="M 32 12 A 20 20 0 0 1 32 52 Z" fill="#F5F5F5" stroke="#D4D4D4" stroke-width="1.2"/>
+        <line x1="32" y1="12" x2="32" y2="52" stroke="#8B8F98" stroke-width="1"/>
+      </g>
+    </symbol>
+
+    <!-- 黑白棋 C 开局四子：绿棋盘 + 中央对角四子（开局定式） -->
+    <symbol id="rev-c" viewBox="0 0 64 64">
+      <rect x="4" y="4" width="56" height="56" rx="12" fill="#157A46"/>
+      <g stroke="#FFFFFF" stroke-width="1.4" opacity="0.22">
+        <line x1="18" y1="12" x2="18" y2="52"/><line x1="32" y1="12" x2="32" y2="52"/><line x1="46" y1="12" x2="46" y2="52"/>
+        <line x1="12" y1="18" x2="52" y2="18"/><line x1="12" y1="32" x2="52" y2="32"/><line x1="12" y1="46" x2="52" y2="46"/>
+      </g>
+      <circle cx="24" cy="24" r="6.5" fill="#F5F5F5" stroke="#D4D4D4" stroke-width="1"/>
+      <circle cx="40" cy="40" r="6.5" fill="#F5F5F5" stroke="#D4D4D4" stroke-width="1"/>
+      <circle cx="40" cy="24" r="6.5" fill="#1A1A1A"/>
+      <circle cx="24" cy="40" r="6.5" fill="#1A1A1A"/>
+    </symbol>
+
+    <!-- 扫雷 C 砖格藏雷：B 的砖格 + A 的地雷 -->
+    <symbol id="mine-c" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="6" fill="#C7CDD6"/>
+      <path d="M 8 56 L 8 8 L 56 8" fill="none" stroke="#EDF1F5" stroke-width="3.2"/>
+      <path d="M 56 8 L 56 56 L 8 56" fill="none" stroke="#98A2B3" stroke-width="3.2"/>
+      <g stroke="#1A1A1A" stroke-width="2.8" stroke-linecap="round">
+        <line x1="32" y1="17" x2="32" y2="47"/>
+        <line x1="32" y1="17" x2="32" y2="47" transform="rotate(45 32 32)"/>
+        <line x1="32" y1="17" x2="32" y2="47" transform="rotate(90 32 32)"/>
+        <line x1="32" y1="17" x2="32" y2="47" transform="rotate(135 32 32)"/>
+      </g>
+      <circle cx="32" cy="32" r="8.5" fill="#1A1A1A"/>
+      <circle cx="29" cy="29" r="2.4" fill="#FFFFFF" opacity="0.9"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+  <header>
+    <svg width="72" height="72" viewBox="0 0 96 96" aria-label="Logo 方案B 预览"><use href="#logo-b"/></svg>
+    <div>
+      <h1>GameHub 图标草稿</h1>
+      <p class="lede">四类草稿：<strong>应用 Logo</strong>（六芒星 + 外接圆，3 个方案）、<strong>五子棋入口图标</strong>（3 个方案）、<strong>扫雷入口图标</strong>（3 个方案）、<strong>黑白棋入口图标</strong>（下版本新游戏，3 个方案）。每个方案都按真实使用尺寸预览（96 / 48 / 32 / 16px），小尺寸下的可辨识度是选型关键。</p>
+    </div>
+  </header>
+  <div class="hint">审阅方式：直接回复组合，如 <code>Logo B，五子棋 A，扫雷 C</code>，也可以指出想微调的点（颜色 / 线宽 / 元素增减）</div>
+
+  <!-- ================= 应用 Logo ================= -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">LOGO</span>
+      <h2>应用 Logo · 六芒星 + 外接圆</h2>
+      <p class="note">几何参数：外接圆与六芒星顶点共圆（半径 32 / 96 视口），星由两个等边三角形叠成。用于 APP 桌面图标、网页 favicon、登录页品牌位。</p>
+    </div>
+    <div class="grid">
+
+      <div class="card">
+        <div class="card-label"><span class="tag">LOGO A</span><span class="name">线条版</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 96 96"><use href="#logo-a"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 96 96"><use href="#logo-a"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 96 96"><use href="#logo-a"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 96 96"><use href="#logo-a"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">星恰好内接于外接圆，纯线框、气质轻盈，适合登录页大尺寸品牌位与单色场景。<b>短板：16px 下线条偏细</b>，不宜做 favicon。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><span class="tag">LOGO B</span><span class="name">实心徽章版</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 96 96"><use href="#logo-b"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 96 96"><use href="#logo-b"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 96 96"><use href="#logo-b"/></svg><figcaption>32</figcaption></figure>
+            <figure>
+              <span class="tab-mock"><svg width="14" height="14" viewBox="0 0 96 96"><use href="#logo-b"/></svg><span>GameHub</span></span>
+              <figcaption>浏览器标签页</figcaption>
+            </figure>
+          </div>
+        </div>
+        <p class="why">靛蓝圆盘 + 白色星形镂空，对比度最高，<b>16px 依然锐利，推荐做 favicon 与桌面图标</b>。圆形轮廓在 iOS/Android/浏览器三端都不吃裁切。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><span class="tag">LOGO C</span><span class="name">渐变应用版</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 96 96"><use href="#logo-c"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 96 96"><use href="#logo-c"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 96 96"><use href="#logo-c"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 96 96"><use href="#logo-c"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">圆角方形渐变底 + 白线星圆，最接近主流 APP 图标的质感，符合 Android 自适应图标安全区。<b>可与 B 搭配</b>：C 做桌面图标、B 做 favicon/登录页。</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= 五子棋 ================= -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">GOMOKU</span>
+      <h2>五子棋入口图标</h2>
+      <p class="note">现状是两个小圆点（棋子语义有了但太弱）。三个方案都围绕"线交叉点上的黑白子"这一五子棋本质元素，替换游戏入口卡片的 32~40px 图标位。</p>
+    </div>
+    <div class="grid">
+
+      <div class="card">
+        <div class="card-label"><span class="tag">五子棋 A</span><span class="name">交点三连</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 64 64"><use href="#gom-a"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 64 64"><use href="#gom-a"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 64 64"><use href="#gom-a"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 64 64"><use href="#gom-a"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">木色棋盘 + 黑三子斜连、白子两端封堵——<b>一图讲清"连线"与"对抗"两件事</b>，棋盘配色与游戏内棋盘一致，元素最完整。推荐。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><span class="tag">五子棋 B</span><span class="name">斜五连极简</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 64 64"><use href="#gom-b"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 64 64"><use href="#gom-b"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 64 64"><use href="#gom-b"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 64 64"><use href="#gom-b"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">无底板，五颗黑子斜连一线 + 两颗白子。<b>"五子连线"语义最直接</b>，透明背景适配任何卡片底色，笔画少、小尺寸最稳。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><span class="tag">五子棋 C</span><span class="name">黑白对峙</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 64 64"><use href="#gom-c"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 64 64"><use href="#gom-c"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 64 64"><use href="#gom-c"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 64 64"><use href="#gom-c"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">2×2 网格上黑白两颗大子对角相抵，对抗张力拉满、远看最醒目。<b>短板：没有"五连"语义</b>，更像围棋/黑白棋的气质。</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= 扫雷 ================= -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">MINESWEEPER</span>
+      <h2>扫雷入口图标</h2>
+      <p class="note">现状是通用 grid 图标（完全看不出是扫雷）。三个方案取自扫雷最标志性的三个元素：地雷、旗子、立体砖格。</p>
+    </div>
+    <div class="grid">
+
+      <div class="card">
+        <div class="card-label"><span class="tag">扫雷 A</span><span class="name">经典地雷</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 64 64"><use href="#mine-a"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 64 64"><use href="#mine-a"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 64 64"><use href="#mine-a"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 64 64"><use href="#mine-a"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">圆体 + 八向尖刺 + 高光，<b>全球通用的扫雷符号</b>，零解释成本，任何尺寸都可辨识。透明底，放卡片里最百搭。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><span class="tag">扫雷 B</span><span class="name">标旗砖格</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 64 64"><use href="#mine-b"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 64 64"><use href="#mine-b"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 64 64"><use href="#mine-b"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 64 64"><use href="#mine-b"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">立体斜面砖格 + 红旗，<b>复刻游戏内最高频的"标旗"动作</b>，砖格质感与 APP 内扫雷棋盘一致，玩过的人秒懂，老玩家有情怀分。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><span class="tag">扫雷 C</span><span class="name">砖格藏雷</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 64 64"><use href="#mine-c"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 64 64"><use href="#mine-c"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 64 64"><use href="#mine-c"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 64 64"><use href="#mine-c"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">B 的砖格里藏着 A 的地雷，<b>"格子底下有雷"的玩法本质一图说尽</b>，语义最完整。短板：元素多，16px 下雷的细节开始糊。</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= 黑白棋（下版本新游戏） ================= -->
+  <section>
+    <div class="sec-head">
+      <span class="eyebrow">REVERSI</span>
+      <h2>黑白棋（翻转棋）入口图标</h2>
+      <p class="note">下版本新增游戏的入口图标。黑白棋的标志元素：绿棋盘、黑白双面棋子、"翻转"这一核心动作、中央对角四子的开局定式。</p>
+    </div>
+    <div class="grid">
+
+      <div class="card">
+        <div class="card-label"><span class="tag">黑白棋 A</span><span class="name">翻转碟</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 64 64"><use href="#rev-a"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 64 64"><use href="#rev-a"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 64 64"><use href="#rev-a"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 64 64"><use href="#rev-a"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">绿棋盘上一枚<b>半黑半白、正在翻转中的棋子</b>——把黑白棋独有的"翻面"动作凝固在图标里，与五子棋/扫雷图标同为"棋盘+关键元素"语言。推荐。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><span class="tag">黑白棋 B</span><span class="name">半黑半白极简</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 64 64"><use href="#rev-b"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 64 64"><use href="#rev-b"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 64 64"><use href="#rev-b"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 64 64"><use href="#rev-b"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">无底板，一枚倾斜 15° 的双色棋子，<b>翻转的动态感最强</b>，任何卡片底色都适配。短板：没有棋盘语境，单独看可能误读为围棋子/阴阳符号。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><span class="tag">黑白棋 C</span><span class="name">开局四子</span></div>
+        <div class="stage">
+          <svg class="main" width="96" height="96" viewBox="0 0 64 64"><use href="#rev-c"/></svg>
+          <div class="sizes">
+            <figure><svg width="48" height="48" viewBox="0 0 64 64"><use href="#rev-c"/></svg><figcaption>48</figcaption></figure>
+            <figure><svg width="32" height="32" viewBox="0 0 64 64"><use href="#rev-c"/></svg><figcaption>32</figcaption></figure>
+            <figure><svg width="16" height="16" viewBox="0 0 64 64"><use href="#rev-c"/></svg><figcaption>16</figcaption></figure>
+          </div>
+        </div>
+        <p class="why">绿棋盘 + <b>中央对角黑白四子</b>——黑白棋全球统一的开局定式，老玩家一眼认门。短板：静态感强，"翻转"语义要靠知识补全，16px 下四子偏小。</p>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <h3>选定后的落地动作（供参考，本页只是草稿评审）</h3>
+    <ul>
+      <li>游戏入口图标：接入 <code>GamesTab</code> 卡片图标位（react-native-svg 组件，三端一致渲染），同时给下个版本的翻转棋入口配同风格图标</li>
+      <li>应用图标：<code>app.json</code> 的 icon / adaptiveIcon（由选定 SVG 导出 1024px PNG）+ 网页 favicon + 登录页品牌位（替换现在的游戏手柄 Ionicons）</li>
+      <li>所有几何参数已记录在 SVG 源码中（星/圆半径、线宽、配色取自 app 主题），选定后可继续微调颜色与粗细再落地</li>
+    </ul>
+  </footer>
+
+</div>
+</body>
+</html>

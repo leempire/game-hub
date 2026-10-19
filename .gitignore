@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+server/data/
+
+# Node / Expo
+node_modules/
+app/dist/
+.expo/
+*.log
+
+# 测试临时文件
+test/tmp/
+.DS_Store
+
+.claude/
+
+# skill 工具状态
+skills-lock.json
+
+tmp/
+
+# 本机配置与密钥：装的是真实地址/口令，模板见 server/config/config.example.json
+server/config/config.json
+server/config/jwt_secret.key

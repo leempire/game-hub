@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect x="4" y="4" width="56" height="56" rx="12" fill="#F9FAFB"/>
+  <!-- Grid dots -->
+  <circle cx="8" cy="8" r="2.8" fill="#374151"/>
+  <circle cx="22" cy="8" r="2.8" fill="#374151"/>
+  <circle cx="36" cy="8" r="2.8" fill="#374151"/>
+  <circle cx="50" cy="8" r="2.8" fill="#374151"/>
+  <circle cx="8" cy="22" r="2.8" fill="#374151"/>
+  <circle cx="22" cy="22" r="2.8" fill="#374151"/>
+  <circle cx="36" cy="22" r="2.8" fill="#374151"/>
+  <circle cx="50" cy="22" r="2.8" fill="#374151"/>
+  <circle cx="8" cy="36" r="2.8" fill="#374151"/>
+  <circle cx="22" cy="36" r="2.8" fill="#374151"/>
+  <circle cx="36" cy="36" r="2.8" fill="#374151"/>
+  <circle cx="50" cy="36" r="2.8" fill="#374151"/>
+  <!-- Player 1 edges (indigo) -->
+  <line x1="8" y1="8" x2="22" y2="8" stroke="#4F46E5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="8" y1="8" x2="8" y2="22" stroke="#4F46E5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="8" y1="22" x2="22" y2="22" stroke="#4F46E5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="22" y1="8" x2="22" y2="22" stroke="#4F46E5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="8" y1="36" x2="22" y2="36" stroke="#4F46E5" stroke-width="3" stroke-linecap="round"/>
+  <line x1="8" y1="22" x2="8" y2="36" stroke="#4F46E5" stroke-width="3" stroke-linecap="round"/>
+  <!-- Player 2 edges (red) -->
+  <line x1="22" y1="8" x2="36" y2="8" stroke="#EF4444" stroke-width="3" stroke-linecap="round"/>
+  <line x1="36" y1="8" x2="50" y2="8" stroke="#EF4444" stroke-width="3" stroke-linecap="round"/>
+  <line x1="36" y1="8" x2="36" y2="22" stroke="#EF4444" stroke-width="3" stroke-linecap="round"/>
+  <line x1="50" y1="8" x2="50" y2="22" stroke="#EF4444" stroke-width="3" stroke-linecap="round"/>
+  <line x1="36" y1="22" x2="50" y2="22" stroke="#EF4444" stroke-width="3" stroke-linecap="round"/>
+  <!-- Filled boxes -->
+  <rect x="9" y="9" width="12" height="12" rx="1" fill="#4F46E5" fill-opacity="0.2"/>
+  <rect x="37" y="9" width="12" height="12" rx="1" fill="#EF4444" fill-opacity="0.2"/>
+</svg>

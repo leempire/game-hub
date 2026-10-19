@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background rounded square -->
+  <rect x="16" y="16" width="480" height="480" rx="64" fill="#2D6A4F"/>
+  <!-- Cross-shaped board track -->
+  <rect x="176" y="56" width="160" height="400" rx="12" fill="#E8F5E9" opacity="0.9"/>
+  <rect x="56" y="176" width="400" height="160" rx="12" fill="#E8F5E9" opacity="0.9"/>
+  <!-- Center circle -->
+  <circle cx="256" cy="256" r="60" fill="#FFF" stroke="#2D6A4F" stroke-width="4"/>
+  <!-- 4 colored planes -->
+  <!-- Red plane (top) -->
+  <g transform="translate(256,108)">
+    <path d="M0,-24 L16,8 L0,0 L-16,8 Z" fill="#E53935"/>
+    <circle cx="0" cy="-8" r="6" fill="#FFCDD2"/>
+  </g>
+  <!-- Yellow plane (right) -->
+  <g transform="translate(404,256) rotate(90)">
+    <path d="M0,-24 L16,8 L0,0 L-16,8 Z" fill="#FDD835"/>
+    <circle cx="0" cy="-8" r="6" fill="#FFF9C4"/>
+  </g>
+  <!-- Blue plane (bottom) -->
+  <g transform="translate(256,404) rotate(180)">
+    <path d="M0,-24 L16,8 L0,0 L-16,8 Z" fill="#1E88E5"/>
+    <circle cx="0" cy="-8" r="6" fill="#BBDEFB"/>
+  </g>
+  <!-- Green plane (left) -->
+  <g transform="translate(108,256) rotate(270)">
+    <path d="M0,-24 L16,8 L0,0 L-16,8 Z" fill="#43A047"/>
+    <circle cx="0" cy="-8" r="6" fill="#C8E6C9"/>
+  </g>
+  <!-- Dice in center -->
+  <rect x="236" y="236" width="40" height="40" rx="8" fill="#FFF" stroke="#333" stroke-width="2"/>
+  <circle cx="248" cy="248" r="3" fill="#333"/>
+  <circle cx="264" cy="248" r="3" fill="#333"/>
+  <circle cx="248" cy="264" r="3" fill="#333"/>
+  <circle cx="264" cy="264" r="3" fill="#333"/>
+  <circle cx="256" cy="256" r="3" fill="#333"/>
+</svg>

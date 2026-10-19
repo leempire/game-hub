@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "GameHub",
+    "slug": "gamehub",
+    "version": "1.17.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.gamehub.app"
+    },
+    "android": {
+      "package": "com.gamehub.app",
+      "versionCode": 30,
+      "adaptiveIcon": {
+        "backgroundColor": "#4338CA",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES",
+        "INTERNET"
+      ],
+      "usesCleartextTraffic": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ]
+  }
+}

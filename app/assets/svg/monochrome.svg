@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="1024" height="1024">
+  <!-- Android 13+ 主题图标：纯白剪影 + 透明底，系统按 alpha 蒙版着色 -->
+  <circle cx="48" cy="48" r="30.5" fill="none" stroke="#FFFFFF" stroke-width="3"/>
+  <polygon points="48,17.5 21.6,63.25 74.4,63.25" fill="#FFFFFF"/>
+  <polygon points="48,78.5 74.4,32.75 21.6,32.75" fill="#FFFFFF"/>
+</svg>
