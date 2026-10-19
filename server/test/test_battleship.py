@@ -8,7 +8,7 @@ import random
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.battleship import (
+from app.game.battleship import (
     SIZE_PRESETS,
     SIZES,
     default_weapon_assignment,
@@ -324,7 +324,7 @@ if __name__ == "__main__":
 
 
 def test_validate_weapon_assignment():
-    from app.battleship import validate_weapon_assignment
+    from app.game.battleship import validate_weapon_assignment
     assert validate_weapon_assignment({"radar": 5, "salvo": 4, "strike": 3})
     # 三件武器不能挂同一艘船（否则「全堆在最难找的船上」成为支配策略）
     assert not validate_weapon_assignment({"radar": 5, "salvo": 5, "strike": 3})
@@ -335,7 +335,7 @@ def test_validate_weapon_assignment():
 
 
 def test_normalize_weapon_assignment_falls_back():
-    from app.battleship import (
+    from app.game.battleship import (
         DEFAULT_WEAPON_ASSIGNMENT, normalize_weapon_assignment,
     )
     assert normalize_weapon_assignment(None) == DEFAULT_WEAPON_ASSIGNMENT
@@ -346,7 +346,7 @@ def test_normalize_weapon_assignment_falls_back():
 
 
 def test_ship_afloat_tracks_sunk():
-    from app.battleship import ship_afloat
+    from app.game.battleship import ship_afloat
     board = create_board()
     apply_placement(board, [{"id": 5, "x": 0, "y": 0, "horizontal": True}])
     attack = create_board()
@@ -359,7 +359,7 @@ def test_ship_afloat_tracks_sunk():
 
 
 def test_area_cells_clamps_at_edges():
-    from app.battleship import area_cells
+    from app.game.battleship import area_cells
     assert len(area_cells(5, 5)) == 9          # 盘中央是完整 3×3
     assert len(area_cells(0, 0)) == 4          # 角上被裁掉
     assert len(area_cells(0, 5)) == 6          # 边上裁成 2×3
@@ -369,7 +369,7 @@ def test_area_cells_clamps_at_edges():
 
 
 def test_radar_scan_reports_presence_only():
-    from app.battleship import radar_scan
+    from app.game.battleship import radar_scan
     board = create_board()
     apply_placement(board, [{"id": 1, "x": 0, "y": 0, "horizontal": True}])
     assert radar_scan(board, 1, 1)             # 邻域内有舰
@@ -382,7 +382,7 @@ def test_radar_scan_reports_presence_only():
 
 
 def test_weapons_view_hides_nothing_but_tracks_state():
-    from app.battleship import weapons_view
+    from app.game.battleship import weapons_view
     board = create_board()
     apply_placement(board, [{"id": 5, "x": 0, "y": 0, "horizontal": True}])
     attack = create_board()

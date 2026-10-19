@@ -8,8 +8,8 @@
 import random
 import time
 
-from app import luzhanqi as L
-from app import luzhanqi_ai as AI
+from app.game import luzhanqi as L
+from app.game import luzhanqi_ai as AI
 
 
 def _playing(mode="open", reveal=True, seed=7):

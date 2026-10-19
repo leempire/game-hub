@@ -8,39 +8,39 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.security import decode_token_ws
 from app.database import get_conn, row_to_user
 from app import room_manager as rm
-from app.minesweeper import game_to_sync as mine_game_to_sync
-from app.reversi import game_to_sync as reversi_game_to_sync
-from app.battleship import game_to_sync as bs_game_to_sync
-from app.battleship import random_placement as bs_random_placement
-from app.battleship import ship_afloat as bs_ship_afloat
-from app.dots import game_to_sync as dots_game_to_sync
-from app.dots import PLAYER1 as DOTS_P1, PLAYER2 as DOTS_P2
-from app.ludo import game_to_sync as ludo_game_to_sync
-from app.game2048 import game_to_sync as g2048_game_to_sync
-from app.game2048 import leaderboard as g2048_leaderboard
-from app.xiangqi import game_to_sync as xiangqi_game_to_sync
-from app import luzhanqi as lzq
-from app.luzhanqi import view_for as luzhanqi_view_for
-from app.luzhanqi import mask_battle as luzhanqi_mask_battle
-from app.tetris import (
+from app.game.minesweeper import game_to_sync as mine_game_to_sync
+from app.game.reversi import game_to_sync as reversi_game_to_sync
+from app.game.battleship import game_to_sync as bs_game_to_sync
+from app.game.battleship import random_placement as bs_random_placement
+from app.game.battleship import ship_afloat as bs_ship_afloat
+from app.game.dots import game_to_sync as dots_game_to_sync
+from app.game.dots import PLAYER1 as DOTS_P1, PLAYER2 as DOTS_P2
+from app.game.ludo import game_to_sync as ludo_game_to_sync
+from app.game.game2048 import game_to_sync as g2048_game_to_sync
+from app.game.game2048 import leaderboard as g2048_leaderboard
+from app.game.xiangqi import game_to_sync as xiangqi_game_to_sync
+from app.game import luzhanqi as lzq
+from app.game.luzhanqi import view_for as luzhanqi_view_for
+from app.game.luzhanqi import mask_battle as luzhanqi_mask_battle
+from app.game.tetris import (
     game_to_sync as tetris_game_to_sync,
     leaderboard as tetris_leaderboard,
 )
-from app.uno import (
+from app.game.uno import (
     game_to_sync as uno_game_to_sync,
     snapshot as uno_snapshot,
     can_call_uno as uno_can_call_uno,
     jumpable_cards as uno_jumpable_cards,
 )
-from app.connect4 import (
+from app.game.connect4 import (
     COLS as C4_COLS, ROWS as C4_ROWS,
     BLACK as C4_BLACK, WHITE as C4_WHITE,
 )
-from app import stasis as stasis_engine
-from app import (battleship_ai, gomoku_ai, reversi_ai, dots_ai, ludo_ai, xiangqi_ai,
+from app.game import stasis as stasis_engine
+from app.game import (battleship_ai, gomoku_ai, reversi_ai, dots_ai, ludo_ai, xiangqi_ai,
                  connect4_ai, uno_ai, luzhanqi_ai)
-from app.gomoku import BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE
-from app.reversi import BLACK as REVERSI_BLACK, WHITE as REVERSI_WHITE
+from app.game.gomoku import BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE
+from app.game.reversi import BLACK as REVERSI_BLACK, WHITE as REVERSI_WHITE
 
 router = APIRouter()
 
@@ -1979,7 +1979,7 @@ async def _bot_reversi_move(code: str, bot_id: int, room: dict, gs: dict):
     if move is None:
         # No legal moves: auto-pass (handled by reversi_make_move)
         # Just advance turn to opponent
-        from app.reversi import get_legal_moves
+        from app.game.reversi import get_legal_moves
         legal = get_legal_moves(gs["board"], stone)
         if not legal:
             gs["pass_count"] = gs.get("pass_count", 0) + 1

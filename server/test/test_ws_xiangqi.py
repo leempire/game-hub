@@ -17,7 +17,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import room_manager as rm
-from app.xiangqi import board_from_rows, RED, BLACK
+from app.game.xiangqi import board_from_rows, RED, BLACK
 
 
 @pytest.fixture(autouse=True)
@@ -147,7 +147,7 @@ def test_xiangqi_legal_move_broadcast(client):
         assert m1["check"] is False
         # 下发的 legal 必须与房间盘面自洽（客户端全靠它做高亮，不自己实现规则）。
         # move 消息不带 board（客户端按 from/to 自行落子），所以拿房间里的权威盘面比。
-        from app.xiangqi import all_legal_moves
+        from app.game.xiangqi import all_legal_moves
         board = rm.get_room(code)["game_state"]["board"]
         assert sorted(m1["legal"]) == sorted(
             [fr, fc, tr, tc]

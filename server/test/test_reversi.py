@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.reversi import (
+from app.game.reversi import (
     create_board,
     find_flips_in_dir,
     find_all_flips,

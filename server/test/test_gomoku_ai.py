@@ -9,11 +9,11 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.gomoku import (
+from app.game.gomoku import (
     create_board, place_stone, check_win, is_valid_move,
     BOARD_SIZE, EMPTY, BLACK, WHITE,
 )
-from app.gomoku_ai import best_move
+from app.game.gomoku_ai import best_move
 
 
 # ── one-step win ──────────────────────────────────────────────────

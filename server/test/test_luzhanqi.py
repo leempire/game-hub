@@ -9,7 +9,7 @@ import random
 
 import pytest
 
-from app import luzhanqi as L
+from app.game import luzhanqi as L
 
 
 # ------------------------------------------------------------------ 工具

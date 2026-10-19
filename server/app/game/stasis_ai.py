@@ -83,7 +83,7 @@ import math
 import random
 from dataclasses import dataclass
 
-from app.stasis import (
+from app.game.stasis import (
     ACCEL, BED, BINDER, BUILDABLE, BUILD_COST, COPPER, CRYO, DIAMOND, DOOR,
     GOLD, PATCH_COST_BIO, PATCH_COST_MULT, REFINERY, REPAIR, SHIELD, SILVER,
     SHIELD_TRIGGER, TURRET, alive_players, bed_door_req, buildable_cells, can_lie, door_max,

@@ -33,7 +33,7 @@
 from dataclasses import dataclass
 from typing import Callable
 
-from app import battleship, minesweeper, stasis_map, uno_rules
+from app.game import battleship, minesweeper, stasis_map, uno_rules
 
 KIND_CHOICE = "choice"
 KIND_TOGGLE = "toggle"

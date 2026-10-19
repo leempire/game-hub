@@ -9,7 +9,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.xiangqi import (
+from app.game.xiangqi import (
     RED,
     BLACK,
     create_game,
@@ -23,7 +23,7 @@ from app.xiangqi import (
     undo_move,
     rows_of,
 )
-from app.xiangqi_ai import best_move
+from app.game.xiangqi_ai import best_move
 
 
 def _red_moves(board, budget=0.3):

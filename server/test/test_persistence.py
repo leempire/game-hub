@@ -186,7 +186,7 @@ def test_roundtrip_set_of_tuples(tmp_db):
 
 def test_restore_room_with_flagged_mines(tmp_db):
     """端到端：带插旗的扫雷房必须能恢复（曾经整房静默消失）。"""
-    from app import minesweeper as mine
+    from app.game import minesweeper as mine
     room = rm.create_room(U1, None, None, "minesweeper")
     code = room["code"]
     room["game_state"] = mine.create_game("beginner")
