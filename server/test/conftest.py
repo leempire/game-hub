@@ -5,10 +5,12 @@
 
 import os
 import sys
+import time
 
 import anyio
 import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -35,7 +37,52 @@ def ws_client():
     共享 portal 后所有连接跑在同一个循环里，语义也更接近真实的 uvicorn（单循环）。
     上线（uvicorn）没有这个问题——它本来就是一个事件循环。
     """
-    with anyio.from_thread.start_blocking_portal() as portal:
+    with anyio.from_thread.start_blocking_portal() as portal, _ordered_ws_sends(portal):
         client = TestClient(app)
         client.portal = portal
         yield client
+
+
+async def _settle():
+    for _ in range(3):
+        await anyio.sleep(0)
+
+
+class _ordered_ws_sends:
+    """让客户端发出的 WS 消息**按发送顺序**被服务端处理完，再返回给用例。
+
+    为什么需要：TestClient 的服务端侧是「每个连接一个协程、`sleep(0)` 忙轮询
+    各自的收件队列」。用例连着从 ws1、ws2 各发一条（中间那次 `_recv_type` 往往
+    读到的是**对方上一手的陈旧广播**，根本没等），两条消息几乎同时进队，谁先被
+    处理取决于事件循环本轮先轮询到哪个协程 —— 服务端就可能先处理后发的那条
+    （「还没轮到你走」、开局时对方还没准备好），期待的广播永远不来，用例永久阻塞。
+    Linux 上恰好几乎总按发送顺序处理，Windows 上多个用例稳定复现。
+
+    做法：每条 `websocket.receive` 入队后，等服务端把它取走（队列变空），再借
+    portal 跑一次 `_settle`——它排在处理协程当前这一步之后执行，返回即说明这条
+    消息的同步处理部分已跑完。连接已关闭、消息永远没人取时最多等 1 秒。
+    语义上等价于「一个客户端发完一条、服务端处理完再发下一条」，用例本来就是
+    这么假设的。
+    """
+
+    def __init__(self, portal):
+        self.portal = portal
+
+    def __enter__(self):
+        self._orig = WebSocketTestSession.send
+        portal, orig = self.portal, self._orig
+
+        def send(session, message):
+            orig(session, message)
+            if message.get("type") != "websocket.receive" or session.portal is not portal:
+                return
+            deadline = time.monotonic() + 1.0
+            while not session._receive_queue.empty() and time.monotonic() < deadline:
+                time.sleep(0.0005)
+            portal.call(_settle)
+
+        WebSocketTestSession.send = send
+        return self
+
+    def __exit__(self, *exc):
+        WebSocketTestSession.send = self._orig
