@@ -230,7 +230,7 @@ def _build_results_record(room: dict) -> list[dict]:
         ranking = room.get("_mine_ranking", [])
         if not ranking:
             # Fallback: compute ranking if not cached
-            from app.minesweeper import compute_ranking
+            from app.game.minesweeper import compute_ranking
             players_info = [
                 {"seat": idx, "username": p["username"],
                  "nickname": p.get("nickname")}
@@ -246,7 +246,7 @@ def _build_results_record(room: dict) -> list[dict]:
     if room["game"] == "ludo":
         ranking = room.get("_ludo_ranking", [])
         if not ranking:
-            from app.ludo import compute_ranking
+            from app.game.ludo import compute_ranking
             players_info = [
                 {"seat": idx, "username": p["username"],
                  "nickname": p.get("nickname")}
@@ -262,7 +262,7 @@ def _build_results_record(room: dict) -> list[dict]:
         # 单局定胜负：出完手牌的那个人是胜者，其余按剩余手牌点数排名
         ranking = room.get("_uno_ranking", [])
         if not ranking:
-            from app.uno import compute_ranking
+            from app.game.uno import compute_ranking
             players_info = [
                 {"seat": idx, "username": p["username"],
                  "nickname": p.get("nickname")}
@@ -279,7 +279,7 @@ def _build_results_record(room: dict) -> list[dict]:
         # 其余（分数最高但没合出来 / 卡死 / 认输）一律记「游戏结束」。
         # 不能沿用下面的 winner==color 判断——2048 的 gs["winner"] 记的是排名第一的
         # 颜色（见 _maybe_finish_2048），直接套会把「分高者」误标成胜方。
-        from app.game2048 import WIN_TILE, max_tile
+        from app.game.game2048 import WIN_TILE, max_tile
         for p in room["players"]:
             board = gs.get("boards", {}).get(p["id"], [])
             reached = max_tile(board) >= WIN_TILE
@@ -322,7 +322,7 @@ def _build_snapshot(room: dict) -> dict:
             "reason": gs.get("reason"),
         }
     if game == "minesweeper":
-        from app.minesweeper import (
+        from app.game.minesweeper import (
             get_revealed_list,
             get_flagged_list,
             compute_ranking,
@@ -346,21 +346,21 @@ def _build_snapshot(room: dict) -> dict:
             "reason": gs.get("reason"),
         }
     if game == "battleship":
-        from app.battleship import snapshot as bs_snapshot
+        from app.game.battleship import snapshot as bs_snapshot
         return bs_snapshot(gs)
     if game == "dots":
-        from app.dots import snapshot as dots_snapshot
+        from app.game.dots import snapshot as dots_snapshot
         return dots_snapshot(gs)
     if game == "xiangqi":
-        from app.xiangqi import snapshot as xiangqi_snapshot
+        from app.game.xiangqi import snapshot as xiangqi_snapshot
         return xiangqi_snapshot(gs)
     if game == "luzhanqi":
         # 快照是**全量真相**（含暗棋下被扣着的棋子）—— 对局已经结束，全量更有复盘价值。
         # 漏了这个分支不会报错，只会让战绩页点开一片空白（深空休眠踩过）。
-        from app.luzhanqi import snapshot as luzhanqi_snapshot
+        from app.game.luzhanqi import snapshot as luzhanqi_snapshot
         return luzhanqi_snapshot(gs)
     if game == "tetris":
-        from app.tetris import snapshot as tetris_snapshot
+        from app.game.tetris import snapshot as tetris_snapshot
         snap = tetris_snapshot(gs)
         # 与 2048 同理：跑分类游戏的快照要带 uid→身份，战绩页才能显示用户名
         snap["players"] = {
@@ -374,7 +374,7 @@ def _build_snapshot(room: dict) -> dict:
         }
         return snap
     if game == "connect4":
-        from app.connect4 import COLS, ROWS
+        from app.game.connect4 import COLS, ROWS
         return {
             "game": "connect4",
             "cols": COLS,
@@ -384,7 +384,7 @@ def _build_snapshot(room: dict) -> dict:
             "reason": gs.get("reason"),
         }
     if game == "ludo":
-        from app.ludo import compute_ranking
+        from app.game.ludo import compute_ranking
         ranking = room.get("_ludo_ranking")
         if not ranking:
             players_info = [
@@ -409,7 +409,7 @@ def _build_snapshot(room: dict) -> dict:
             "reason": gs.get("reason"),
         }
     if game == "uno":
-        from app.uno import snapshot as uno_snapshot, compute_ranking as uno_rank
+        from app.game.uno import snapshot as uno_snapshot, compute_ranking as uno_rank
         snap = uno_snapshot(gs)
         ranking = room.get("_uno_ranking")
         if not ranking:
@@ -423,7 +423,7 @@ def _build_snapshot(room: dict) -> dict:
         snap["ranking"] = ranking
         return snap
     if game == "2048":
-        from app.game2048 import snapshot as g2048_snapshot
+        from app.game.game2048 import snapshot as g2048_snapshot
         snap = g2048_snapshot(gs)
         # 战绩页要显示用户名：2048 是多人跑分，颜色既不是身份也不是名次，
         # 光有 uid→盘面 的映射没法渲染「谁是谁」。这里把身份一起存进快照。
@@ -438,12 +438,12 @@ def _build_snapshot(room: dict) -> dict:
         }
         return snap
     if game == "stasis":
-        from app.stasis import snapshot as stasis_snapshot
+        from app.game.stasis import snapshot as stasis_snapshot
         snap = stasis_snapshot(gs)
         # 排名（含用户名）由结算时算好存在房间上；没有就现算一份，保证快照自洽。
         ranking = room.get("_stasis_ranking")
         if not ranking:
-            from app.stasis import compute_ranking as stasis_rank
+            from app.game.stasis import compute_ranking as stasis_rank
             players_info = [
                 {"seat": idx, "uid": p["id"], "username": p["username"],
                  "nickname": p.get("nickname")}

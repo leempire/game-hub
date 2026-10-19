@@ -9,7 +9,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.battleship import (
+from app.game.battleship import (
     create_board,
     random_placement,
     apply_placement,
@@ -21,7 +21,7 @@ from app.battleship import (
     HIT,
     SHIP_DEFS,
 )
-from app.battleship_ai import best_move
+from app.game.battleship_ai import best_move
 
 
 # ── helper ────────────────────────────────────────────────────────
@@ -288,7 +288,7 @@ if __name__ == "__main__":
 
 
 def _avg_shots(difficulty, games=60, seed=4242):
-    from app.battleship_ai import best_move
+    from app.game.battleship_ai import best_move
     rng = random.Random(seed)
     totals = []
     for _ in range(games):
@@ -318,7 +318,7 @@ def test_difficulty_tiers_are_ordered():
 
 
 def test_normalize_difficulty_falls_back():
-    from app.battleship_ai import DEFAULT_DIFFICULTY, normalize_difficulty
+    from app.game.battleship_ai import DEFAULT_DIFFICULTY, normalize_difficulty
     for level in ("easy", "normal", "hard"):
         assert normalize_difficulty(level) == level
     for bad in (None, "", "nightmare", 3):
@@ -326,7 +326,7 @@ def test_normalize_difficulty_falls_back():
 
 
 def test_every_tier_returns_unfired_cell():
-    from app.battleship_ai import best_move
+    from app.game.battleship_ai import best_move
     for level in ("easy", "normal", "hard"):
         rng = random.Random(7)
         board = create_board()
@@ -343,7 +343,7 @@ def test_every_tier_returns_unfired_cell():
 
 
 def test_weapon_plan_prefers_strike_on_locked_target():
-    from app.battleship_ai import weapon_plan
+    from app.game.battleship_ai import weapon_plan
     rng = random.Random(11)
     board = create_board()
     ships = random_placement(rng)
@@ -369,7 +369,7 @@ def test_weapon_plan_prefers_strike_on_locked_target():
 
 
 def test_weapon_plan_radar_only_early():
-    from app.battleship_ai import weapon_plan
+    from app.game.battleship_ai import weapon_plan
     rng = random.Random(13)
     board = create_board()
     ships = random_placement(rng)

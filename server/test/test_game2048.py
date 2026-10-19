@@ -2,7 +2,7 @@
 
 import pytest
 import random
-from app.game2048 import (
+from app.game.game2048 import (
     create_board,
     spawn_tile,
     move,

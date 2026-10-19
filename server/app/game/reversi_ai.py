@@ -6,7 +6,7 @@ Board: list[list[int]] (8×8), board[y][x], EMPTY=0 / BLACK=1 / WHITE=2.
 
 import copy
 import time
-from app.reversi import (
+from app.game.reversi import (
     BOARD_SIZE, EMPTY, BLACK, WHITE,
     get_legal_moves, apply_move, opponent, count_stones,
 )

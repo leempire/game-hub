@@ -60,18 +60,22 @@ server/
     ├── persistence.py  # 房间实时落盘 + 启动恢复（热重启，见「热重启」）
     ├── security.py     # JWT + 密码哈希
     ├── room_manager.py # 房间生命周期：创建/加入/准备/开始/断线保座(120s)/对局结束回调
+    ├── room_settings.py# 房间级玩法设置的**唯一注册表**（下发统一的 room.settings）
     ├── ws.py           # WS 路由与消息分发（各游戏 move/胜负广播/认输/断线判负）
-    ├── gomoku.py / minesweeper.py / reversi.py / battleship.py   # 纯引擎（无 IO）
-    ├── dots.py / ludo.py / game2048.py / xiangqi.py / connect4.py / tetris.py / uno.py
-    │   / stasis.py / stasis_map.py / luzhanqi.py
-    │   # 点格棋/飞行棋/2048/象棋/重力四子棋/俄罗斯方块/UNO/深空休眠/军棋 引擎
-    │   # luzhanqi.py 里那张 TOPOLOGY（kinds/rails/roads/fronts/mountains）是**棋盘
-    │   #   地形的唯一来源**，随 view_for 整张下发给客户端 —— 客户端一行拓扑规则都不写
-    │   # stasis_map.py 是深空休眠的**地图注册表**（纯函数、无状态）。v9 起几何只有
-    │   #   这一份：整张格子网格由 Map.payload 下发，客户端 stasisMap.ts 只剩解析
-    ├── gomoku_ai.py / reversi_ai.py / battleship_ai.py / dots_ai.py / ludo_ai.py
-    │   / xiangqi_ai.py / connect4_ai.py / uno_ai.py / stasis_ai.py / luzhanqi_ai.py
-    │   # 人机 AI（扫雷/2048/俄罗斯方块无 AI）
+    ├── game/           # **各游戏的纯引擎与人机 AI**（无 IO、不碰 asyncio）
+    │   ├── gomoku.py / minesweeper.py / reversi.py / battleship.py / dots.py
+    │   │   / ludo.py / game2048.py / xiangqi.py / connect4.py / tetris.py
+    │   │   / uno.py + uno_rules.py / luzhanqi.py
+    │   │   / stasis.py + stasis_map.py
+    │   │   # 点格棋/飞行棋/2048/象棋/重力四子棋/俄罗斯方块/UNO/深空休眠/军棋 引擎
+    │   │   # luzhanqi.py 里那张 TOPOLOGY（kinds/rails/roads/fronts/mountains）是**棋盘
+    │   │   #   地形的唯一来源**，随 view_for 整张下发给客户端 —— 客户端一行拓扑规则都不写
+    │   │   # stasis_map.py 是深空休眠的**地图注册表**（纯函数、无状态）。v9 起几何只有
+    │   │   #   这一份：整张格子网格由 Map.payload 下发，客户端 stasisMap.ts 只剩解析
+    │   ├── gomoku_ai.py / reversi_ai.py / battleship_ai.py / dots_ai.py / ludo_ai.py
+    │   │   / xiangqi_ai.py / connect4_ai.py / uno_ai.py / stasis_ai.py / luzhanqi_ai.py
+    │   │   # 人机 AI（扫雷/2048/俄罗斯方块无 AI）
+    │   └── __init__.py # 这层的约定（引擎不认识时间/不发消息；AI 只看下发过的信息）
     └── routers/        # auth / admin / rooms / app_update / history
 bin/
 ├── release-apk.sh      # 发布：版本号双写 → prebuild → gradlew assembleRelease → 拷贝 APK → curl 验证
@@ -295,7 +299,7 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   「对手获胜」的 2 人对战语义，用在合作塔防上会把整局直接判给静默体。
   弃守只结束本人、遗产平分给队友（同扫雷/UNO 的「本人出局、其他人继续」）。
 - **地图几何只有一份实现，而且它在服务端**（v9 反转了原来那条约定）。
-  `server/app/stasis_map.py` 是**地图注册表**（声明式 `MapSpec` → 编译成只读 `Map`，
+  `server/app/game/stasis_map.py` 是**地图注册表**（声明式 `MapSpec` → 编译成只读 `Map`，
   三张图 `dorm`/`suite`/`atrium`），整张格子网格连同门位 / 床位 / 包围盒由
   `Map.payload` 随 `game_to_sync` 下发；`app/src/stasisMap.ts` **只剩解析**，一行
   几何规则都没有。原来那条「两份实现必须同步改」是**单张地图时代**的做法，
@@ -740,6 +744,12 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
 
 ## 项目级规范与已知坑
 
+- **游戏引擎一律放 `server/app/game/`**（导入路径 `from app.game.gomoku import ...`），
+  房间/传输/落盘/配置留在 `server/app/`。引擎不认识时间（深空休眠只认 `dt_ms`）、
+  不读数据库、不发消息；人机 AI 的入参就是「真人看到的那份视图」，不许偷看未下发的信息。
+  **加一个游戏 = 在 `game/` 加引擎（+ 可选 AI）**，再按「新游戏接入清单」接线。
+  这一层是**纯函数 + 显式入参**，所以单测能毫秒级跑完整局（`test/balance_stasis.py` 就是靠它）。
+
 - **禁用浏览器专属 API**：`window.confirm/alert/prompt` 在原生端崩溃（1.1.x 事故）；`window.addEventListener` 同理——原生 RN 里 `window === global` 且**没有** addEventListener，对局屏裸调它挂载即 TypeError 白屏+WS 断连（1.3.1 APP 五子棋白屏事故，Web 端却完全正常，极易漏测）。一律用应用内 Modal/toast；Web 专属逻辑必须收口到 backGuard（`onConfirmLeave` 等 IS_WEB 守卫的助手）；`visual_audit.py` 静态扫描兜底（confirm/alert/prompt + backGuard 外的 DOM API）。
 - **RNW 特性**：disabled 的 TouchableOpacity 是 `pointer-events:none`（Playwright 点击会挂起，改断言 computedStyle）；颜色编译进 class 名（测试取值用 `getComputedStyle`）。
 - **react-navigation linking**：开启后浏览器 history 与路由双向同步；程序化导航（goBack/Tab切换）先改路由状态再调 history.go，popstate 时 `getRouteName()` 已是新路由——backGuard 靠包装 history 方法区分程序化/用户返回（见「返回操作」）。linking 的 replaceState 会冲掉自定义 pushState 条目；getCurrentRoute() 返回叶子路由名（Tab 页是 Games/Rooms/Social/Profile，不是 MainTabs）。
@@ -781,7 +791,7 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
 - **逐人下发的消息要带够字段**：飞行棋 `dice_rolled` 不带 `current_seat` 时，「掷到无可动飞机自动移交回合」会让客户端停在「点击骰子掷骰」而实际已轮到别人。
 - **飞行棋走子路径由服务端给**（v1.6）：赛道 52 格按蓝→绿→红→黄四色循环着色，落点与**自己**同色则跳 4 格、踩到虚线捷径格则飞 12 格——所以 `piece_moved` 必须带 `path`（逐格 progress 序列）+ `segments`（`walk`/`jump`/`fly`）。客户端**不能**再按 `old+dice` 自己推路径（会画错：飞机停在半路、提示文案对不上）。引擎侧 `resolve_landing()` 是只读的，AI 也用它推演。
 - **飞行棋的赛道是「围着十字边缘一圈」的十字环**（v1.6.1，按 `tmp/飞行棋.png` 重做）：15×15 逻辑格、**外圈第 0/14 行/列宽 2 倍**（总 17 单位，换算走 `unitOf/cellRect/cellCenter`），52 格沿棋盘外缘走、四个凹角向里切（斜切，`(4,3)→(3,4)` 共角不共边——**不要**补连接格，补了就变 56 格）。**飞机自己只走相对进度 0..48**：自己的航道入口就在 48（左上基地 `(7,0)`、右上 `(0,7)`、右下 `(7,14)`、左下 `(14,7)`），49..54 是航道，55 到达。四条虚线在绝对索引 3/16/29/42（一色一条：黄/蓝/绿/红），各飞 12 格，但**只有踩在自己颜色的那条上才算数**（标准规则）——因为「自己颜色」⇔「相对进度 % 4 == 0」，而 3/16/29/42 里只有 16 是 4 的倍数，所以任何座位的可用虚线恒为**相对进度 16**，飞 12 格到 28（四条绝对虚线各归一个座位：蓝 `(4,11)` / 绿 `(11,10)` / 红 `(10,3)` / 黄 `(3,4)`）。**漏掉「自己颜色」这条会变成「谁踩到任何虚线都能飞」**（蓝方能在绿色虚线上起飞，用户实测报过）；画面上自己那条起点是实心圆、其余空心。
-- **飞行棋配色、赛道坐标、虚线位置的常量在两处**：`server/app/ludo.py`（权威，走子裁决）与 `app/src/ludoBoard.ts`（只负责画）。改一边必须同步改另一边。座位方位是「左上蓝 / 右上绿 / 右下红 / 左下黄」，且**每个座位的臂是它基地逆时针那一侧的臂**——引擎 `COLORS` 顺序、客户端 `TRACK` 起点与绕行方向、`HOME` 表三者必须同时对得上，任一处反了就是镜像棋盘。四条不变式（每座位起点=自己颜色、`进度%4==0` ⇔ 同色、每色恰好 13 格、每条虚线起终点同色跨度 12）由 `test_ludo.py::TestTrackColors` 锁死——起跑线偏移 `13 ≡ 1 (mod 4)` 是它们成立的原因。
+- **飞行棋配色、赛道坐标、虚线位置的常量在两处**：`server/app/game/ludo.py`（权威，走子裁决）与 `app/src/ludoBoard.ts`（只负责画）。改一边必须同步改另一边。座位方位是「左上蓝 / 右上绿 / 右下红 / 左下黄」，且**每个座位的臂是它基地逆时针那一侧的臂**——引擎 `COLORS` 顺序、客户端 `TRACK` 起点与绕行方向、`HOME` 表三者必须同时对得上，任一处反了就是镜像棋盘。四条不变式（每座位起点=自己颜色、`进度%4==0` ⇔ 同色、每色恰好 13 格、每条虚线起终点同色跨度 12）由 `test_ludo.py::TestTrackColors` 锁死——起跑线偏移 `13 ≡ 1 (mod 4)` 是它们成立的原因。
 - **棋盘美术要按 4 个座位全画**：2 人局也只画参赛两色的话，赛道仍画满 4 色循环，半个棋盘会空白得像没渲染出来。座位色优先取对局状态，该座位没人时退回固定色表。
 - **掷骰动画是「行动闸门」**（v1.6）：动画播完之前回合推进一律不生效——`dice_rolled` 只入队、落定后才应用 `movable`/`phase`/座位，`piece_moved` 落定前一律排队后补播。**玩家和人机一视同仁**：人机是「掷完立刻走」，两条广播几乎同帧到达，不挡的话棋子在骰子还在转时就飞出去了。落定后再留 180ms 才放行（骰子「弹一下」是 200ms）。闸门状态在 `sync`/`game_start` 时清空。骰子描边（起转 `colors.primary` / 落定 `#111827`）是动画状态的可观测信号，E2E 靠它断言。
 - **基地里的棋子也要能点**：飞行棋基地飞机掷 6 时可起飞，但早期只给轨道飞机挂了 `onPress`，掷出 6 后提示「点击飞机移动」却无处可点，直接卡死。
@@ -848,8 +858,8 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
   - 反推方法可复用：`PIL` 采样 + 奶油圆检测定位格心 → 用「15×15、外圈 2 倍宽」的格网逐格取色 → 与推导出的 52 格环逐格比对（52/52 全中才动手）。
   - 引擎/客户端/AI/单测/E2E/文档同步；`test_ludo.py` 54 条、`test_ludo_ai.py`、`test_bot.py` 的飞行棋用例全部按新进度轴改写（旧用例大量用 `progress=51/57`，新几何下 51 已越界）。
 - **v1.7.0 已发布**：新增**中国象棋**（第 8 个游戏）——
-  - 引擎 `server/app/xiangqi.py`：9×10、红先，全套走法（马腿/象眼/炮架/将帅照面/过河兵）、将军/将死/**困毙判负**（象棋里困毙不是和棋）、60 回合无吃子判和。开局合法着法 **44** 条（象棋已知值）作为整体自检。
-  - AI `server/app/xiangqi_ai.py`：negamax + alpha-beta + 迭代加深 + 同分随机，0.9s 硬性时间预算；**跑在 `asyncio.to_thread` 里**并传盘面副本，否则卡死事件循环。对随机走子 3/3 全胜。
+  - 引擎 `server/app/game/xiangqi.py`：9×10、红先，全套走法（马腿/象眼/炮架/将帅照面/过河兵）、将军/将死/**困毙判负**（象棋里困毙不是和棋）、60 回合无吃子判和。开局合法着法 **44** 条（象棋已知值）作为整体自检。
+  - AI `server/app/game/xiangqi_ai.py`：negamax + alpha-beta + 迭代加深 + 同分随机，0.9s 硬性时间预算；**跑在 `asyncio.to_thread` 里**并传盘面副本，否则卡死事件循环。对随机走子 3/3 全胜。
   - **客户端不实现规则**：合法着法随消息下发，客户端只做高亮（见上）。
   - **两步落子** + **黑方视角翻转 180°**（`flipSquare` 是对合变换，渲染与点击换算共用一份实现）。
   - 棋盘美术：河界断口 + 九宫斜线 + 楚河汉界；棋子＝奶油盘面 + 本方色环 + 汉字（**盘面 vs 木色底只有 1.36:1，轮廓全靠那圈色环**）。
@@ -873,8 +883,8 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
   - **终局复位 `ready`**：真人非房主打完一局回到房间页即未准备，要续开就重新点准备（见上文「终局要把真人非房主的 `ready` 复位」）。配套改了 4 条依赖旧行为的用例（`test_ws_battleship`/`test_ws_reversi`/`test_ws_xiangqi` 的 `*_start_new_round_from_lobby`、`test_room_lifecycle.test_played_room_start_new_game`）——它们原来直接在终局后 `start`，再也不会收到 `game_start`。
   - 回归：pytest 360（+55）、`e2e_xiangqi_smoke.py` 10 步、`e2e_leave_midgame.py` 6 步、visual_audit 32/32。
 - **v1.7.1（随 v1.7.2 一起发布）**：新增**重力四子棋**（第 9 个游戏，key `connect4`）——
-  - 引擎 `server/app/connect4.py`：7 列 × 6 行、黑先，落子靠重力堆到列底；四连（横/竖/两斜）判胜、满盘判和。**客户端只发列号**，落点行由服务端算并随 `move` 广播（客户端自己推"这一列还剩几格"会错位）。
-  - AI `server/app/connect4_ai.py`：negamax + alpha-beta + 迭代加深 + 中列优先，0.5s 时间预算，先查"一步赢/一步堵"再进搜索。跑在 `asyncio.to_thread` 里并传盘面副本（0.5s 同步搜索会卡住事件循环）。
+  - 引擎 `server/app/game/connect4.py`：7 列 × 6 行、黑先，落子靠重力堆到列底；四连（横/竖/两斜）判胜、满盘判和。**客户端只发列号**，落点行由服务端算并随 `move` 广播（客户端自己推"这一列还剩几格"会错位）。
+  - AI `server/app/game/connect4_ai.py`：negamax + alpha-beta + 迭代加深 + 中列优先，0.5s 时间预算，先查"一步赢/一步堵"再进搜索。跑在 `asyncio.to_thread` 里并传盘面副本（0.5s 同步搜索会卡住事件循环）。
   - 客户端 `ConnectFourScreen.tsx`：点**整列**落子（热区远高于 44pt，不需要象棋那种两步落子补偿）、落子 160ms 下落动画、最后落子黄点。
   - **提示标**：轮到自己时标出「连四」（浅绿，这一手直接赢）与「堵」（浅琥珀，不堵对方就赢）。颜色 + 文字标签 + 形状（圆角/菱形）三条通道，另配图例——颜色单独承载信息不符合 WCAG 1.4.1。
   - **满列不禁用**：只在非自己回合时 `disabled`。禁用后是 `pointer-events:none`，点上去既没反应也没提示（用户只会觉得"点了没反应"）；留着让它弹「这一列已经放不下了」。
@@ -887,7 +897,7 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
   - **四个棋类统一「最近一步」标记**：`theme.ts` 新增 `lastMoveMark`/`lastMoveMarkEdge`（黄点 + 深墨描边），位置按棋盘特点各放（五子棋/翻转棋在棋子中心、点格棋是边上的黄晕、象棋在棋子右上角——中心是汉字会挡住）。**顺手修了两个真 bug**：翻转棋与点格棋的 `handleMove` 都**没有维护 `prev.moves`**，渲染端 `lastMove = game.moves[last]` 永远是 null，标记从来没显示过（等于死代码）。
   - 回归：pytest 426、`e2e_mine_board.py` 10 步、`e2e_web_game.py` 14 步（含二次确认与标记跟随）、`e2e_dots_smoke`/`e2e_reversi_smoke`/`e2e_xiangqi_smoke` 各加了标记断言、`test_ws_minesweeper.py` 新增生命值流程、visual_audit 32/32。
 - **v1.8.0 已发布**：新增**俄罗斯方块对战**（第 10 个游戏，key `tetris`）——
-  - 引擎 `server/app/tetris.py`：10×20、七种方块（SRS 四态旋转表直接写出来）、
+  - 引擎 `server/app/game/tetris.py`：10×20、七种方块（SRS 四态旋转表直接写出来）、
     7-bag 随机袋、软/硬降、消行、等级（每 10 行一级）、**攻击行**（消 2/3/4 行给对手
     顶 1/2/4 行带空洞的行）。每人一份盘、**同一个随机种子**（方块序列完全一致 → 公平）。
   - **架构：动作序列重放，不做服务端 tick**。重力归客户端，客户端攒动作、**锁定后
@@ -903,7 +913,7 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
     另有一道 `tetrisGrid` 格线（1.71）把 10 列引出来（v1.9 补，见该版本条目）。
   - 回归：pytest 489（+63，含 48 条引擎 + 14 条 WS 协议）、`e2e_tetris_smoke.py` 12 步、tsc 干净、visual_audit 32/32。
 - **v1.9.0 已发布**：新增 **UNO 牌类**（第 11 个游戏，key `uno`）——项目第一个**非棋盘、回合制多人**游戏，补上一直缺的「多人派对」这一档（此前 6 个是 1v1，4 个是「各玩各的」或互撕）。
-  - 引擎 `server/app/uno.py`：标准 108 张（`0` 每色 1 张、`1-9` 与功能牌每色 2 张、黑牌各 4 张）。
+  - 引擎 `server/app/game/uno.py`：标准 108 张（`0` 每色 1 张、`1-9` 与功能牌每色 2 张、黑牌各 4 张）。
     **牌用字符串编码**（`R5`/`RS`/`RR`/`R+2`/`W`/`W+4`）——JSON 友好，比较、断言、落盘都省事。
   - **开局就把牌堆实体化并洗好**，所以**不需要持久化 rng**（2048 要存 `__rng__` 是因为它边玩边出块）；
     `persistence.py` / `schemas.py` / `routers/` / `main.py` **一行都不用改**。
@@ -1008,7 +1018,7 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
   - **v2 按原型复刻了空间与镜头**（复刻调研：`docs/游戏设计/深空休眠/增强调研.md`，
     18 条来源 + 7 张参考截图）：**整层楼的俯视平面图**（v3 起 25×30 格、12 间不规则凹形
     舱室、2 格宽通道网格、气闸在左上）、**可操控的角色 + 左下角虚拟摇杆**、
-    **相机跟随 + 拖动平移**。几何在 `server/app/stasis_map.py`（权威）与
+    **相机跟随 + 拖动平移**。几何在 `server/app/game/stasis_map.py`（权威）与
     `app/src/stasisMap.ts`（绘制副本），**改一边必须同步改另一边**。
     原先的「单间舱室 + 环形通道条」抽象界面已完全替换。
   - **位置是权威，客户端只做预演**：摇杆方向每 tick 上行，服务端积分位置并广播；
@@ -1240,7 +1250,7 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
     test/balance_stasis.py --games 16`）。v2 那版没进库，后来连文档里那张表都复现
     不出来（`设计.md` §1.5.1 记过）—— **改任何战斗常量之前先跑它**。
   - 回归：pytest **841**（+3）+ 1 xpassed、tsc 干净、`e2e_stasis_smoke.py` 27 步。
-  - ⚠️ **`server/app/stasis.py` 涨到 2330 行**（v7 时 1557，超过项目自己定的线）。
+  - ⚠️ **`server/app/game/stasis.py` 涨到 2330 行**（v7 时 1557，超过项目自己定的线）。
     它是纯引擎、无 IO、注释密度高，但真要拆得按「地图交互 / 战斗 / 经济 / 玩家」分，
     是独立一轮。
 - **v1.11.6（未发布）：深空休眠 v8 —— 用户实测报的三条**（调研归档在
@@ -1427,7 +1437,7 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
     那两张黑牌 —— `W+6` / `W+10` / `W+RD4` 因此**永远打不出去**（不弹选色框、不带颜色
     发上去被整手拒收，而玩家补不上那个颜色）。现在这张表随消息下发
     （`_action_flags` 的 `color_kinds`）。详见上文「可出判定不由客户端算」那条。
-  - ⚠️ `server/app/uno.py` 涨到 **1045 行**（v1.13 时 606）。它是纯引擎、无 IO、
+  - ⚠️ `server/app/game/uno.py` 涨到 **1045 行**（v1.13 时 606）。它是纯引擎、无 IO、
     注释密度高，**函数级已经拆过一轮**（`play` 的前置校验 → `_guard_play`、
     效果结算 → `_apply_effect` + `_apply_hand_effect`、摸牌 → `_draw_for_play` +
     `_take_penalty`、旗标 → `_action_flags`，**全部 ≤50 行**）。要再往下就得按
@@ -1536,10 +1546,10 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
   - **棋盘地形由服务端整张下发**（`TOPOLOGY`），客户端只换算成像素 ——
     军棋有 133 条边，两份实现必然漂移（同深空休眠 v9 的教训）。
     地形靠**形状**区分：铁路粗双线、公路细线、行营圆圈、大本营圆角方块、山界双层折线。
-  - **引擎** `server/app/luzhanqi.py`：走法（公路一步 / 铁路直行不限格数 / **工兵可拐弯** /
+  - **引擎** `server/app/game/luzhanqi.py`：走法（公路一步 / 铁路直行不限格数 / **工兵可拐弯** /
     行营不可被攻击且只能走一步 / 大本营内不可移动）、碰子全表、吃军旗判胜、
     **无棋可走判负**、120 半回合无吃子判和。状态是纯 dict，`persistence.py` 一行没改。
-  - **AI** `server/app/luzhanqi_ai.py`：**入参就是 `view_for` 的产物**（`gs` 压根没传进去），
+  - **AI** `server/app/game/luzhanqi_ai.py`：**入参就是 `view_for` 的产物**（`gs` 压根没传进去），
     所以暗棋下它和真人拿到一样的信息、不许作弊。暗棋靠**信念集**（地雷只可能在最后两排、
     军旗只可能在大本营；每次交战按相对大小收窄）算期望收益，并回避「拿大子撞未知」。
   - **两个真 bug 是 E2E 抓出来的**：①进对局屏那一次发成了 `luzhanqi_setup`，

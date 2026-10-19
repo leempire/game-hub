@@ -18,7 +18,7 @@ gs: game state dict from ludo.create_game(); valid when phase == "move".
 算成 old+dice 会低估收益、也算错落点危不危险。
 """
 
-from app.ludo import (
+from app.game.ludo import (
     PIECES_PER_PLAYER,
     RING,
     RING_END,

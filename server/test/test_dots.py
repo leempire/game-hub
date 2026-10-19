@@ -8,7 +8,7 @@ import copy
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.dots import (
+from app.game.dots import (
     create_game,
     is_valid_edge,
     get_legal_edges,
@@ -24,7 +24,7 @@ from app.dots import (
     PLAYER2,
     DEFAULT_DOTS,
 )
-from app import dots_ai
+from app.game import dots_ai
 
 
 def test_create_game_default():

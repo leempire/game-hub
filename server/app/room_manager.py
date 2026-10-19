@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 from app import persistence
 from app import room_settings
-from app import stasis as stasis_engine
-from app import stasis_ai
+from app.game import stasis as stasis_engine
+from app.game import stasis_ai
 
 # Room idle TTL in seconds. Sweeper deletes rooms exceeding this.
 # Monkeypatch this constant in tests to avoid real 30-minute waits.
@@ -41,7 +41,7 @@ _ROOM_OWNER_EVENTS = ("room_claimed", "room_released")
 # （自净）+ sweeper 每轮对账补一个（兜底）。与 _bot_tasks 同构。
 _tick_tasks: dict[str, asyncio.Task] = {}
 
-from app.gomoku import (
+from app.game.gomoku import (
     create_board,
     place_stone,
     check_win,
@@ -50,7 +50,7 @@ from app.gomoku import (
     BLACK,
     WHITE,
 )
-from app.minesweeper import (
+from app.game.minesweeper import (
     create_game as mine_create_game,
     reveal as mine_reveal,
     flag as mine_flag,
@@ -58,7 +58,7 @@ from app.minesweeper import (
     game_to_sync as mine_game_to_sync,
     compute_ranking as mine_compute_ranking,
 )
-from app.reversi import (
+from app.game.reversi import (
     create_board as reversi_create_board,
     apply_move as reversi_apply_move,
     get_legal_moves as reversi_get_legal_moves,
@@ -68,14 +68,14 @@ from app.reversi import (
     BLACK as REVERSI_BLACK,
     WHITE as REVERSI_WHITE,
 )
-from app.xiangqi import (
+from app.game.xiangqi import (
     create_game as xiangqi_create_game,
     make_move as xiangqi_engine_move,
     RED as XIANGQI_RED,
     BLACK as XIANGQI_BLACK,
 )
-from app import luzhanqi as lzq
-from app.connect4 import (
+from app.game import luzhanqi as lzq
+from app.game.connect4 import (
     create_board as c4_create_board,
     drop as c4_drop,
     check_win as c4_check_win,
@@ -85,7 +85,7 @@ from app.connect4 import (
     BLACK as C4_BLACK,
     WHITE as C4_WHITE,
 )
-from app.battleship import (
+from app.game.battleship import (
     create_board as bs_create_board,
     validate_placement,
     apply_placement,
@@ -103,8 +103,8 @@ from app.battleship import (
     BOARD_SIZE as BS_BOARD_SIZE,
     DEFAULT_SIZE as BS_DEFAULT_SIZE,
 )
-from app.battleship_ai import normalize_difficulty as bs_normalize_difficulty
-from app.dots import (
+from app.game.battleship_ai import normalize_difficulty as bs_normalize_difficulty
+from app.game.dots import (
     create_game as dots_create_game,
     apply_move as dots_apply_move,
     is_valid_edge as dots_is_valid_edge,
@@ -114,7 +114,7 @@ from app.dots import (
     PLAYER2 as DOTS_P2,
     DEFAULT_DOTS,
 )
-from app.ludo import (
+from app.game.ludo import (
     create_game as ludo_create_game,
     roll_dice as ludo_roll_dice,
     move_piece as ludo_move_piece,
@@ -124,7 +124,7 @@ from app.ludo import (
     _advance_turn as ludo_advance_turn,
     _check_game_over as ludo_check_game_over,
 )
-from app.tetris import (
+from app.game.tetris import (
     create_game as tetris_create_game,
     spawn_next as tetris_spawn_next,
     apply_action as tetris_apply_action,
@@ -134,7 +134,7 @@ from app.tetris import (
     game_to_sync as tetris_game_to_sync,
     snapshot as tetris_snapshot,
 )
-from app.game2048 import (
+from app.game.game2048 import (
     create_board as g2048_create_board,
     spawn_tile as g2048_spawn_tile,
     move_with_trace as g2048_move_with_trace,
@@ -143,7 +143,7 @@ from app.game2048 import (
     max_tile as g2048_max_tile,
     create_seeded_rng as g2048_create_seeded_rng,
 )
-from app.uno import (
+from app.game.uno import (
     create_game as uno_create_game,
     play as uno_play,
     draw as uno_draw,
@@ -154,7 +154,7 @@ from app.uno import (
     surrender as uno_surrender,
     compute_ranking as uno_compute_ranking,
 )
-from app import uno_rules
+from app.game import uno_rules
 
 # Bot turn callback: registered by ws.py to schedule AI moves.
 # Signature: async callback(code, bot_user_id)
@@ -741,7 +741,7 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
             if all_eliminated:
                 gs["finished"] = True
                 gs["reason"] = "eliminated"
-                from app.minesweeper import _reveal_all_mines
+                from app.game.minesweeper import _reveal_all_mines
                 _reveal_all_mines(gs)
                 players_info = _get_players_info(room)
                 ranking = mine_compute_ranking(gs, players_info)
@@ -2835,7 +2835,7 @@ def _mine_surrender(room: dict, user_id: int) -> dict | None:
     if all_eliminated:
         gs["finished"] = True
         gs["reason"] = "eliminated"
-        from app.minesweeper import _reveal_all_mines
+        from app.game.minesweeper import _reveal_all_mines
         _reveal_all_mines(gs)
         players_info = _get_players_info(room)
         ranking = mine_compute_ranking(gs, players_info)
@@ -2949,7 +2949,7 @@ def _on_dc_timeout(code: str, user_id: int):
             if all_eliminated:
                 gs["finished"] = True
                 gs["reason"] = "eliminated"
-                from app.minesweeper import _reveal_all_mines
+                from app.game.minesweeper import _reveal_all_mines
                 _reveal_all_mines(gs)
                 players_info = _get_players_info(room)
                 ranking = mine_compute_ranking(gs, players_info)

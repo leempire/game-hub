@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 import random
 
-from app import stasis_map as M
+from app.game import stasis_map as M
 
 # ── 时间 ────────────────────────────────────────────────────
 

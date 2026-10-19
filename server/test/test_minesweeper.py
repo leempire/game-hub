@@ -8,7 +8,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.minesweeper import (
+from app.game.minesweeper import (
     create_game,
     reveal,
     flag,
@@ -429,7 +429,7 @@ def test_flag_cancelled_not_counted():
     flag(g, mines[0][0], mines[0][1], seat=0)  # Cancel
 
     players_info = [{"seat": 0, "username": "alice", "nickname": "A"}]
-    from app.minesweeper import _compute_flag_stats
+    from app.game.minesweeper import _compute_flag_stats
     stats = _compute_flag_stats(g)
     assert stats[0]["correct_flags"] == 0
     print("  ✓ test_flag_cancelled_not_counted")

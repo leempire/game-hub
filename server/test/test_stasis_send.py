@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import room_manager as rm
-from app import stasis as stasis_engine
+from app.game import stasis as stasis_engine
 from app import ws as wsmod
 
 

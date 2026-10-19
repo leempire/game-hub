@@ -324,7 +324,7 @@ def test_ludo_bot_takes_off_on_six(client, monkeypatch):
     """人机掷到 6：自动起飞并广播 piece_moved。"""
     import asyncio
     from app.ws import _bot_do_turn
-    import app.ludo as ludo_mod
+    import app.game.ludo as ludo_mod
 
     monkeypatch.setattr(ludo_mod.random, "randint", lambda a, b: 6)
 
@@ -355,7 +355,7 @@ def test_ludo_bot_passes_turn_when_stuck(client, monkeypatch):
     """人机掷到非 6 且飞机全在基地：无可动子，回合交回真人。"""
     import asyncio
     from app.ws import _bot_do_turn
-    import app.ludo as ludo_mod
+    import app.game.ludo as ludo_mod
 
     monkeypatch.setattr(ludo_mod.random, "randint", lambda a, b: 3)
 

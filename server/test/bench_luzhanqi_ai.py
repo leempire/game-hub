@@ -31,8 +31,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app import luzhanqi as L                       # noqa: E402
-from app import luzhanqi_ai as AI                   # noqa: E402
+from app.game import luzhanqi as L                       # noqa: E402
+from app.game import luzhanqi_ai as AI                   # noqa: E402
 import luzhanqi_ai_v1 as OLD                        # noqa: E402
 
 

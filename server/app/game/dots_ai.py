@@ -15,7 +15,7 @@ The heuristic approach produces solid play within ~100ms.
 """
 
 import copy
-from app.dots import (
+from app.game.dots import (
     get_legal_edges,
     apply_move,
     is_valid_edge,

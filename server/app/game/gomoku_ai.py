@@ -6,7 +6,7 @@ Board: list[list[int]] (15×15), board[y][x], EMPTY=0 / BLACK=1 / WHITE=2.
 
 import copy
 import time
-from app.gomoku import (
+from app.game.gomoku import (
     BOARD_SIZE, EMPTY, BLACK, WHITE, DIRECTIONS,
     place_stone, check_win,
 )

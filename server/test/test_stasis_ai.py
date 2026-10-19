@@ -23,9 +23,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import stasis as st
-from app import stasis_ai as ai
-from app import stasis_map as M
+from app.game import stasis as st
+from app.game import stasis_ai as ai
+from app.game import stasis_map as M
 
 DORM = M.get_map("dorm")
 
