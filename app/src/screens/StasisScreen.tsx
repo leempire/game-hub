@@ -114,6 +114,20 @@ type Panel =
   | { kind: 'gate'; gate: string; mine: boolean }
   | { kind: 'pod' };
 
+/** 两份「id → 血量」表的逐字段浅比较（门血 / 闸门血，值都是一层扁平对象）。 */
+function sameHp(a: Record<string, object>, b: Record<string, object>): boolean {
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  for (const k of ka) {
+    const x = a[k] as Record<string, unknown>, y = b[k] as Record<string, unknown> | undefined;
+    if (!y) return false;
+    const fx = Object.keys(x);
+    if (fx.length !== Object.keys(y).length) return false;
+    for (const f of fx) if (x[f] !== y[f]) return false;
+  }
+  return true;
+}
+
 export default function StasisScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const navigation = useNavigation<any>();
@@ -443,8 +457,10 @@ export default function StasisScreen({ code, onLeave }: Props) {
           players: nextPlayers,
         };
       });
-      if (tick.doors) setDoorHp(tick.doors);
-      if (tick.gates) setGateHp(tick.gates);
+      // **数值没变就别换引用**：tick 每次都是新对象，直接 set 会让整层门（12~18 张
+      // SVG 贴图，`DoorLayer` 是 memo 的）每次都重画，而没被砸的时候门血根本不动。
+      if (tick.doors) setDoorHp((prev) => (sameHp(prev, tick.doors!) ? prev : tick.doors!));
+      if (tick.gates) setGateHp((prev) => (sameHp(prev, tick.gates!) ? prev : tick.gates!));
 
       // 用权威位置校正本地预演
       const mine = tick.players?.[String(myUidRef.current)];

@@ -548,7 +548,11 @@ export const BuildingLayer = memo(function BuildingLayer({
  *  （被静默体撞倒），现在撞倒不存在了（碰到即出局），于是这个姿势改成表达
  *  「躺下了」：**一眼能看出队友是不是已经进屋躺好**，这正是本作最要紧的一条状态。
  */
-export function HeroView({ color, name, mine, lying, size = 30 }: {
+/**
+ * `memo`：props 全是原始值。队友的角色原来跟着对局屏每次刷新都把 SVG 贴图重画一遍
+ * （位置走的是外层 Animated，跟这里无关），CPU 采样里 `HeroSprite` 排得很靠前。
+ */
+export const HeroView = memo(function HeroView({ color, name, mine, lying, size = 30 }: {
   color: string; name: string; mine: boolean; lying: boolean; size?: number;
 }) {
   return (
@@ -557,9 +561,12 @@ export function HeroView({ color, name, mine, lying, size = 30 }: {
       <HeroSprite color={color} lying={lying} size={size} />
     </View>
   );
-}
+});
 
-export function EntityView({ mood, level, hp, maxHp }: { mood: string; level: number; hp: number; maxHp: number }) {
+/** 血条每次挨打都变，贴图只随 `mood` 变 —— 贴图单独 memo，挨打时只重画血条。 */
+const EntitySpriteM = memo(EntitySprite);
+
+export const EntityView = memo(function EntityView({ mood, level, hp, maxHp }: { mood: string; level: number; hp: number; maxHp: number }) {
   const color = mood === 'retreat' ? stasisEntityRetreat
     : mood === 'overload' ? stasisEntityOverload : stasisEntity;
   const ratio = clampRatio(hp, maxHp);
@@ -569,10 +576,10 @@ export function EntityView({ mood, level, hp, maxHp }: { mood: string; level: nu
       <View style={styles.entityBar}>
         <View style={[styles.entityBarFill, { width: `${ratio * 100}%`, backgroundColor: color }]} />
       </View>
-      <EntitySprite size={36} mood={mood as 'normal' | 'retreat' | 'overload'} />
+      <EntitySpriteM size={36} mood={mood as 'normal' | 'retreat' | 'overload'} />
     </View>
   );
-}
+});
 
 // ── 摇杆 ────────────────────────────────────────────────
 

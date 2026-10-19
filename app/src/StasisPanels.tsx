@@ -19,7 +19,7 @@
 // 2. **前置条件必须写在弹窗里**。用户原话：「应该有个门的等级的前置条件，但是
 //    升级弹窗中看不出来，生物能够了也没法升级」—— `PodSheet` 的 `gateNote`
 //    就是为这句话存在的。
-import React from 'react';
+import React, { memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { withAlpha, colors, stasisBio, stasisAlloy,
   stasisAlert, stasisDoorOk, stasisDoorLow, stasisGold } from './theme';
@@ -61,7 +61,7 @@ function priceLabel(table: number[], level: number, res: 'bio' | 'alloy' = 'bio'
 
 // ── 建造 ────────────────────────────────────────────────
 
-export function BuildSheet({ visible, onClose, cell, onBuild, canAfford, built }: {
+function BuildSheetImpl({ visible, onClose, cell, onBuild, canAfford, built }: {
   visible: boolean; onClose: () => void;
   /** 要建在哪一格（`"x,y"`）。面板开着的时候格号不会变，所以直接收下。 */
   cell: string | null;
@@ -130,7 +130,7 @@ function rateTextOf(kind: string, level: number, asNext = false): string {
   return `每秒 ${mineRate(kind, level)} 生物能`;
 }
 
-export function BuildingSheet({ visible, onClose, cell, kind, level, onUpgrade, onDemolish }: {
+function BuildingSheetImpl({ visible, onClose, cell, kind, level, onUpgrade, onDemolish }: {
   visible: boolean; onClose: () => void;
   cell: string | null; kind: string | null; level: number;
   /** `alloy` 是**第 6 级起额外要的那份合金**（0 = 这一级只要生物能）——
@@ -204,7 +204,7 @@ export function BuildingSheet({ visible, onClose, cell, kind, level, onUpgrade, 
 
 // ── 气密门 ──────────────────────────────────────────────
 
-export function DoorSheet({ visible, onClose, rid, level, hp, max, mine, ownerUid, onUpgrade, onPatch }: {
+function DoorSheetImpl({ visible, onClose, rid, level, hp, max, mine, ownerUid, onUpgrade, onPatch }: {
   visible: boolean; onClose: () => void;
   rid: string | null; level: number; hp: number; max: number;
   /** 自己的门能升级；**队友的门只能远程修补**（这是合作机制的另一半）。 */
@@ -249,7 +249,7 @@ export function DoorSheet({ visible, onClose, rid, level, hp, max, mine, ownerUi
  * 「这是不是你的房」；② 破了**不能重建**（房间门破了房间会重置）；③ 修补它
  * 一律按「帮别人」的 1.5 倍算（引擎的 `patch(gate=...)`）。
  */
-export function GateSheet({ visible, onClose, gate, level, hp, max, mine,
+function GateSheetImpl({ visible, onClose, gate, level, hp, max, mine,
                             contrib, nameOf, onUpgrade, onPatch }: {
   visible: boolean; onClose: () => void;
   /** 闸门 id（`null` = 不显示）。 */
@@ -315,7 +315,7 @@ function contribRows(contrib: Record<string, { bio: number; alloy: number; acts:
 
 // ── 休眠舱 ──────────────────────────────────────────────
 
-export function PodSheet({ visible, onClose, bedLevel, doorLevel, lying, onLie, onUpgrade }: {
+function PodSheetImpl({ visible, onClose, bedLevel, doorLevel, lying, onLie, onUpgrade }: {
   visible: boolean; onClose: () => void;
   bedLevel: number;
   /** 自己那扇门现在的等级 —— 用来算「升床还差不差门」。**拿不到就不算门槛**
@@ -386,7 +386,7 @@ export function PodSheet({ visible, onClose, bedLevel, doorLevel, lying, onLie, 
 
 // ── 全站浮层：缩小看整层楼 ──────────────────────────────
 
-export function WholeStation({ visible, onClose, map, rooms, doorHp, gates, myUid, entity, nameOf, aiOf, seatColorOf, onPatch, onPatchGate }: {
+function WholeStationImpl({ visible, onClose, map, rooms, doorHp, gates, myUid, entity, nameOf, aiOf, seatColorOf, onPatch, onPatchGate }: {
   visible: boolean; onClose: () => void;
   /** 这一局的几何 —— 房间清单与闸门位置都从它来（v9 起没有模块级常量了）。 */
   map: MapGeom;
@@ -478,7 +478,7 @@ export function WholeStation({ visible, onClose, map, rooms, doorHp, gates, myUi
 
 // ── 确认（弃守 / 离开）──────────────────────────────────
 
-export function ConfirmDialog({ kind, onCancel, onConfirm }: {
+function ConfirmDialogImpl({ kind, onCancel, onConfirm }: {
   /** `surrender` 弃守 / `leave` 离开对局；`null` 表示不显示。 */
   kind: 'surrender' | 'leave' | null;
   onCancel: () => void;
@@ -506,7 +506,7 @@ export function ConfirmDialog({ kind, onCancel, onConfirm }: {
 
 // ── 结算 ────────────────────────────────────────────────
 
-export function ResultDialog({ visible, game, nameOf, seatColorOf, onBack }: {
+function ResultDialogImpl({ visible, game, nameOf, seatColorOf, onBack }: {
   visible: boolean;
   game: StasisPayload | null;
   nameOf: (uid: number) => string;
@@ -580,3 +580,22 @@ const styles = StyleSheet.create({
   ovAi: { color: stasisGold, fontSize: 10, fontWeight: '700', marginLeft: -6, marginRight: 4 },
   ovLv: { color: ON_SPACE_SOFT, fontSize: 11 },
 });
+
+
+// ── 关着的面板不重渲染 ───────────────────────────────────────
+//
+// 这些面板**常驻挂载**（为了保留开关动画），而对局屏每 2.5 Hz 刷新一次 ——
+// 原来每次刷新都要把 7 个关着的面板连同内容（建筑表、全站列表、结算排名）
+// 整个重建一遍，CPU 采样里它们加起来比地图本身还贵。比较函数只放过一种情况：
+// **前后两次都是关着的** → 跳过；只要有一次开着（打开、关闭的那一帧、开着时
+// 内容在变）就照常渲染，所以关闭动画与开着时的实时数据都不受影响。
+const whileHidden = (a: { visible: boolean }, b: { visible: boolean }) => !a.visible && !b.visible;
+export const BuildSheet = memo(BuildSheetImpl, whileHidden);
+export const BuildingSheet = memo(BuildingSheetImpl, whileHidden);
+export const DoorSheet = memo(DoorSheetImpl, whileHidden);
+export const GateSheet = memo(GateSheetImpl, whileHidden);
+export const PodSheet = memo(PodSheetImpl, whileHidden);
+export const WholeStation = memo(WholeStationImpl, whileHidden);
+export const ResultDialog = memo(ResultDialogImpl, whileHidden);
+export const ConfirmDialog = memo(ConfirmDialogImpl,
+  (a, b) => a.kind == null && b.kind == null);

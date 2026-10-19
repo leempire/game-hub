@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from './theme';
@@ -426,12 +426,20 @@ interface GameHelpButtonProps {
   size?: number;
 }
 
-export function GameHelpButton({ game, size = 28 }: GameHelpButtonProps) {
+function GameHelpButtonImpl({ game, size = 28 }: GameHelpButtonProps) {
   const [visible, setVisible] = useState(false);
   useModalBackGuard(visible, () => setVisible(false));
 
   const entry = GAME_HELP[game];
   const iconSize = Math.round(size * 0.7);
+  // 规则正文**只在弹窗打开时才建**：深空休眠的规则有十几节、每节都要过一遍
+  // `boldSegments`，原来对局屏每刷新一次（2.5 Hz）就整份重建一遍，哪怕弹窗是关着的。
+  const sections = useMemo(() => (visible ? entry.sections.map((sec, idx) => (
+    <View key={idx} style={styles.section}>
+      <Text style={styles.heading}>{sec.heading}</Text>
+      <Text style={styles.body}>{boldSegments(sec.body, styles.bodyBold)}</Text>
+    </View>
+  )) : null), [visible, entry]);
 
   return (
     <>
@@ -460,12 +468,7 @@ export function GameHelpButton({ game, size = 28 }: GameHelpButtonProps) {
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.scroll} showsVerticalScrollIndicator>
-              {entry.sections.map((sec, idx) => (
-                <View key={idx} style={styles.section}>
-                  <Text style={styles.heading}>{sec.heading}</Text>
-                  <Text style={styles.body}>{boldSegments(sec.body, styles.bodyBold)}</Text>
-                </View>
-              ))}
+              {sections}
               <View style={styles.bottomSpacer} />
             </ScrollView>
           </View>
@@ -474,6 +477,12 @@ export function GameHelpButton({ game, size = 28 }: GameHelpButtonProps) {
     </>
   );
 }
+
+/**
+ * `memo`：props 只有 `game`/`size` 两个原始值，对局屏怎么刷新都不该带着它重渲染
+ * （每个对局屏都挂着一个）。
+ */
+export const GameHelpButton = memo(GameHelpButtonImpl);
 
 const styles = StyleSheet.create({
   trigger: {
