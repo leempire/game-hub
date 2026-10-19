@@ -484,6 +484,15 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   §1.5.1 里那张表都复现不出来，只能改用「同策略对照」代替。
   **16 局的样本太吵**（同一个常量组合能跑出 12% 和 56% 两个数），定档位至少 24 局、
   比两个候选值至少 48 局。
+- **卡顿排查四条结论（2026-10-19，Windows + Edge 4 倍降速实测）**：
+  ①**web 服务要跑生产模式 bundle**（`scripts/start.sh` 默认 `--no-dev --minify`）——
+  手机浏览器玩家连的就是它，开发版每 8 秒卡 2.8 秒、生产版 0；②**远端单位必须插值**：
+  队友/静默体走 `remoteRef` 的缓冲一帧插值（段长取实测 tick 间隔，>2 格吸附），
+  原来直接 `setValue` 只有 5 帧/秒；③**常驻挂载的面板用「前后都关着就跳过」的 memo**
+  （`StasisPanels` 末尾的 `whileHidden`），门血/闸门血**数值没变不换引用**（`sameHp`）；
+  ④**服务端 tick 按截止时间排、广播走逐连接发送链**（`ws._stasis_enqueue`）：一个卡住
+  的连接只会丢自己的 tick 快照，不会再拖住全房间；状态/事件/终局照样必达保序。
+  回归：`test_stasis_send.py`。**别在 tick 路径上再写 `await ws.send_json`。**
 - **这一屏的「帧率」是自己设的上限，不是性能上限**（v8，用户报「帧率太低、移动的
   手感不好」）：主循环原来是 `setInterval(..., 33)`，把画面更新钉死在 30 Hz，而
   rAF 实测恒为 60.0 fps / p95 16.7ms（主线程根本不忙）。用 MutationObserver 数
