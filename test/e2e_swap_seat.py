@@ -99,13 +99,22 @@ def main():
             assert player_order(pa) == [ua, ub], '对方还没同意就换了座位'
             ok('B 收到换位弹窗；未同意前座位不动')
 
+            # 待答态：发起方那颗按钮要**停在**「等待同意」。服务端对真人目标会立刻回
+            # 一条 `accepted: null` 的「已转达」ack —— 曾经拿它清掉待答态，于是按钮
+            # 只闪一帧就变回「换位」，玩家以为没发出去又点一次。
+            assert pa.get_by_text('等待同意', exact=True).count() == 1, \
+                '发起方没显示「等待同意」（待答态一帧就没了）'
+            ok('发起方停在「等待同意」上')
+
             # ② 同意 → 双方看到的顺序都换过来
             pb.locator('[data-testid="swap-accept"]').click()
             pb.get_by_text('点击复制', exact=True).first.wait_for(timeout=10000)
             pa.wait_for_timeout(1200)
             assert player_order(pa) == [ub, ua], f'A 侧顺序没变：{player_order(pa)}'
             assert player_order(pb) == [ub, ua], f'B 侧顺序没变：{player_order(pb)}'
-            ok('同意后双方座位顺序都对调了（广播到位）')
+            assert pa.get_by_text('等待同意', exact=True).count() == 0, \
+                '拿到最终答复后「等待同意」没复位'
+            ok('同意后双方座位顺序都对调了（广播到位），待答态复位')
 
             # ③ 人机自动同意（人机是列表里最后一位，它的「换位」按钮也是最后一个）
             pa.get_by_text('添加人机', exact=True).click()

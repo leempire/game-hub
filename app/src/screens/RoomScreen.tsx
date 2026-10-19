@@ -136,7 +136,11 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
       });
     };
     const handleSwapResult = (msg: SocketMessage) => {
-      setSwapWaitTo(null);
+      // `accepted === null` 是「请求已转达、对方还没答复」那条 ack（服务端对真人目标
+      // 立刻回这一条）——**不能拿它清待答态**，否则「等待同意」只存在一帧，
+      // 按钮闪回「换位」、玩家以为没发出去又点一次。只有拿到最终答复（同意/拒绝/
+      // 人机自动同意）才复位。
+      if (msg.accepted !== null) setSwapWaitTo(null);
       notify('换位', (msg.message as string) || '换位请求已处理');
     };
 
@@ -377,17 +381,21 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
               {isLobbyStatus && p.id !== user?.id && (
                 <TouchableOpacity
                   testID={`swap-seat-${p.id}`}
-                  style={styles.swapSeatBtn}
+                  style={[styles.rowBtn, swapWaitTo === p.id ? styles.pendingBtn : styles.swapSeatBtn]}
                   onPress={() => handleSwapRequest(p)}
                 >
-                  <Text style={styles.swapSeatBtnText}>
+                  <Text style={[styles.rowBtnText, swapWaitTo === p.id ? styles.pendingBtnText : styles.swapSeatBtnText]}>
                     {swapWaitTo === p.id ? '等待同意' : '换位'}
                   </Text>
                 </TouchableOpacity>
               )}
               {isHost && p.is_bot && isLobbyStatus && (
-                <TouchableOpacity style={styles.removeBotBtn} onPress={() => handleRemoveBot(p.id)}>
-                  <Text style={styles.removeBotBtnText}>移除</Text>
+                <TouchableOpacity
+                  testID={`remove-bot-${p.id}`}
+                  style={[styles.rowBtn, styles.removeBotBtn]}
+                  onPress={() => handleRemoveBot(p.id)}
+                >
+                  <Text style={[styles.rowBtnText, styles.removeBotBtnText]}>移除</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -602,20 +610,27 @@ const styles = StyleSheet.create({
   difficultyChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   difficultyChipText: { fontSize: fontSize.sm, color: colors.text, fontWeight: '600' },
   difficultyChipTextActive: { color: colors.white },
-  // 换位按钮：**44pt 高**（HIG 主控件下限）。它是等待大厅里最常用的一条动作，
-  // 不跟着「移除」那颗小药丸一起缩 —— 玩家列表每行因此高一点，值得。
-  swapSeatBtn: {
+  // 行内动作按钮（换位 / 移除）：**同一颗按钮的两种语义** —— 同高、同圆角、同边框
+  // 粗细、同内边距，只有颜色与文字不同。它们并排出现在同一个玩家行里，形状一致才
+  // 读得出是一个按钮组（旧版是「一颗 44pt 的空框 + 一颗 17pt 的红药丸」，两码事）。
+  // **44pt 高**（HIG 主控件下限）：这是等待大厅里最常用的两条动作，不跟着状态胶囊缩。
+  rowBtn: {
     minHeight: 44,
-    minWidth: 64,
+    minWidth: 60,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.sm + 2,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.borderStrong,
     backgroundColor: colors.bg,
   },
-  swapSeatBtnText: { color: colors.primary, fontSize: fontSize.sm, fontWeight: '600' },
+  rowBtnText: { fontSize: fontSize.sm, fontWeight: '600' },
+  swapSeatBtn: { borderColor: colors.primary },
+  swapSeatBtnText: { color: colors.primary },
+  // 「等待同意」是**已发出、还没结果**的待答态：降一档成中性色，不再和可点的
+  // 「换位」抢眼（仍然可点 —— 点了就是再发一次请求，不是死按钮）。
+  pendingBtn: { borderColor: colors.borderStrong, backgroundColor: colors.card },
+  pendingBtnText: { color: colors.textMuted },
   swapBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -645,18 +660,8 @@ const styles = StyleSheet.create({
   swapRejectText: { color: colors.text, fontSize: fontSize.md, fontWeight: '600' },
   swapAccept: { backgroundColor: colors.primary },
   swapAcceptText: { color: colors.white, fontSize: fontSize.md, fontWeight: '600' },
-  removeBotBtn: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.danger,
-  },
-  removeBotBtnText: {
-    color: colors.danger,
-    fontSize: fontSize.xs,
-    fontWeight: '600',
-  },
+  removeBotBtn: { borderColor: colors.danger },
+  removeBotBtnText: { color: colors.danger },
   addBotBtn: {
     backgroundColor: colors.bg,
     borderWidth: 1,
@@ -667,13 +672,20 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     fontWeight: '600',
   },
-  playerBadges: { flexDirection: 'row', gap: spacing.xs },
+  // 玩家行右侧那一簇（状态胶囊 + 两颗动作按钮）。
+  // **`alignItems: 'center'` 是必须的**：默认的 `stretch` 会把状态胶囊拉满整行高度，
+  // 于是「已准备」被撑成一枚 52×44 的绿色大圆饼（截图实测），而旁边的按钮只有 44 高
+  // —— 三颗控件三种尺寸，正是这一行难看的根源。
+  playerBadges: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // 状态胶囊：**标签比按钮小一档**（22 高 vs 44 高）是常见的层级表达，所以它只居中、
+  // 不跟着按钮一起长高。`lineHeight` 写死是为了让高度不随平台默认行高漂移。
   statusPill: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 3,
     borderRadius: radius.full,
     fontSize: fontSize.xs,
     fontWeight: '600',
+    lineHeight: 16,
     overflow: 'hidden',
     color: colors.white,
   },
