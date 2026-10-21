@@ -270,6 +270,7 @@ parse_targets() {  # 把参数里的服务名解析成 TARGETS 数组（默认�
             web|expo)       TARGETS+=(web) ;;
             all)            TARGETS=(backend web) ;;
             --clear|-c)     ;;
+            --dev)          ;;
             -h|--help)      ;;
             *)              die "未知参数：$a（可用：backend / web / all）" ;;
         esac

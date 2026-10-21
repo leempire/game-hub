@@ -159,6 +159,39 @@ export function onConfirmLeave(handler: () => void): () => void {
   return () => window.removeEventListener('gh:confirm-leave', handler);
 }
 
+// 网络恢复（浏览器 `online` 事件）：socket.ts 借它立刻重连。原生端 no-op。
+export function onWebOnline(handler: () => void): () => void {
+  if (!IS_WEB) return () => {};
+  window.addEventListener('online', handler);
+  return () => window.removeEventListener('online', handler);
+}
+
+// 网页端的键盘操作（俄罗斯方块、2048 这类「按方向」的对局屏共用）。原生端没有
+// 物理键盘，什么也不做。处理器返回 true 表示「这个键我用了」→ preventDefault，
+// 免得方向键 / 空格顺带把页面滚走。输入框里的按键、带 Ctrl/Alt/Meta 的组合键
+// 一律不管（不抢浏览器快捷键）。单字符键统一成小写传进来。
+export function useWebKeys(
+  handler: (key: string, e: KeyboardEvent) => boolean | void,
+  enabled = true,
+): void {
+  const ref = useRef(handler);   // 处理器每次渲染都是新闭包；监听只挂一次
+  ref.current = handler;
+  useEffect(() => {
+    if (!IS_WEB || !enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      // Ctrl/⌘+Z 是 2048 的撤销（单人局），其余组合键一律交给浏览器
+      const isUndo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z';
+      if (e.altKey || ((e.ctrlKey || e.metaKey) && !isUndo)) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (ref.current(key, e)) e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enabled]);
+}
+
 // 弹窗打开期间，返回键优先关闭弹窗
 export function useModalBackGuard(visible: boolean, close: () => void): void {
   const closeRef = useRef(close);

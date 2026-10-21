@@ -1301,9 +1301,23 @@ async def _stasis_tick_loop(code: str):
     # 延迟导入：ws 模块 import 了 room_manager，模块级导入会成环。
     from app import ws as _ws
     ticks = 0
+    # **按截止时间排 tick，不是「干完活再睡 200ms」**。原来每轮固定
+    # `sleep(0.2)`，处理耗时与定时器误差全部累加：Windows 上实测平均间隔
+    # 205ms（定时器粒度 ~15.6ms），而引擎每轮按 200ms 推进 —— 游戏时间比真实
+    # 时间慢 2.6%，客户端按真实时间预演，于是每个 tick 都被往回拽一截。
+    # 落后超过一个 tick（进程卡顿、热重启）就**重新对齐、不补帧**：补帧等于让
+    # 静默体在一瞬间连走好几步。
+    period = STASIS_TICK_MS / 1000
+    loop = asyncio.get_running_loop()
+    next_at = loop.time()
     try:
         while True:
-            await asyncio.sleep(STASIS_TICK_MS / 1000)
+            next_at += period
+            delay = next_at - loop.time()
+            if delay < -period:
+                next_at = loop.time()
+                delay = 0
+            await asyncio.sleep(max(0.0, delay))
             room = _rooms.get(code)
             if room is None or room["status"] != "playing" \
                     or room["game"] != "stasis":

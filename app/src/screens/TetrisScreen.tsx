@@ -16,9 +16,8 @@ import {
 } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
-import { useModalBackGuard, onConfirmLeave } from '../backGuard';
+import { useModalBackGuard, onConfirmLeave, useWebKeys } from '../backGuard';
 import { GameHelpButton } from '../help';
-import { useWebKeys } from '../useWebKeys';
 import {
   TetrisPiece, TetrisRules, TetrisLeaderRow, gravityMs, GARBAGE_LABEL,
   ID_TO_PIECE, GARBAGE_ID, cellsOf, stepDown, movePiece, rotatePiece,
@@ -266,8 +265,6 @@ export default function TetrisScreen({ code, onLeave }: Props) {
     pendingRef.current.push('hold');
     flush();
   }, [flush, flash]);
-  const holdNowRef = useRef(holdNow);
-  holdNowRef.current = holdNow;
 
   // ── 重力：固定节拍，与移动无关 ────────────────────────────
   // 踩坑预案：如果把定时器挂在 cur/board 上，每动一下都会重置计时 →
@@ -281,6 +278,21 @@ export default function TetrisScreen({ code, onLeave }: Props) {
     const id = setInterval(() => stepRef.current(), gravityMs(level));
     return () => clearInterval(id);
   }, [playing, awaiting, level]);
+
+  // ── 网页键盘：←→/AD 移动、↑/W/X 顺时针、Z 逆时针、↓/S 软降、C 暂存、空格落底 ──
+  // 按住方向键靠系统的自动连发；落底/暂存不连发（按住空格会把后面几块全砸下去）
+  useWebKeys((key, e) => {
+    switch (key) {
+      case 'ArrowLeft': case 'a': act('left'); return true;
+      case 'ArrowRight': case 'd': act('right'); return true;
+      case 'ArrowUp': case 'w': case 'x': act('rotate_cw'); return true;
+      case 'z': act('rotate_ccw'); return true;
+      case 'ArrowDown': case 's': stepAndMaybeLock(); return true;
+      case 'c': if (!e.repeat) holdNow(); return true;
+      case ' ': if (!e.repeat) act('hard_drop'); return true;
+      default: return false;
+    }
+  }, playing && confirm === null);
 
   // ── WS ────────────────────────────────────────────────────
   useEffect(() => {
@@ -427,24 +439,6 @@ export default function TetrisScreen({ code, onLeave }: Props) {
   actRef.current = act;
   const stepNowRef = useRef(stepAndMaybeLock);
   stepNowRef.current = stepAndMaybeLock;
-
-  // Web 键盘：←→ 移动、↓ 软降、↑/X 顺时针、Z 逆时针、空格硬降。
-  // 与屏幕按钮/手势走同一组 actRef / stepNowRef，不另起一套本地规则。
-  useWebKeys((event) => {
-    const key = event.key;
-    if (key === 'ArrowLeft') { event.preventDefault(); actRef.current('left'); }
-    else if (key === 'ArrowRight') { event.preventDefault(); actRef.current('right'); }
-    else if (key === 'ArrowDown') { event.preventDefault(); stepNowRef.current(); }
-    else if (key === 'ArrowUp' || key === 'x' || key === 'X') {
-      event.preventDefault(); actRef.current('rotate_cw');
-    } else if (key === 'z' || key === 'Z') {
-      event.preventDefault(); actRef.current('rotate_ccw');
-    } else if (key === 'c' || key === 'C') {
-      event.preventDefault(); holdNowRef.current();
-    } else if (key === ' ') {
-      event.preventDefault(); actRef.current('hard_drop');
-    }
-  });
 
   /** 本次手势里**已经兑现**的横向位移（px）——见 `applyDrag`。 */
   const consumedRef = useRef(0);

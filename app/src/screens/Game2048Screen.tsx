@@ -12,9 +12,8 @@ import { RoomSocket, SocketMessage } from '../socket';
 import { colors, spacing, radius, fontSize, g2048Tile, playerColors, withAlpha } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
-import { useModalBackGuard, onConfirmLeave } from '../backGuard';
+import { useModalBackGuard, onConfirmLeave, useWebKeys } from '../backGuard';
 import { GameHelpButton } from '../help';
-import { useWebKeys } from '../useWebKeys';
 
 interface LeaderRow {
   user_id: number;
@@ -550,25 +549,26 @@ export default function Game2048Screen({ code, onLeave }: Props) {
     socketRef.current?.send({ type: 'move2048', direction });
   }, [game]);
 
-  // Web 键盘：方向键与屏幕方向键走同一条 sendMove（PC 浏览器不必再点按钮）
+  // 网页键盘：方向键 / WASD 走子，Ctrl/⌘+Z 撤销。
+  // 一次按键只走一步（按住不连发，2048 连发等于乱走）；撤销只在单人局可用。
+  const KEY_DIR: Record<string, string> = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    w: 'up', s: 'down', a: 'left', d: 'right',
+  };
   const sendMoveRef = useRef(sendMove);
   sendMoveRef.current = sendMove;
   const undoRef = useRef(undoMove);
   undoRef.current = undoMove;
-  useWebKeys((event) => {
-    // Ctrl/⌘ + Z 撤销（桌面浏览器；移动端用底部按钮）
-    if ((event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'Z')) {
-      event.preventDefault();
+  useWebKeys((key, e) => {
+    if ((e.ctrlKey || e.metaKey) && key === 'z') {
       undoRef.current();
-      return;
+      return true;
     }
-    const dir = {
-      ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
-    }[event.key];
-    if (!dir) return;
-    event.preventDefault();
-    sendMoveRef.current(dir);
-  });
+    const dir = KEY_DIR[key];
+    if (!dir) return false;
+    if (!e.repeat) sendMove(dir);
+    return true;
+  }, !!game && !game.winner && !game.game_over && confirm === null);
 
   // ── 排行榜浮层：可拖动 ───────────────────────────────────
   // 浮层展开后会盖住棋盘一角，所以允许拖走。拖动只由「胶囊」和「面板标题行」两个

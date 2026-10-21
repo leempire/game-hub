@@ -75,6 +75,7 @@ export function CreateRoomModal({
               value={name}
               onChangeText={onChangeName}
               placeholder="房间名称（可选）"
+              maxLength={20}
               placeholderTextColor={colors.textFaint}
             />
             <TextInput
@@ -82,6 +83,7 @@ export function CreateRoomModal({
               value={password}
               onChangeText={onChangePassword}
               placeholder="房间密码（可选）"
+              maxLength={32}
               placeholderTextColor={colors.textFaint}
               secureTextEntry
               returnKeyType="go"

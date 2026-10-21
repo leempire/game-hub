@@ -246,6 +246,15 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
 - **tick 内零写盘**，只刷内存的 `last_activity`；每隔若干 tick 落一次关键帧；
   离散动作才立即落盘。**瞬态输入（如移动方向）不落盘。**
 - **广播分层**（高频动态 / 低频布局 / 立即事件），不要把全量状态塞进每个 tick。
+- **卡顿排查四条结论（2026-10-19，Windows + Edge 4 倍降速实测）**：
+  ①**web 服务要跑生产模式 bundle**（`scripts/start.sh` 默认 `--no-dev --minify`）——
+  手机浏览器玩家连的就是它，开发版每 8 秒卡 2.8 秒、生产版 0；②**远端单位必须插值**：
+  队友/静默体走 `remoteRef` 的缓冲一帧插值（段长取实测 tick 间隔，>2 格吸附），
+  原来直接 `setValue` 只有 5 帧/秒；③**常驻挂载的面板用「前后都关着就跳过」的 memo**
+  （`StasisPanels` 末尾的 `whileHidden`），门血/闸门血**数值没变不换引用**（`sameHp`）；
+  ④**服务端 tick 按截止时间排、广播走逐连接发送链**（`ws._stasis_enqueue`）：一个卡住
+  的连接只会丢自己的 tick 快照，不会再拖住全房间；状态/事件/终局照样必达保序。
+  回归：`test_stasis_send.py`。**别在 tick 路径上再写 `await ws.send_json`。**
 - 将来做炸弹人/贪吃蛇这类需要 tick 的游戏，可以复用这套骨架；能不用 tick 的
   （如俄罗斯方块的「客户端攒动作、服务端重放」）仍然优先不用。
 
@@ -350,6 +359,7 @@ team_tools 50031/50035/50040…），手写 `ps aux | grep uvicorn | xargs kill`
 scripts/status.sh                    # 进程、端口、HTTP 探活、日志位置
 scripts/start.sh                     # 拉起没在跑的服务（已在跑的跳过）
 scripts/start.sh web --clear         # expo 加 --clear（Metro 漏更时）
+scripts/start.sh web --dev           # 默认是生产模式 bundle（--no-dev --minify，玩家连的就是它）；调试才加 --dev
 scripts/restart.sh backend           # 改 server/ 代码或 config.json 后必须执行
 scripts/stop.sh                      # 停全部
 tail -f tmp/log/backend.log          # 服务日志；pid 在 tmp/run/*.pid
@@ -401,6 +411,23 @@ curl -s http://127.0.0.1:50541/api/app/version
   排队、onopen 补发，对局内动作不排队防过期。
 - **`socket.ts` 的 `try` 只许包 `JSON.parse`，不许包 `dispatch`（勿改回去）**：
   静默 try 会把「崩溃」伪装成「功能没做」（地图全黑、控制台一行日志都没有）。
+- **服务端处理器里给某个连接发消息一律 `await _send_ws(ws, msg)`，不许裸写 `ws.send_json`**：
+  接收循环把 `_handle_message` 包在 `try` 里，异常一冒上来就走掉线流程。给**对手**发时
+  对手的连接可能刚断、还没注销，裸 `send_json` 一抛就把**正在操作的这个人**踢下线
+  （还起 120 秒判负计时）。`_send_ws` 走发送链、失败即丢；处理器自己的异常也只作废
+  那一条消息并 `logging.exception`，连接保留。回归在 `test_ws_resilience.py`。
+- **`RoomSocket` 的重连不设次数上限**（退避封顶 30 秒）；60 秒没收到任何消息就判半死
+  并重连（服务端每个 ping 都回 pong）；回到前台（AppState）与网页 `online` 立刻叫醒；
+  4001/4003/4004 是服务端的拒绝，不再重连。**暂停中的连接不查不叫醒**——它可能正被
+  同一用户的新连接顶替着，收不到 pong 是正常的。网页键盘统一用 backGuard 的
+  `useWebKeys`（俄罗斯方块、2048 在用）。
+- **token 每次都查库**（`security._verify`）：用户还在、没被封、`pv`（密码盐的指纹）
+  与库里一致才放行 —— 改密码当场作废所有旧会话，封号当场断开 WS（`ws.kick_user`，
+  关闭码 4001）。**没有 `pv` 的老 token 放行到自然过期**（7 天），别改成拒绝，否则
+  一上线全员被踢回登录页。登录失败按 (用户名, IP) 限流（10 次 / 10 分钟，内存里，
+  重启清空）。昵称 ≤16、房名 ≤20、房间密码 ≤32、新密码 6-32 都在**服务端**校验
+  （客户端的 `maxLength` 只是体验）。客户端只把「带着 token 的请求」的 401 当成
+  会话失效 —— 登录接口密码错也回 401。回归 `test_auth_security.py`。
 - **任何点击都必须有反馈**：不能靠 `disabled`（RNW 下等于 `pointer-events:none`，点了连
   提示都没有）、不能只置灰；服务端拒绝要回一句中文错误，别让玩家看到「点了没反应」。
 - **必须被看见的状态用 `position:absolute` 盖屏**：不要挂在固定高度内容的底部，

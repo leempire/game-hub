@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from './theme';
@@ -164,7 +164,7 @@ export const GAME_HELP: Record<GameKey, HelpEntry> = {
       },
       {
         heading: '操作方式',
-        body: '在棋盘上滑动（上下左右）或点击方向按钮，所有方块会沿滑动方向移动到底。相邻且数值相同的方块会合并为两倍数值的新方块。每次滑动每格最多合并一次。每次滑动后会随机出现一个新方块（90% 概率为 2，10% 概率为 4）。网页版可以用方向键，Ctrl/⌘+Z 撤销。',
+        body: '在棋盘上滑动（上下左右）或点击方向按钮，所有方块会沿滑动方向移动到底。相邻且数值相同的方块会合并为两倍数值的新方块。每次滑动每格最多合并一次。每次滑动后会随机出现一个新方块（90% 概率为 2，10% 概率为 4）。电脑网页上也可以用方向键或 WASD，Ctrl/⌘+Z 撤销。',
       },
       {
         heading: '撤销与个人最佳',
@@ -189,7 +189,7 @@ export const GAME_HELP: Record<GameKey, HelpEntry> = {
       },
       {
         heading: '操作方式',
-        body: '单击棋盘 = 旋转；左右拖动棋盘 = 方块跟着手指实时移动，拖过几格就走几格；下滑软降、上滑旋转。底部另有左移 / 旋转 / 下移 / 右移按钮，「直接落底」把方块一把砸到底（虚线框是它将要落到的位置）。右侧「暂存」框可以点：把当前方块存起来、换出暂存的方块（每块限一次，换出来的方块从顶部重新落下）。网页版还支持键盘：←→ 移动、↓ 软降、↑/X 顺时针、Z 逆时针、C 暂存、空格直接落底。方块会随等级自动下落，等级越高掉得越快。',
+        body: '单击棋盘 = 旋转；左右拖动棋盘 = 方块跟着手指实时移动，拖过几格就走几格；下滑软降、上滑旋转。底部另有左移 / 旋转 / 下移 / 右移按钮，「直接落底」把方块一把砸到底（虚线框是它将要落到的位置）。右侧「暂存」框可以点：把当前方块存起来、换出暂存的方块（每块限一次，换出来的方块从顶部重新落下）。电脑网页还支持键盘：←→/AD 移动、↑/W/X 顺时针、Z 逆时针、↓/S 软降、C 暂存、空格直接落底。方块会随等级自动下落，等级越高掉得越快。',
       },
       {
         heading: '消行与得分',
@@ -438,12 +438,20 @@ interface GameHelpButtonProps {
   size?: number;
 }
 
-export function GameHelpButton({ game, size = 28 }: GameHelpButtonProps) {
+function GameHelpButtonImpl({ game, size = 28 }: GameHelpButtonProps) {
   const [visible, setVisible] = useState(false);
   useModalBackGuard(visible, () => setVisible(false));
 
   const entry = GAME_HELP[game];
   const iconSize = Math.round(size * 0.7);
+  // 规则正文**只在弹窗打开时才建**：深空休眠的规则有十几节、每节都要过一遍
+  // `boldSegments`，原来对局屏每刷新一次（2.5 Hz）就整份重建一遍，哪怕弹窗是关着的。
+  const sections = useMemo(() => (visible ? entry.sections.map((sec, idx) => (
+    <View key={idx} style={styles.section}>
+      <Text style={styles.heading}>{sec.heading}</Text>
+      <Text style={styles.body}>{boldSegments(sec.body, styles.bodyBold)}</Text>
+    </View>
+  )) : null), [visible, entry]);
 
   return (
     <>
@@ -480,12 +488,7 @@ export function GameHelpButton({ game, size = 28 }: GameHelpButtonProps) {
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.scroll} showsVerticalScrollIndicator>
-              {entry.sections.map((sec, idx) => (
-                <View key={idx} style={styles.section}>
-                  <Text style={styles.heading}>{sec.heading}</Text>
-                  <Text style={styles.body}>{boldSegments(sec.body, styles.bodyBold)}</Text>
-                </View>
-              ))}
+              {sections}
               <View style={styles.bottomSpacer} />
             </ScrollView>
           </View>
@@ -494,6 +497,12 @@ export function GameHelpButton({ game, size = 28 }: GameHelpButtonProps) {
     </>
   );
 }
+
+/**
+ * `memo`：props 只有 `game`/`size` 两个原始值，对局屏怎么刷新都不该带着它重渲染
+ * （每个对局屏都挂着一个）。
+ */
+export const GameHelpButton = memo(GameHelpButtonImpl);
 
 const styles = StyleSheet.create({
   trigger: {
