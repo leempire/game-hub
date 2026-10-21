@@ -440,12 +440,20 @@ export function GameHelpButton({ game, size = 28 }: GameHelpButtonProps) {
         style={[styles.trigger, { width: size, height: size, borderRadius: size / 2 }]}
         onPress={() => setVisible(true)}
         activeOpacity={0.7}
-        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        // 视觉 28px 太小，靠 hitSlop 撑到 44×44（HIG 下限）
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        accessibilityRole="button"
+        accessibilityLabel={`${entry.title}规则帮助`}
       >
         <Ionicons name="help-circle-outline" size={iconSize} color={colors.primary} />
       </TouchableOpacity>
 
-      <Modal visible={visible} transparent animationType="fade">
+      <Modal
+        visible={visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVisible(false)}
+      >
         <View style={styles.overlay}>
           <View style={styles.card}>
             <View style={styles.headerRow}>

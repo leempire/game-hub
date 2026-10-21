@@ -22,7 +22,7 @@ import {
 import {
   XIANGQI_ROWS, XIANGQI_COLS, isRedPiece, pieceGlyph,
 } from '../xiangqiBoard';
-import { NUMBER_COLORS } from '../minesweeper';
+import { NUMBER_COLORS, formatMineElapsed } from '../minesweeper';
 import { ID_TO_PIECE, GARBAGE_ID } from '../tetris';
 import { notify, formatDate } from '../utils';
 // 游戏名的唯一来源（以前这里另有一份 GAME_LABELS，与主页卡片各写一遍）
@@ -479,7 +479,7 @@ function MineRanking({ ranking, reason }: {
   ranking: Array<{
     seat: number; username: string; nickname: string | null;
     alive: boolean; correct_flags: number; wrong_flags: number;
-    revealed_count: number; rank: number;
+    revealed_count: number; elapsed_ms?: number | null; rank: number;
   }>;
   reason: string | null;
 }) {
@@ -500,6 +500,7 @@ function MineRanking({ ranking, reason }: {
           </Text>
           <Text style={mineRankStyles.stat}>
             标雷{entry.correct_flags} 翻开{entry.revealed_count}
+            {formatMineElapsed(entry.elapsed_ms) ? ` · 用时${formatMineElapsed(entry.elapsed_ms)}` : ''}
           </Text>
         </View>
       ))}

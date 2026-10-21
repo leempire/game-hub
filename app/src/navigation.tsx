@@ -174,8 +174,10 @@ function MainTabs() {
         tabBarStyle: {
           borderTopColor: colors.border,
           backgroundColor: colors.card,
-          paddingBottom: 4,
-          height: 56,
+          // 56 是内容高度；底部安全区要另加（iPhone home indicator /
+          // Android 手势条），否则标签会被系统条压住。
+          paddingBottom: insets.bottom + 4,
+          height: 56 + insets.bottom,
         },
       })}
     >

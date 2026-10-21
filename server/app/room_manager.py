@@ -743,6 +743,7 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
                 gs["reason"] = "eliminated"
                 from app.game.minesweeper import _reveal_all_mines
                 _reveal_all_mines(gs)
+                _mine_finalize_times(gs)
                 players_info = _get_players_info(room)
                 ranking = mine_compute_ranking(gs, players_info)
                 _set_mine_game_over(room, ranking)
@@ -2452,6 +2453,43 @@ def _apply_weapon_shots(
     return {**payload, "game_over": None}
 
 
+def _mine_touch_time(gs: dict, seat: int) -> None:
+    """Record a successful reveal/chord on the wall clock.
+
+    The engine itself never reads the clock（它要能在单测里瞬间跑完）；计时只在
+    房间层写入，引擎只负责存与排序。`elapsed_ms` 的语义是「本局第一次翻开 →
+    该玩家最后一次翻开」的跨度，不是「从开局到现在」——后者会让先开始玩的人
+    在平局时吃亏，也会把等待时间算进去。
+    """
+    now_ms = int(_time.time() * 1000)
+    if gs.get("started_at_ms") is None:
+        gs["started_at_ms"] = now_ms
+    player = gs.get("players", {}).get(seat)
+    if player is None:
+        return
+    if player.get("first_action_ms") is None:
+        player["first_action_ms"] = now_ms
+    player["last_action_ms"] = now_ms
+
+
+def _mine_finalize_times(gs: dict) -> None:
+    """Settle `elapsed_ms` for every player before compute_ranking()."""
+    if gs.get("finished_at_ms") is None:
+        gs["finished_at_ms"] = int(_time.time() * 1000)
+    start = gs.get("started_at_ms")
+    end = gs["finished_at_ms"]
+    for player in gs.get("players", {}).values():
+        if player.get("elapsed_ms") is not None:
+            continue
+        first = player.get("first_action_ms")
+        last = player.get("last_action_ms")
+        if first is None:
+            # 全程没翻过格子的人没有「用时」可言 —— 留 None，界面不显示 0.0 秒
+            player["elapsed_ms"] = None
+        else:
+            player["elapsed_ms"] = max(0, (last or end) - (start or first))
+
+
 def mine_reveal_action(code: str, user_id: int, x: int, y: int) -> dict:
     """Reveal a minesweeper cell. Returns result dict for WS broadcast."""
     room = _rooms.get(code)
@@ -2464,9 +2502,11 @@ def mine_reveal_action(code: str, user_id: int, x: int, y: int) -> dict:
     gs = room["game_state"]
     result = mine_reveal(gs, x, y, seat)
     if result["ok"]:
+        _mine_touch_time(gs, seat)
         _touch_activity(room)
     if result["ok"] and result["game_over"]:
         # Compute ranking and finalize game
+        _mine_finalize_times(gs)
         players_info = _get_players_info(room)
         ranking = mine_compute_ranking(gs, players_info)
         result["game_over"]["ranking"] = ranking
@@ -2489,8 +2529,10 @@ def mine_chord_action(code: str, user_id: int, x: int, y: int) -> dict:
     gs = room["game_state"]
     result = mine_chord(gs, x, y, seat)
     if result["ok"]:
+        _mine_touch_time(gs, seat)
         _touch_activity(room)
     if result["ok"] and result["game_over"]:
+        _mine_finalize_times(gs)
         players_info = _get_players_info(room)
         ranking = mine_compute_ranking(gs, players_info)
         result["game_over"]["ranking"] = ranking
@@ -2823,6 +2865,7 @@ def _mine_surrender(room: dict, user_id: int) -> dict | None:
         gs["reason"] = "eliminated"
         from app.game.minesweeper import _reveal_all_mines
         _reveal_all_mines(gs)
+        _mine_finalize_times(gs)
         players_info = _get_players_info(room)
         ranking = mine_compute_ranking(gs, players_info)
         _set_mine_game_over(room, ranking)
@@ -2937,6 +2980,7 @@ def _on_dc_timeout(code: str, user_id: int):
                 gs["reason"] = "eliminated"
                 from app.game.minesweeper import _reveal_all_mines
                 _reveal_all_mines(gs)
+                _mine_finalize_times(gs)
                 players_info = _get_players_info(room)
                 ranking = mine_compute_ranking(gs, players_info)
                 _set_mine_game_over(room, ranking)

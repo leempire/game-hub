@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal, TextInput } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal, TextInput,
+  KeyboardAvoidingView, Platform,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { createRoom, joinRoom } from '../api';
 import { colors, spacing, radius, fontSize } from '../theme';
-import { notify } from '../utils';
 import { useModalBackGuard } from '../backGuard';
 import { GameHelpButton } from '../help';
 // 游戏目录（名字 / 说明 / 徽标 / 分类 / 图标）的唯一来源。
@@ -25,21 +27,42 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
   const [joinPwd, setJoinPwd] = useState('');
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
-  useModalBackGuard(picked !== null, () => setPicked(null));
-  useModalBackGuard(showJoinModal, () => setShowJoinModal(false));
+  // 弹窗内错误：toast 在原生端会被 Modal 盖住（Modal 是独立窗口）
+  const [modalError, setModalError] = useState<string | null>(null);
+  // 提交中点取消后，已在路上的请求回来时不能再导航
+  const createCancelledRef = useRef(false);
+  const joinCancelledRef = useRef(false);
+
+  const closePicked = () => {
+    createCancelledRef.current = true;
+    setPicked(null);
+    setModalError(null);
+  };
+  const closeJoin = () => {
+    joinCancelledRef.current = true;
+    setShowJoinModal(false);
+    setJoinCode('');
+    setJoinPwd('');
+    setModalError(null);
+  };
+  useModalBackGuard(picked !== null, closePicked);
+  useModalBackGuard(showJoinModal, closeJoin);
 
   const handleCreateRoom = async () => {
     if (!token || !picked) return;
+    createCancelledRef.current = false;
+    setModalError(null);
     setCreating(true);
     try {
       // 游戏级设置（扫雷难度 / 军棋玩法 / 深空休眠地图 / 海战棋尺寸 / UNO 房规）
       // **一律不在建房时选**，房主进房之后在等待大厅里挑（v1.15 起统一走
       // `room_setting` 一条消息）。建房只负责挑游戏类型。
       const room = await createRoom(token, picked.key);
+      if (createCancelledRef.current) return;
       setPicked(null);
       onNavigateToRoom(room.code);
     } catch (err) {
-      notify('创建失败', (err as Error).message);
+      if (!createCancelledRef.current) setModalError((err as Error).message);
     } finally {
       setCreating(false);
     }
@@ -48,19 +71,22 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
   const handleJoinRoom = async () => {
     if (!token) return;
     const code = joinCode.trim().toUpperCase();
+    setModalError(null);
     if (!code) {
-      notify('提示', '请输入房间号');
+      setModalError('请输入房间号');
       return;
     }
+    joinCancelledRef.current = false;
     setJoining(true);
     try {
       const room = await joinRoom(token, code, joinPwd || null);
+      if (joinCancelledRef.current) return;
       setShowJoinModal(false);
       setJoinCode('');
       setJoinPwd('');
       onNavigateToRoom(room.code);
     } catch (err) {
-      notify('加入失败', (err as Error).message);
+      if (!joinCancelledRef.current) setModalError((err as Error).message);
     } finally {
       setJoining(false);
     }
@@ -122,81 +148,93 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
       </ScrollView>
 
       {/* 建房 / 加入（13 个游戏共用这一个弹窗） */}
-      <Modal visible={picked !== null} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
+      <Modal visible={picked !== null} transparent animationType="fade" onRequestClose={closePicked}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{picked?.title}</Text>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnPrimary]}
-              onPress={handleCreateRoom}
-              disabled={creating}
-            >
-              <Text style={styles.modalBtnPrimaryText}>
-                {creating ? '创建中...' : '创建房间'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.modalBtn}
-              onPress={() => {
-                setPicked(null);
-                setShowJoinModal(true);
-              }}
-            >
-              <Text style={styles.modalBtnText}>加入房间</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnSecondary]}
-              onPress={() => setPicked(null)}
-            >
-              <Text style={styles.modalBtnSecondaryText}>取消</Text>
-            </TouchableOpacity>
+            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>{picked?.title}</Text>
+              {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnPrimary, creating && styles.modalBtnDisabled]}
+                onPress={handleCreateRoom}
+                disabled={creating}
+              >
+                <Text style={styles.modalBtnPrimaryText}>
+                  {creating ? '创建中...' : '创建房间'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalBtn}
+                onPress={() => {
+                  setPicked(null);
+                  setModalError(null);
+                  setShowJoinModal(true);
+                }}
+              >
+                <Text style={styles.modalBtnText}>加入房间</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnSecondary]}
+                onPress={closePicked}
+              >
+                <Text style={styles.modalBtnSecondaryText}>取消</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Join room modal */}
-      <Modal visible={showJoinModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
+      <Modal visible={showJoinModal} transparent animationType="fade" onRequestClose={closeJoin}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>加入房间</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={joinCode}
-              onChangeText={setJoinCode}
-              placeholder="输入6位房间号"
-              placeholderTextColor={colors.textFaint}
-              autoCapitalize="characters"
-              maxLength={6}
-            />
-            <TextInput
-              style={styles.modalInput}
-              value={joinPwd}
-              onChangeText={setJoinPwd}
-              placeholder="密码（如有）"
-              placeholderTextColor={colors.textFaint}
-              secureTextEntry
-            />
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnPrimary]}
-              onPress={handleJoinRoom}
-              disabled={joining}
-            >
-              <Text style={styles.modalBtnPrimaryText}>
-                {joining ? '加入中...' : '加入'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnSecondary]}
-              onPress={() => {
-                setShowJoinModal(false);
-                setJoinCode('');
-                setJoinPwd('');
-              }}
-            >
-              <Text style={styles.modalBtnSecondaryText}>取消</Text>
-            </TouchableOpacity>
+            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={styles.modalTitle}>加入房间</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={joinCode}
+                onChangeText={setJoinCode}
+                placeholder="输入6位房间号"
+                placeholderTextColor={colors.textFaint}
+                autoCapitalize="characters"
+                maxLength={6}
+                returnKeyType="next"
+              />
+              <TextInput
+                style={styles.modalInput}
+                value={joinPwd}
+                onChangeText={setJoinPwd}
+                placeholder="密码（如有）"
+                placeholderTextColor={colors.textFaint}
+                secureTextEntry
+                returnKeyType="go"
+                onSubmitEditing={() => void handleJoinRoom()}
+              />
+              {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnPrimary, joining && styles.modalBtnDisabled]}
+                onPress={handleJoinRoom}
+                disabled={joining}
+              >
+                <Text style={styles.modalBtnPrimaryText}>
+                  {joining ? '加入中...' : '加入'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnSecondary]}
+                onPress={closeJoin}
+              >
+                <Text style={styles.modalBtnSecondaryText}>取消</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -294,6 +332,7 @@ const styles = StyleSheet.create({
   modalCard: {
     width: '100%',
     maxWidth: 340,
+    maxHeight: '90%',
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.lg,
@@ -329,4 +368,13 @@ const styles = StyleSheet.create({
   modalBtnPrimaryText: { fontSize: fontSize.md, color: colors.white, fontWeight: '700' },
   modalBtnSecondary: { borderColor: 'transparent' },
   modalBtnSecondaryText: { fontSize: fontSize.md, color: colors.textMuted },
+  modalBtnDisabled: { opacity: 0.5 },
+  modalScroll: { flexGrow: 0, flexShrink: 1 },
+  modalError: {
+    fontSize: fontSize.sm,
+    color: colors.danger,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+    lineHeight: 20,
+  },
 });

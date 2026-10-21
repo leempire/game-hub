@@ -63,6 +63,11 @@ def create_game(difficulty: str = "intermediate", num_players: int = 1) -> dict:
             "lives_left": lives,
             "revealed_count": 0,
             "eliminated_at": None,
+            # 计时：由 room_manager 在动作入口写入（引擎不读墙钟）。
+            # `elapsed_ms` 在终局时结算，作为「同标雷数、同翻格数」的排名键。
+            "first_action_ms": None,
+            "last_action_ms": None,
+            "elapsed_ms": None,
         }
     return {
         "width": w,
@@ -76,6 +81,9 @@ def create_game(difficulty: str = "intermediate", num_players: int = 1) -> dict:
         "started": False,
         "finished": False,
         "reason": None,          # "cleared" or "eliminated" or None
+        # 游戏时钟由外部写入（room_manager 用 time.time()），引擎只做存储与排序。
+        "started_at_ms": None,
+        "finished_at_ms": None,
         "players": players,
     }
 
@@ -228,6 +236,10 @@ def compute_ranking(game: dict, players_info: list[dict]) -> list[dict]:
             "wrong_flags": flag_stats.get(seat, {}).get("wrong_flags", 0),
             "revealed_count": player.get("revealed_count", 0),
             "eliminated_at": player.get("eliminated_at"),
+            # 用时（毫秒）：从本局第一次翻开到该玩家最后一次翻开的跨度。
+            # **它是排名键里的第三档** —— 游戏叫「竞速」，同标雷数、同翻格数时
+            # 必须让更快的人赢，否则慢慢插旗也能拿第一。
+            "elapsed_ms": player.get("elapsed_ms"),
         })
 
     # Sort: survivors first, then by correct_flags desc, revealed_count desc
@@ -244,10 +256,16 @@ def compute_ranking(game: dict, players_info: list[dict]) -> list[dict]:
     # For eliminated players, we want eliminated_at desc (later is better).
     # Since we sort ascending by default, we negate the timestamp effect
     # by reversing the string comparison. Use a two-pass approach:
+    # Survivors: correct flags desc, revealed desc, then elapsed asc (faster wins).
+    # Eliminated: revealed desc, then eliminated_at desc (later = better).
+    def elapsed_key(e) -> float:
+        v = e.get("elapsed_ms")
+        return float("inf") if v is None else float(v)
+
     survivors = [e for e in entries if e["alive"]]
     eliminated = [e for e in entries if not e["alive"]]
 
-    survivors.sort(key=lambda e: (-e["correct_flags"], -e["revealed_count"]))
+    survivors.sort(key=lambda e: (-e["correct_flags"], -e["revealed_count"], elapsed_key(e)))
     # Eliminated: revealed_count desc, then eliminated_at desc (later = better)
     eliminated.sort(key=lambda e: (-e["revealed_count"],
                                     -( _iso_to_ordinal(e["eliminated_at"]))))
@@ -271,6 +289,7 @@ def compute_ranking(game: dict, players_info: list[dict]) -> list[dict]:
             "correct_flags": e["correct_flags"],
             "wrong_flags": e["wrong_flags"],
             "revealed_count": e["revealed_count"],
+            "elapsed_ms": e.get("elapsed_ms"),
             "rank": rank,
         }
         result.append(entry)
@@ -295,7 +314,8 @@ def _is_tied(a: dict, b: dict) -> bool:
         return False
     if a["alive"]:
         return (a["correct_flags"] == b["correct_flags"]
-                and a["revealed_count"] == b["revealed_count"])
+                and a["revealed_count"] == b["revealed_count"]
+                and a.get("elapsed_ms") == b.get("elapsed_ms"))
     else:
         return (a["revealed_count"] == b["revealed_count"]
                 and a["eliminated_at"] == b["eliminated_at"])
@@ -526,11 +546,15 @@ def game_to_sync(game: dict, players_info: list[dict] | None = None) -> dict:
         "started": game["started"],
         "finished": game["finished"],
         "reason": game["reason"],
+        # 只下发相对量的**起点**没有必要：客户端不自己计时（以服务端结算为准），
+        # 这里仅给结算/回放一个可显示的用时。
+        "started_at_ms": game.get("started_at_ms"),
         "players": {
             str(seat): {
                 "alive": p["alive"],
                 "lives_left": p.get("lives_left", 1),
                 "revealed_count": p["revealed_count"],
+                "elapsed_ms": p.get("elapsed_ms"),
             }
             for seat, p in game["players"].items()
         },

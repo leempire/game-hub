@@ -17,6 +17,7 @@ import { GameHelpButton } from '../help';
 import { settingValueLabel } from '../roomSettings';
 import {
   MineGameState, MineRankingEntry, RevealedCell, NUMBER_COLORS,
+  formatMineElapsed,
 } from '../minesweeper';
 
 // 旗子压在覆盖格 #CBD5E1 上，需 ≥3:1（原 #EF4444 只有 2.53）
@@ -455,6 +456,15 @@ export default function MineScreen({ code, onLeave }: Props) {
     socketRef.current?.surrender();
   };
 
+  // 终局返回：关闭 socket 后直接回房间。Android 返回键（Modal 的
+  // onRequestClose）与「返回房间」按钮走同一条路径。
+  const handleBackToRoom = useCallback(() => {
+    setShowGameOver(false);
+    skipRemoveRef.current = true;
+    socketRef.current?.close();
+    navigation.goBack();
+  }, [navigation]);
+
   // Player status chips: one per player showing alive/eliminated + revealed count.
   // 4 人局横排放不下，默认收起（只显示自己），点右侧 chevron 展开全部。
   const renderPlayerChip = (idx: number) => {
@@ -765,7 +775,7 @@ export default function MineScreen({ code, onLeave }: Props) {
       </View>
 
       {/* Leave confirmation modal */}
-      <Modal visible={confirmLeave} transparent animationType="fade">
+      <Modal visible={confirmLeave} transparent animationType="fade" onRequestClose={() => setConfirmLeave(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons name="exit-outline" size={36} color={colors.danger} />
@@ -792,7 +802,7 @@ export default function MineScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Surrender confirmation modal */}
-      <Modal visible={confirmSurrender} transparent animationType="fade">
+      <Modal visible={confirmSurrender} transparent animationType="fade" onRequestClose={() => setConfirmSurrender(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons name="flag-outline" size={36} color={colors.warning} />
@@ -817,7 +827,7 @@ export default function MineScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over / ranking modal */}
-      <Modal visible={showGameOver} transparent animationType="fade">
+      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>游戏结束</Text>
@@ -869,6 +879,11 @@ export default function MineScreen({ code, onLeave }: Props) {
                       <Text style={styles.rankingStatText}>
                         翻 {r.revealed_count}
                       </Text>
+                      {formatMineElapsed(r.elapsed_ms) ? (
+                        <Text style={styles.rankingStatText}>
+                          用时 {formatMineElapsed(r.elapsed_ms)}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 ))}
@@ -876,12 +891,7 @@ export default function MineScreen({ code, onLeave }: Props) {
             )}
             <TouchableOpacity
               style={[styles.modalBtn, styles.modalBtnPrimary]}
-              onPress={() => {
-                setShowGameOver(false);
-                skipRemoveRef.current = true;
-                socketRef.current?.close();
-                navigation.goBack();
-              }}
+              onPress={handleBackToRoom}
             >
               <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
             </TouchableOpacity>

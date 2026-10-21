@@ -205,6 +205,10 @@ async def run_elimination_flow():
             assert go["reason"] == "eliminated"
             assert "ranking" in go
             assert len(go["ranking"]) == 2
+            # 用时随结算下发：A 翻过格子 → 有限值；B 没翻过 → None（界面不显示 0.0 秒）
+            by_seat = {e["seat"]: e for e in go["ranking"]}
+            assert by_seat[0]["elapsed_ms"] is not None
+            assert by_seat[1]["elapsed_ms"] is None
             # A 先淘汰，B 后淘汰 → B 排名更前（但都是淘汰者）
             # 淘汰者按 revealed_count desc，然后 eliminated_at desc
             print(f"  全员淘汰，game_over with ranking ✓")

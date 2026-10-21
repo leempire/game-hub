@@ -104,7 +104,10 @@ echo "APK size: $((APK_SIZE / 1024 / 1024)) MB"
 
 # 防呆：确认地址**真的**进了包（release 是 Hermes 字节码，字符串表里仍能捞到）。
 # 地址打错的包要等装到手机上才发现，那时已经发出去了。
-if unzip -p "$APK_SRC" assets/index.android.bundle 2>/dev/null | strings | grep -qF "$EXPO_PUBLIC_API_BASE"; then
+# ⚠️ 这里必须用 `grep -c` 而不是 `grep -q`：脚本开了 `pipefail`，`grep -q`
+# 匹配到第一条就退出，上游 `strings` 收到 SIGPIPE（141）—— 明明地址在包里，
+# 整个管道却被判成失败（v1.18 发布时实际踩到）。
+if unzip -p "$APK_SRC" assets/index.android.bundle 2>/dev/null | strings | grep -cF "$EXPO_PUBLIC_API_BASE" > /dev/null; then
     echo "✓ APK 内已内联 $EXPO_PUBLIC_API_BASE"
 else
     echo "ERROR: APK 的 JS bundle 里找不到 $EXPO_PUBLIC_API_BASE —— 打包环境没带上 EXPO_PUBLIC_API_BASE，已中止"

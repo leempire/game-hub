@@ -23,6 +23,8 @@ export interface MinePlayerState {
   /** 剩余命数；0 表示已淘汰。服务端 game_to_sync 逐人下发。 */
   lives_left: number;
   revealed_count: number;
+  /** 用时（毫秒）。终局结算前为 null；见 `formatMineElapsed`。 */
+  elapsed_ms?: number | null;
 }
 
 /** Ranking entry received in game_over and sync (when finished) */
@@ -34,7 +36,22 @@ export interface MineRankingEntry {
   correct_flags: number;
   wrong_flags: number;
   revealed_count: number;
+  /**
+   * 用时（毫秒）。桌面上叫「竞速」，同标雷数、同翻格数时按它排先后
+   * （v1.18 补；老战绩里没有这个字段，展示时留空即可）。
+   */
+  elapsed_ms?: number | null;
   rank: number;
+}
+
+/** 毫秒 → `m:ss`（不足 10 秒保留一位小数，让「1 秒 vs 2 秒」分得出来）。 */
+export function formatMineElapsed(ms: number | null | undefined): string | null {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return null;
+  const totalSec = ms / 1000;
+  if (totalSec < 10) return `${totalSec.toFixed(1)}秒`;
+  const m = Math.floor(totalSec / 60);
+  const s = Math.floor(totalSec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 /** Game state received via sync / game_start messages */
@@ -50,6 +67,8 @@ export interface MineGameState {
   started: boolean;
   finished: boolean;
   reason: 'cleared' | 'eliminated' | null;
+  /** 本局第一次翻开的时间戳（服务端写入；客户端不依赖它计时）。 */
+  started_at_ms?: number | null;
   players: Record<string, MinePlayerState>;
   ranking?: MineRankingEntry[];
 }

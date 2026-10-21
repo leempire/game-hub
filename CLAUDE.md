@@ -43,6 +43,7 @@ app/                    # Expo 客户端（RN + Web）
     ├── LuzhanqiBoardView.tsx # 军棋棋盘渲染层（对局屏与战绩回放共用一份画法）
     ├── toast.tsx       # 应用内提示（替代 window.alert）
     ├── appUpdate.ts    # 版本检查与 APK 下载（VersionInfo）
+    ├── deepLink.ts     # 初始 URL 记录：未登录打开 /room/:code，登录后恢复并自动进房
     └── screens/        # AuthScreen/GamesTab/RoomsTab/SocialTab/ProfileTab/RoomScreen/
                         # GomokuScreen/MineScreen/ReversiScreen/BattleshipScreen/
                         # DotsScreen/LudoScreen/Game2048Screen/XiangqiScreen/ConnectFourScreen/
@@ -743,6 +744,11 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
 - **禁用浏览器专属 API**：`window.confirm/alert/prompt` 在原生端崩溃（1.1.x 事故）；`window.addEventListener` 同理——原生 RN 里 `window === global` 且**没有** addEventListener，对局屏裸调它挂载即 TypeError 白屏+WS 断连（1.3.1 APP 五子棋白屏事故，Web 端却完全正常，极易漏测）。一律用应用内 Modal/toast；Web 专属逻辑必须收口到 backGuard（`onConfirmLeave` 等 IS_WEB 守卫的助手）；`visual_audit.py` 静态扫描兜底（confirm/alert/prompt + backGuard 外的 DOM API）。
 - **RNW 特性**：disabled 的 TouchableOpacity 是 `pointer-events:none`（Playwright 点击会挂起，改断言 computedStyle）；颜色编译进 class 名（测试取值用 `getComputedStyle`）。
 - **react-navigation linking**：开启后浏览器 history 与路由双向同步；程序化导航（goBack/Tab切换）先改路由状态再调 history.go，popstate 时 `getRouteName()` 已是新路由——backGuard 靠包装 history 方法区分程序化/用户返回（见「返回操作」）。linking 的 replaceState 会冲掉自定义 pushState 条目；getCurrentRoute() 返回叶子路由名（Tab 页是 Games/Rooms/Social/Profile，不是 MainTabs）。
+- **新增对局屏必须同时补三处深链**：`App.tsx` 的 `LINKING.config.screens` path、
+  `app/src/deepLink.ts` 的 `ROUTE_BY_PATH`、以及 `navigation.tsx` 的 Stack.Screen。
+  漏了不会报错，只会表现为「刷新页面回主页 / 分享链接打不开」。未登录打开
+  `/room/:code` 由 `deepLink.ts` 记住初始 URL，登录后主动导航；RoomScreen 发现
+  自己不是成员时会先 `joinRoom`（密码房/已开局会明确拒绝并退回）。
 - **返回误触退出提示（已修，勿回退）**：症状是「离开房间 / 底部 Tab 切换等程序化导航时，没按返回键却弹出『再按一次返回退出』」。根因即上一条——程序化导航的 popstate 里路由已是主 Tab，被误判成用户在主 Tab 按返回。修法是 backGuard 包装 `history.go/back/forward`：凡程序化遍历先置 `suppressPop`（+400ms 安全网防吞掉下一次真实返回），用户真实返回不经这些方法故照常处理。回归靠 `e2e_back_behavior.py` + 一个插桩 history 的临时复现脚本。
 - **僵尸 WS 连接（已修，勿回退）**：症状是「对局结束返回房间后点开始游戏没反应/提示房间不存在」。根因：RoomScreen 驻留导航栈底不重挂载，服务端每 (code,user_id) 只留一条 WS——对局页连接把房间页连接顶掉，对局页关闭后槽位被弹出，房间页 socket 客户端看似 OPEN 实则收不到任何广播。修法三件套：①RoomScreen `useFocusEffect` 重新聚焦时 `socket.reconnect()`（跳过首次挂载）；②服务端 receive 循环自愈——槽位为空时重新注册当前连接（绝不抢占更新的连接）；③`RoomSocket.sendOrQueue` 大厅消息（ready/start/add_bot）未连接时排队、onopen 补发，对局内动作（move/fire/reveal）不排队防过期操作。
 - **`socket.ts` 的 `try` 只许包 `JSON.parse`，不许包 `dispatch`（v12 修，勿改回去）**：原来是 `try { parse; dispatch } catch {}`，本意是「服务端偶尔发了非 JSON 就丢掉这条」，实际把**每个处理器自己的异常**也一起吞了、一声不吭。`suite` 图那次 `buildMap` 抛 `TypeError`，界面上唯一的表现是**地图全是黑的**，控制台里连一行日志都没有（用户报的就是它）。**静默 try 会把「崩溃」伪装成「功能没做」**，排查成本差着量级。数据口在 `app/src/socket.ts`，动它等于动所有 13 个游戏的消息分发。
@@ -1678,6 +1684,29 @@ E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路�
     回归：`TestPresets`（每个阵型对两个颜色各验一遍 `validate_layout` +
     「红黑互为上下镜像」）、`test_ws_luzhanqi.py` 三条。
   - 回归：pytest **1179**、tsc 干净、`visual_audit` 41/41、E2E 全绿。
+- **v1.18.0 已发布：全量界面审计的 P0 清账 + 扫雷竞速计分**（versionCode 31 → **32**）
+  - **房间列表三态 + 轮询收口**：首次加载显示加载态、失败显示「加载失败 + 重试」、
+    只有成功且为空才显示「暂无房间」；轮询只在 Tab 可见 + App 前台时跑（3 秒 → 5 秒），
+    请求序号丢弃过期响应。**静默 `catch {}` 会把「请求失败」伪装成「平台没人」**。
+  - **弹窗内联错误 + `onRequestClose` + 取消竞态**：原生端 Modal 是独立窗口，
+    根部的 ToastHost 会被盖住 —— 建房/加入/改密失败现在留在弹窗里；
+    所有 `<Modal>` 补 `onRequestClose`（Android 返回键不再点了没反应）；
+    提交中点取消后，已在路上的请求回来不再导航进房。
+  - **登录体验**：`loading` 等到 `getMe` 结束（不再先闪主页）；token 过期显示
+    「登录已过期」；上次用户名预填；退出登录二次确认；回源 5 秒上限。
+  - **深链**：13 个对局路由 + History 全补 path；未登录打开 `/room/:code` 登录后
+    自动回到该房（`deepLink.ts` 记住初始 URL + RoomScreen 自动 `joinRoom`）。
+    新增对局屏时三处（LINKING / ROUTE_BY_PATH / Stack.Screen）必须一起改。
+  - **扫雷竞速计分**：排名补第三键 `elapsed_ms`（同标雷数、同翻格数时更快者在前）；
+    计时只在房间层写入，引擎不读墙钟；结算与战绩回放显示用时，没翻过格子的人为 `null`。
+  - **小修**：海战棋对局中补规则入口；帮助按钮 hitSlop 撑到 44×44；房间页按钮 ≥44；
+    锁图标改 `textMuted` + 「有密码」文字；Tab bar 加 `insets.bottom`。
+  - ⚠️ **发版脚本的 `pipefail` 坑**：`set -o pipefail` + `grep -q` 匹配后提前退出，
+    上游 `strings` 收到 SIGPIPE（141），明明地址在 APK 里也会被判失败。
+    防呆检查改用 `grep -c`（读完整个输入）。
+  - 回归：pytest **1181**、tsc 干净、`visual_audit` 41/41、扫雷/五子棋/海战棋/返回行为
+    E2E 全绿；另用临时脚本验过「未登录邀请链接 → 注册 → 自动进房」「弹窗内联错误」
+    「房间列表失败态 + 重试」「token 过期提示 + 用户名预填」「对局页刷新不丢」。
 - **路线图**：
   - **下一个已定方向：大富翁**（用户指定 UNO 之后做；军棋是中途插进来的一个，已做完）。与本项目现有资产重合度最高——飞行棋已经把
     **服务端权威骰子 + 逐格路径动画 + 4 座棋盘美术**全铺好了（`ludo.py` / `ludoBoard.ts` /

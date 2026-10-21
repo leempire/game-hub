@@ -603,7 +603,7 @@ export default function DotsScreen({ code, onLeave }: Props) {
       </View>
 
       {/* Confirm modal */}
-      <Modal visible={confirm !== null} transparent animationType="fade">
+      <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons
@@ -638,7 +638,7 @@ export default function DotsScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade">
+      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>对局结束</Text>

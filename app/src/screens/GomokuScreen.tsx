@@ -1115,7 +1115,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
       </View>
 
       {/* 确认弹窗 */}
-      <Modal visible={confirm !== null} transparent animationType="fade">
+      <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons name={confirm === 'surrender' ? 'flag-outline' : 'exit-outline'} size={36} color={colors.danger} />
@@ -1137,7 +1137,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* 结算弹窗 */}
-      <Modal visible={showGameOver} transparent animationType="fade">
+      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>对局结束</Text>

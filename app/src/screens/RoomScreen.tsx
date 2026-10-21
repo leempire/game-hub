@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../auth';
-import { getRoom, leaveRoom, Room, RoomPlayer } from '../api';
+import { getRoom, joinRoom, leaveRoom, Room, RoomPlayer } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
 import { useModalBackGuard } from '../backGuard';
 import { colors, spacing, radius, fontSize } from '../theme';
@@ -68,8 +68,21 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
 
   const fetchRoom = useCallback(async () => {
     if (!token) return;
+    const myId = user?.id;
     try {
-      const r = await getRoom(token, code);
+      let r = await getRoom(token, code);
+      // 深链 / 分享链接直接落到本页时，用户还不是房间成员：先入房。
+      // 否则 WS 会以 4003「你不在房间中」被拒，页面看着像卡住。
+      // 密码房与已开局的房会在这里拿到一句明确拒绝，然后退回上一页。
+      if (myId && !r.players.some((p) => p.id === myId)) {
+        try {
+          r = await joinRoom(token, code, null);
+        } catch (joinErr) {
+          notify('无法加入', (joinErr as Error).message);
+          onLeave();
+          return;
+        }
+      }
       if (!syncedRef.current) {
         setRoom(r);
         gameTypeRef.current = r.game;
@@ -79,7 +92,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [token, code]);
+  }, [token, code, user?.id, onLeave]);
 
   // Connect WS on mount
   useEffect(() => {
@@ -469,7 +482,12 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
       />
       {/* 换位请求（v1.16）：别人要和我换座位，我点头才真的换。
           接 `useModalBackGuard`（在组件顶部）—— 返回键只关这个弹窗。 */}
-      <Modal visible={swapFrom !== null} transparent animationType="fade">
+      <Modal
+        visible={swapFrom !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => answerSwap(false)}
+      >
         <View style={styles.swapBackdrop}>
           <View style={styles.swapCard} testID="swap-request-modal">
             <Text style={styles.swapTitle}>换位请求</Text>

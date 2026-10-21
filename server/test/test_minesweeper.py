@@ -482,6 +482,29 @@ def test_ranking_tie():
     print("  ✓ test_ranking_tie")
 
 
+def test_ranking_elapsed_breaks_tie():
+    """同标雷数、同翻格数时按用时排序（「竞速」必须真的看时间）。"""
+    players_info = [
+        {"seat": 0, "username": "alice", "nickname": "A"},
+        {"seat": 1, "username": "bob", "nickname": "B"},
+    ]
+    g = create_game("beginner", num_players=2)
+    g["players"][0].update(alive=True, revealed_count=10, elapsed_ms=5000)
+    g["players"][1].update(alive=True, revealed_count=10, elapsed_ms=3000)
+    ranking = compute_ranking(g, players_info)
+    assert ranking[0]["seat"] == 1, ranking
+    assert ranking[0]["rank"] == 1
+    assert ranking[1]["seat"] == 0
+    assert ranking[1]["rank"] == 2
+
+    # 用时也相同才是真平局
+    g["players"][0]["elapsed_ms"] = 3000
+    ranking = compute_ranking(g, players_info)
+    assert ranking[0]["rank"] == 1
+    assert ranking[1]["rank"] == 1
+    print("  ✓ test_ranking_elapsed_breaks_tie")
+
+
 def test_no_actions_after_game_over():
     g = create_game("beginner", num_players=2)
     reveal(g, 4, 4, seat=0)
@@ -662,6 +685,7 @@ if __name__ == "__main__":
     test_flag_cancelled_not_counted()
     test_ranking_order()
     test_ranking_tie()
+    test_ranking_elapsed_breaks_tie()
     test_no_actions_after_game_over()
     test_sync_message_structure()
     test_flagged_list_for_sync()

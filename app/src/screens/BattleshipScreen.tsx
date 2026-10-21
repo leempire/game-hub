@@ -19,6 +19,7 @@ import {
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
+import { GameHelpButton } from '../help';
 import { useDisconnectCountdown } from '../disconnect';
 
 // 命中/击沉标记：都压在深蓝棋盘上，提亮到 ≥4:1（原 #EF4444 只有 3.06:1）
@@ -1039,7 +1040,10 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
           <Text style={styles.myColor}>{myColorLabel}</Text>
           <Text style={[styles.turnHint, isMyTurn && styles.turnActive]}>{turnText}</Text>
         </View>
-        <Text style={styles.roomCode}>#{code}</Text>
+        <View style={styles.topRight}>
+          <GameHelpButton game="battleship" size={24} />
+          <Text style={styles.roomCode}>#{code}</Text>
+        </View>
       </View>
 
       {/* Disconnected banner */}
@@ -1122,7 +1126,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
       </View>
 
       {/* Confirm modal */}
-      <Modal visible={confirm !== null} transparent animationType="fade">
+      <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons
@@ -1159,7 +1163,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade">
+      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>对局结束</Text>
@@ -1739,6 +1743,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  topRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   myColor: { fontSize: fontSize.md, fontWeight: '700', color: colors.text },
   turnHint: { fontSize: fontSize.sm, color: colors.textSecondary },
   turnActive: { color: colors.primary, fontWeight: '600' },
