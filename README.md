@@ -92,25 +92,20 @@ bash bin/release-apk.sh <版本号>   # 如 1.3.0，versionCode 自动 +1
 ```bash
 # 后端单测（引擎/AI/战绩/WS 协议）
 cd server && python -m pytest test/ -q
-cd server && python test/test_ws_game.py        # 脚本式：真实后端五子棋对局/断线重连（需后端已启动）
+cd server && python test/test_ws_game.py        # 脚本式：真实后端对局/断线重连（需后端已启动）
 
 # 浏览器 E2E（需前后端都已启动）
-python test/e2e_web_game.py           # 双人五子棋 11 步（含断线重连）
-python test/e2e_mine_smoke.py         # 扫雷竞技淘汰+排名 12 步
-python test/e2e_reversi_smoke.py      # 翻转棋 8 步（翻转/非法着/认输终局）
-python test/e2e_battleship_smoke.py   # 海战棋 9 步（布阵→开战→开炮→认输）
-python test/e2e_bot_smoke.py          # 人机 8 步（加人机→自动准备→开始→bot 应招）
-python test/e2e_back_behavior.py      # 返回行为 7 步（双击退出/关弹窗/对局确认）
-python test/e2e_history_smoke.py      # 历史战绩 7 步（认输落库→我的→历史列表）
-python test/e2e_dots_smoke.py         # 点格棋 8 步（画边/回合移交/认输终局）
-python test/e2e_ludo_smoke.py         # 飞行棋 6 步（掷骰广播/认输弃权/排名结算）
-python test/e2e_2048_smoke.py         # 2048 竞速 12 步（同种子/各自走子/认输只结束自己/单人开局）
-python test/e2e_luzhanqi_smoke.py     # 军棋 20 步（明棋/暗棋选择→布阵→走子→认输；暗棋下对手只画牌背）
-python test/visual_audit.py           # 本地视觉审计 32 项 + 浏览器专属 API 静态扫描
+python test/e2e_web_game.py                     # 示例：五子棋双浏览器对战
+python test/visual_audit.py                     # 视觉审计 + 浏览器专属 API 静态扫描
 ```
+
+完整的脚本清单、每一步断言与发布前自检顺序见
+[docs/测试矩阵.md](docs/测试矩阵.md)。
 
 ## 文档
 
-- [CLAUDE.md](CLAUDE.md) —— 项目架构、关键机制、常用命令、已知坑（维护必读）
+- [CLAUDE.md](CLAUDE.md) —— 跨游戏通用约定、关键机制、常用命令、已知坑（维护必读）
+- [docs/游戏设计/](docs/游戏设计/README.md) —— 游戏索引与跨游戏设计规范；每款游戏的规则、数值与踩坑在 `docs/游戏设计/<游戏中文名>/`
+- [docs/测试矩阵.md](docs/测试矩阵.md) —— 单测 / E2E / 发布前自检
 - [docs/接口协议.md](docs/接口协议.md) —— REST/WebSocket 全量契约
 - [docs/使用指南.md](docs/使用指南.md) —— 玩家与管理员使用手册
