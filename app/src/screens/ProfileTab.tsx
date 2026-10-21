@@ -1,16 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Modal, Linking, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import { useAuth } from '../auth';
-import { updateNickname, changePassword } from '../api';
+import { updateNickname, changePassword, fetchMyStats, MyStats } from '../api';
 import { colors, spacing, radius, fontSize } from '../theme';
 import { notify, formatDate } from '../utils';
 import { isNative, isMobileWeb } from '../platform';
 import { checkLatestVersion, downloadAndInstallApk, getCurrentVersion, VersionInfo } from '../appUpdate';
 import { useModalBackGuard } from '../backGuard';
+import { ProfileStatsCard } from '../profileStats';
 import { API_BASE } from '../config';
 
 interface Props {
@@ -33,11 +35,30 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<VersionInfo | null>(null);
+  const [stats, setStats] = useState<MyStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const isFocused = useIsFocused();
   useModalBackGuard(showNickname, () => { if (!submitting) setShowNickname(false); });
   useModalBackGuard(showPassword, () => { if (!submitting) setShowPassword(false); });
   useModalBackGuard(showLogout, () => setShowLogout(false));
   useModalBackGuard(!!updateInfo, () => { if (!downloading) setUpdateInfo(null); });
   const autoCheckedRef = useRef(false);
+
+  // 战绩卡：回到「我的」时刷新一次（打完一局回来就能看到新数字）
+  const loadStats = useCallback(async () => {
+    if (!token) return;
+    try {
+      setStats(await fetchMyStats(token));
+    } catch {
+      // 网络失败保留上一次的数字；首次失败显示「暂时无法加载」
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (isFocused) void loadStats();
+  }, [isFocused, loadStats]);
 
   // Auto-check for update on native mount (silent - only notify if update available)
   useEffect(() => {
@@ -178,6 +199,13 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
         </View>
         <Text style={styles.joinDate}>注册于 {formatDate(user.created_at)}</Text>
       </View>
+
+      {/* 战绩卡：总场次 / 胜率 / 当前连胜 + 近 7 天与常玩游戏 */}
+      <ProfileStatsCard
+        stats={stats}
+        loading={statsLoading}
+        onOpenHistory={onNavigateToHistory}
+      />
 
       {/* Actions */}
       <View style={styles.actions}>

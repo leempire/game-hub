@@ -663,6 +663,56 @@ def test_chord_no_actions_after_game_over():
     print("  ✓ test_chord_no_actions_after_game_over")
 
 
+def test_flag_cycles_through_question_mark():
+    """空 → 旗 → 问号 → 空；问号不参与 chord，也不阻挡翻开。"""
+    g = create_game("beginner", num_players=1)
+    first = flag(g, 3, 3, seat=0)
+    assert first["state"] == "flag" and (3, 3) in g["flagged"]
+    second = flag(g, 3, 3, seat=0)
+    assert second["state"] == "question"
+    assert second["flagged"] is False and second["questioned"] is True
+    assert (3, 3) not in g["flagged"], "问号不算旗子（不参与通关/chord）"
+    assert (3, 3) in g["questioned"]
+    third = flag(g, 3, 3, seat=0)
+    assert third["state"] == "none"
+    assert (3, 3) not in g["questioned"]
+
+
+def test_question_mark_does_not_block_reveal():
+    g = create_game("beginner", num_players=1)
+    flag(g, 4, 4, seat=0)
+    flag(g, 4, 4, seat=0)          # → 问号
+    res = reveal(g, 4, 4, seat=0)
+    assert res["ok"], "问号只是笔记，应该可以直接翻开"
+    assert (4, 4) not in g["questioned"], "翻开后问号自动清掉"
+    sync = game_to_sync(g)
+    assert sync["questioned"] == []
+
+
+def test_daily_seed_makes_the_mine_layout_reproducible():
+    """每日固定盘：同种子 + 同一第一下 → 同一份雷盘。"""
+    def mines_for(seed, first=(4, 4)):
+        g = create_game("beginner", 1, seed=seed, daily=True)
+        reveal(g, first[0], first[1], seat=0)
+        return g["mine_positions"]
+
+    a = mines_for(20261021)
+    b = mines_for(20261021)
+    c = mines_for(20261022)
+    assert a == b, "同一天同难度必须拿到同一份雷盘"
+    assert a != c
+    # 不同第一下点击 → 安全区不同，雷盘也随之不同（同种子，不是逐格固定）
+    assert mines_for(20261021, first=(0, 0)) != a
+
+
+def test_sync_carries_difficulty_and_daily_flag():
+    g = create_game("advanced", 1, seed=123, daily=True)
+    sync = game_to_sync(g)
+    assert sync["difficulty"] == "advanced"
+    assert sync["daily"] is True
+    assert "questioned" in sync
+
+
 if __name__ == "__main__":
     print("Running minesweeper unit tests...")
     test_create_game_defaults()

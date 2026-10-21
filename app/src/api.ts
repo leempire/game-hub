@@ -408,7 +408,7 @@ export type GameSnapshot = GomokuSnapshot | ReversiSnapshot | MinesweeperSnapsho
 
 export interface GameRecord {
   id: number;
-  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi';
+  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis';
   room_code: string;
   players: HistoryPlayer[];
   results: HistoryResult[];
@@ -422,6 +422,30 @@ export interface HistoryListResult {
   total: number;
   page: number;
   size: number;
+}
+
+/** 我的页战绩卡 + 主页「最近玩过」共用的聚合数据（服务端算好，不拉全量）。 */
+export interface MyStats {
+  total: number;
+  wins: number;
+  losses: number;
+  /** 非胜负局：平局 / 2048 未达成等。不计入胜率分母。 */
+  draws: number;
+  /** 0..1；没有胜负局时为 null。 */
+  win_rate: number | null;
+  current_streak: number;
+  best_streak: number;
+  recent_7d: number;
+  top_games: Array<{ game: string; count: number; wins: number }>;
+  recent_games: Array<{ game: string; last_played_at: string }>;
+  /** 跑分竞速的个人最佳分（按游戏 id 索引；老记录没有分数就没有这一项）。 */
+  best_scores: Record<string, number>;
+  /** 扫雷各难度的个人最佳用时（毫秒，按难度 id 索引）。 */
+  best_times: Record<string, number>;
+}
+
+export function fetchMyStats(token: string): Promise<MyStats> {
+  return apiFetch<MyStats>('/api/history/stats', {}, token);
 }
 
 export function fetchMyHistory(

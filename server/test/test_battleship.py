@@ -455,6 +455,56 @@ def _engine_sized(size: int) -> dict:
     }
 
 
+class TestVariantRules:
+    """v1.18.1 房规：舰船不可相邻 / 击沉不报舰种。"""
+
+    @staticmethod
+    def _spread() -> list[dict]:
+        """每隔一行放一艘：正常规则合法，且没有两艘相邻。"""
+        return [
+            {"id": 1, "x": 0, "y": 0, "horizontal": True},
+            {"id": 2, "x": 0, "y": 2, "horizontal": True},
+            {"id": 3, "x": 0, "y": 4, "horizontal": True},
+            {"id": 4, "x": 0, "y": 6, "horizontal": True},
+            {"id": 5, "x": 0, "y": 8, "horizontal": True},
+        ]
+
+    def test_no_touch_rejects_adjacent_ships(self):
+        tight = self._spread()
+        tight[1] = {"id": 2, "x": 0, "y": 1, "horizontal": True}   # 贴住 1 号舰
+        assert validate_placement(tight), "不开启房规时相邻是合法的"
+        assert validate_placement(self._spread(), no_touch=True)
+        assert not validate_placement(tight, no_touch=True), "开启后上下相邻应被拒"
+
+    def test_no_touch_includes_diagonal(self):
+        ships = self._spread()
+        # 2 号舰从 (0,2) 横放挪到 (5,1)：斜角贴着 1 号舰的 (4,0)
+        ships[1] = {"id": 2, "x": 5, "y": 1, "horizontal": True}
+        assert not validate_placement(ships, no_touch=True), "斜角相邻也算相邻"
+
+    def test_random_placement_respects_no_touch_on_every_size(self):
+        for size in SIZES:
+            for seed in range(5):
+                ships = random_placement(random.Random(seed), size, no_touch=True)
+                assert validate_placement(ships, size, no_touch=True), (size, seed)
+
+    def test_sync_hides_sunk_ship_type(self):
+        from app.game import battleship as bs
+        ships = self._spread()
+        board = create_board()
+        apply_placement(board, ships)
+        attack = create_board()
+        # 击沉 5 号舰（2 格）
+        for cx, cy in get_ship_cells(board, 5):
+            attack[cy][cx] = HIT
+        visible = bs._visible_opp_ships(board, attack, ships, hide_type=True)
+        assert len(visible) == 1 and visible[0]["sunk"] is True
+        assert "id" not in visible[0], "击沉不报舰种时协议里不能带舰种"
+        assert len(visible[0]["cells"]) == 2, "位置仍然公开（要能标出沉船）"
+        shown = bs._visible_opp_ships(board, attack, ships, hide_type=False)
+        assert shown[0]["id"] == 5
+
+
 class TestBoardSizes:
     def test_every_preset_fits_its_board(self):
         """每个档位的舰队都必须**放得进自己的棋盘**（最长的那艘 ≤ 边长）。"""

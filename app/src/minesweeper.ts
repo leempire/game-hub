@@ -62,8 +62,14 @@ export interface MineGameState {
   mines: number;
   /** 本局每人几条命（按难度定：1/2/3）。 */
   lives: number;
+  /** 本局难度（用于取该难度的个人最佳用时；老服务端没有） */
+  difficulty?: string;
+  /** 是否每日固定盘（雷盘按 UTC 日期定种子） */
+  daily?: boolean;
   revealed: RevealedCell[];
   flagged: FlaggedCell[];
+  /** 问号笔记（v1.18.1）：不参与 chord / 通关判定 */
+  questioned?: FlaggedCell[];
   started: boolean;
   finished: boolean;
   reason: 'cleared' | 'eliminated' | null;
@@ -103,6 +109,9 @@ export interface MineFlaggedMsg {
   x: number;
   y: number;
   flagged: boolean;
+  /** 三态（v1.18.1）：flag / question / none；旧服务端只给 flagged */
+  state?: 'flag' | 'question' | 'none';
+  questioned?: boolean;
   seat: number;
 }
 

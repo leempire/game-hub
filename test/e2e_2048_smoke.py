@@ -192,9 +192,24 @@ def main():
         open_leaderboard(pc)
         solo_rows = pc.locator(LB_ROWS)
         assert solo_rows.count() == 1, f'单人局排行榜应只有 1 行，实际 {solo_rows.count()}'
-        pc.locator('[data-testid="dir-left"]').click()
-        pc.wait_for_timeout(800)
         ok('单人 2048 可直接开局，排行榜只有自己')
+
+        # 撤销（v1.18.1）：只在单人局出现，回滚盘面；无步可撤要有提示
+        before = board_text(pc)
+        for tid in ('dir-left', 'dir-up', 'dir-right', 'dir-down'):
+            pc.locator(f'[data-testid="{tid}"]').click()
+            pc.wait_for_timeout(500)
+            if board_text(pc) != before:
+                break
+        assert board_text(pc) != before, '开局应至少有一个方向能走'
+        pc.locator('[data-testid="g2048-undo"]').click()
+        pc.wait_for_timeout(700)
+        assert board_text(pc) == before, '撤销应回到走子前的盘面'
+        pc.locator('[data-testid="g2048-undo"]').click()
+        pc.wait_for_timeout(350)
+        assert '还没有可以撤销' in pc.locator('body').inner_text(), \
+            '没有可撤销步数时要给提示（不能点了没反应）'
+        ok('单人局撤销：回滚盘面，无步可撤时有提示')
 
         browser.close()
     print(f'=== 2048 竞速冒烟通过：{STEP} 步 ===')

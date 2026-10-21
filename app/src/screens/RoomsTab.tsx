@@ -9,7 +9,7 @@ import { useAuth } from '../auth';
 import { listRooms, createRoom, joinRoom, Room } from '../api';
 import { colors, spacing, radius, fontSize } from '../theme';
 import { notify } from '../utils';
-import { settingValueLabel } from '../roomSettings';
+import { settingValueLabel, settingsSummary } from '../roomSettings';
 import { useModalBackGuard } from '../backGuard';
 import { CreateRoomModal, JoinRoomModal } from '../roomForms';
 import { gameShort, gameIonicon, type GameKey } from '../games';
@@ -17,17 +17,6 @@ import { gameShort, gameIonicon, type GameKey } from '../games';
 interface Props {
   onNavigateToRoom: (code: string) => void;
 }
-
-// 房间只有等待中/游戏中两种状态——对局结束的房间回到等待中
-const STATUS_LABELS: Record<string, string> = {
-  waiting: '等待中',
-  playing: '对局中',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  waiting: colors.accent,
-  playing: colors.warning,
-};
 
 /** 轮询间隔。3 秒太频繁：房间列表不是实时对战消息，5 秒足够看出新房间。 */
 const POLL_MS = 5000;
@@ -57,6 +46,8 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
   // 请求序号：慢网下后返回的旧响应不能覆盖新列表
   const seqRef = useRef(0);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  // 正在加入的房间号：单卡 spinner + 防连点（慢网下连点会发多次 join）
+  const [pendingCode, setPendingCode] = useState<string | null>(null);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => setAppActive(s === 'active'));
@@ -139,16 +130,21 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
   // 或 已开始且本人是原玩家（断线重连）；其余给出明确拒绝。
   // 有密码的等待房弹出加入框输入密码。
   const handleRoomPress = async (room: Room) => {
-    if (!token || !user) return;
+    if (!token || !user || pendingCode) return;
     const isMember = room.players.some((p) => p.id === user.id);
 
     if (isMember) {
       // 已是成员：直接进房（若对局中，join 接口会标记重连）
       try {
-        if (room.status === 'playing') await joinRoom(token, room.code, null);
+        if (room.status === 'playing') {
+          setPendingCode(room.code);
+          await joinRoom(token, room.code, null);
+        }
         onNavigateToRoom(room.code);
       } catch (err) {
         notify('进入失败', (err as Error).message);
+      } finally {
+        setPendingCode(null);
       }
       return;
     }
@@ -168,10 +164,13 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
       return;
     }
     try {
+      setPendingCode(room.code);
       const joined = await joinRoom(token, room.code, null);
       onNavigateToRoom(joined.code);
     } catch (err) {
       notify('加入失败', (err as Error).message);
+    } finally {
+      setPendingCode(null);
     }
   };
 
@@ -246,43 +245,78 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
               <Text style={styles.emptyHint}>创建一个房间开始游戏吧</Text>
             </View>
           ) : (
-            rooms.map((room) => (
-              <TouchableOpacity
-                key={room.code}
-                style={styles.roomCard}
-                onPress={() => handleRoomPress(room)}
-                activeOpacity={0.8}
-              >
-                <View style={styles.roomHeader}>
-                  <Text style={styles.roomName}>{room.name}</Text>
-                  <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[room.status] || colors.textMuted }]}>
-                    <Text style={styles.statusText}>{STATUS_LABELS[room.status] || room.status}</Text>
+            rooms.map((room) => {
+              const isMember = !!user && room.players.some((p) => p.id === user.id);
+              const full = room.players.length >= room.max_players;
+              const canJoin = isMember || (room.status === 'waiting' && !full);
+              const pending = pendingCode === room.code;
+              const host = room.players.find((p) => p.is_host) ?? room.players[0];
+              const names = room.players
+                .map((p) => p.nickname || p.username)
+                .join(' · ');
+              const summary = settingsSummary(room.settings ?? []);
+              const statusText = room.status === 'playing'
+                ? (isMember ? '对局中 · 可重连' : '对局中 · 仅重连')
+                : full ? '已满' : '等待中';
+              const statusColor = room.status === 'playing'
+                ? colors.warning
+                : full ? colors.textMuted : colors.accent;
+              return (
+                <TouchableOpacity
+                  key={room.code}
+                  style={[styles.roomCard, !canJoin && styles.roomCardDim]}
+                  onPress={() => handleRoomPress(room)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${room.name}，${statusText}`}
+                >
+                  <View style={styles.roomHeader}>
+                    <Text style={styles.roomName}>{room.name}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+                      <Text style={styles.statusText}>{statusText}</Text>
+                    </View>
                   </View>
-                </View>
-                <View style={styles.roomMeta}>
-                  <Text style={styles.roomCode}>#{room.code}</Text>
-                  <View style={styles.gameBadge}>
-                    <Ionicons name={gameIonicon(room.game)} size={12} color={colors.white} />
-                    <Text style={styles.gameBadgeText}>
-                      {room.game === 'minesweeper'
-                        // 难度名由服务端下发（`room.settings`），客户端不抄一份档位表
-                        ? `${gameShort(room.game)}·${settingValueLabel(room, 'difficulty') ?? ''}`
-                        : gameShort(room.game)}
+                  <View style={styles.roomMeta}>
+                    <Text style={styles.roomCode}>#{room.code}</Text>
+                    <View style={styles.gameBadge}>
+                      <Ionicons name={gameIonicon(room.game)} size={12} color={colors.white} />
+                      <Text style={styles.gameBadgeText}>
+                        {room.game === 'minesweeper'
+                          // 难度名由服务端下发（`room.settings`），客户端不抄一份档位表
+                          ? `${gameShort(room.game)}·${settingValueLabel(room, 'difficulty') ?? ''}`
+                          : gameShort(room.game)}
+                      </Text>
+                    </View>
+                    <View style={styles.roomPlayers}>
+                      <Ionicons name="people" size={14} color={colors.textSecondary} />
+                      <Text style={styles.roomPlayersText}> {room.players.length}/{room.max_players}</Text>
+                    </View>
+                    {room.has_password && (
+                      <View style={styles.lockBadge}>
+                        <Ionicons name="lock-closed" size={12} color={colors.textMuted} />
+                        <Text style={styles.lockText}>有密码</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.roomPeople} numberOfLines={1}>
+                    房主 {host ? (host.nickname || host.username) : '—'} · {names}
+                  </Text>
+                  {((room.round ?? 0) > 0 || summary) ? (
+                    <Text style={styles.roomExtra} numberOfLines={1}>
+                      {(room.round ?? 0) > 0 ? `已打 ${room.round} 局 · 可续开` : ''}
+                      {(room.round ?? 0) > 0 && summary ? ' · ' : ''}
+                      {summary}
                     </Text>
-                  </View>
-                  <View style={styles.roomPlayers}>
-                    <Ionicons name="people" size={14} color={colors.textSecondary} />
-                    <Text style={styles.roomPlayersText}> {room.players.length}/{room.max_players}</Text>
-                  </View>
-                  {room.has_password && (
-                    <View style={styles.lockBadge}>
-                      <Ionicons name="lock-closed" size={12} color={colors.textMuted} />
-                      <Text style={styles.lockText}>有密码</Text>
+                  ) : null}
+                  {pending && (
+                    <View style={styles.cardPending}>
+                      <ActivityIndicator size="small" color={colors.primary} />
+                      <Text style={styles.cardPendingText}>正在加入…</Text>
                     </View>
                   )}
-                </View>
-              </TouchableOpacity>
-            ))
+                </TouchableOpacity>
+              );
+            })
           )}
         </ScrollView>
       )}
@@ -382,7 +416,21 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   roomHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  roomCardDim: { opacity: 0.62 },
   roomName: { fontSize: fontSize.md, fontWeight: '700', color: colors.text, flex: 1 },
+  roomPeople: {
+    fontSize: fontSize.xs, color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  roomExtra: {
+    fontSize: fontSize.xs, color: colors.textMuted,
+    marginTop: 2,
+  },
+  cardPending: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  cardPendingText: { fontSize: fontSize.xs, color: colors.primary },
   statusBadge: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,

@@ -3,7 +3,7 @@
 import json
 import sqlite3
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 
 _db_path: str = "data/gamehub.db"
@@ -201,6 +201,117 @@ def _row_to_record(row: sqlite3.Row) -> dict:
     }
 
 
+def get_user_stats(user_id: int) -> dict:
+    """Aggregate a player's record without shipping every row to the client.
+
+    战绩里 `result` 的语义由 `_build_results_record` 决定：
+    `win` / `lose` / `draw` / `end`。**胜率只按 `win + lose` 算**——
+    2048 的 `end`（没合出 2048）和有胜负但打平都不该稀释胜率；
+    连胜遇到任何非 `win` 都中断（平局/认输同样断）。
+    """
+    empty = {
+        "total": 0, "wins": 0, "losses": 0, "draws": 0,
+        "win_rate": None, "current_streak": 0, "best_streak": 0,
+        "recent_7d": 0, "top_games": [], "recent_games": [],
+        "best_scores": {}, "best_times": {},
+    }
+    conn = get_conn()
+    try:
+        user_row = conn.execute(
+            "SELECT username FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        if not user_row:
+            return empty
+        username = user_row["username"]
+        rows = conn.execute(
+            """SELECT game, results_json, ended_at
+               FROM game_records
+               WHERE players_json LIKE ?
+               ORDER BY id ASC""",
+            (f'%"{username}"%',),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    total = wins = losses = draws = recent_7d = 0
+    current_streak = best_streak = 0
+    game_counts: dict[str, int] = {}
+    game_wins: dict[str, int] = {}
+    last_played: dict[str, str] = {}
+    best_scores: dict[str, int] = {}
+    best_times: dict[str, int] = {}   # 扫雷各难度最佳用时（毫秒，越小越好）
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+
+    for row in rows:
+        try:
+            results = json.loads(row["results_json"])
+        except (TypeError, ValueError):
+            continue
+        mine = next(
+            (e for e in results if e.get("username") == username), None
+        )
+        if not mine:
+            continue
+        game = row["game"]
+        result = mine.get("result")
+        total += 1
+        game_counts[game] = game_counts.get(game, 0) + 1
+        if result == "win":
+            wins += 1
+            game_wins[game] = game_wins.get(game, 0) + 1
+            current_streak += 1
+            best_streak = max(best_streak, current_streak)
+        else:
+            current_streak = 0
+            if result == "lose":
+                losses += 1
+            else:
+                # draw / end / 未知值：算「非胜负局」，不进入胜率分母
+                draws += 1
+        # 跑分竞速的个人最佳分：老记录没有 score 键，跳过即可（从新记录开始累积）
+        score = mine.get("score")
+        if isinstance(score, int) and score > best_scores.get(game, -1):
+            best_scores[game] = score
+        # 扫雷最佳用时按难度分开；老记录没有 elapsed_ms/difficulty，跳过
+        elapsed = mine.get("elapsed_ms")
+        difficulty = mine.get("difficulty")
+        if isinstance(elapsed, int) and elapsed >= 0 and isinstance(difficulty, str):
+            if elapsed < best_times.get(difficulty, 1 << 62):
+                best_times[difficulty] = elapsed
+        ended_at = row["ended_at"] or ""
+        if game not in last_played or ended_at > last_played[game]:
+            last_played[game] = ended_at
+        try:
+            if datetime.fromisoformat(ended_at) >= cutoff:
+                recent_7d += 1
+        except (TypeError, ValueError):
+            pass
+
+    decided = wins + losses
+    top_games = [
+        {"game": g, "count": c, "wins": game_wins.get(g, 0)}
+        for g, c in sorted(game_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+    ]
+    recent_games = [
+        {"game": g, "last_played_at": t}
+        for g, t in sorted(last_played.items(), key=lambda kv: kv[1], reverse=True)[:4]
+    ]
+    return {
+        "total": total,
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "win_rate": round(wins / decided, 4) if decided else None,
+        "current_streak": current_streak,
+        "best_streak": best_streak,
+        "recent_7d": recent_7d,
+        "top_games": top_games,
+        "recent_games": recent_games,
+        "best_scores": best_scores,
+        "best_times": best_times,
+    }
+
+
 def _build_players_record(room: dict) -> list[dict]:
     """Build the players list stored with each record."""
     gs = room.get("game_state") or {}
@@ -239,9 +350,16 @@ def _build_results_record(room: dict) -> list[dict]:
             ranking = compute_ranking(gs, players_info)
         # Rank 1 = "win", others = "lose"; ties at rank 1 all "win"
         rank_map = {e["username"]: e["rank"] for e in ranking}
+        # 各难度的最佳用时从这里聚合（/api/history/stats 的 best_times）
+        time_map = {e["username"]: e.get("elapsed_ms") for e in ranking}
         for p in room["players"]:
             r = "win" if rank_map.get(p["username"], 999) == 1 else "lose"
-            results.append({"username": p["username"], "result": r})
+            results.append({
+                "username": p["username"],
+                "result": r,
+                "elapsed_ms": time_map.get(p["username"]),
+                "difficulty": room.get("difficulty"),
+            })
         return results
     if room["game"] == "ludo":
         ranking = room.get("_ludo_ranking", [])
@@ -286,6 +404,9 @@ def _build_results_record(room: dict) -> list[dict]:
             results.append({
                 "username": p["username"],
                 "result": "win" if reached else "end",
+                # 分数随战绩落库：个人最佳分（/api/history/stats 的 best_scores）
+                # 直接从战绩聚合，不必再建一张表。老记录没有这个键，聚合时跳过。
+                "score": gs.get("scores", {}).get(p["id"], 0),
             })
         return results
     # gomoku / reversi
@@ -310,6 +431,7 @@ def _build_snapshot(room: dict) -> dict:
             "game": "gomoku",
             "board_size": 15,
             "board": gs.get("board", []),
+            "moves": gs.get("moves", []),
             "winner": gs.get("winner"),
             "reason": gs.get("reason"),
         }
@@ -318,6 +440,7 @@ def _build_snapshot(room: dict) -> dict:
             "game": "reversi",
             "board_size": 8,
             "board": gs.get("board", []),
+            "moves": gs.get("moves", []),
             "winner": gs.get("winner"),
             "reason": gs.get("reason"),
         }
@@ -380,6 +503,7 @@ def _build_snapshot(room: dict) -> dict:
             "cols": COLS,
             "rows": ROWS,
             "board": gs.get("board", []),
+            "moves": gs.get("moves", []),
             "winner": gs.get("winner"),
             "reason": gs.get("reason"),
         }

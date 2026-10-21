@@ -80,8 +80,11 @@ LINE_SCORES = {1: 100, 2: 300, 3: 500, 4: 800}
 # 消行 → 送给对手的攻击行数（标准 Tetris 的简化版：单行不攻击）
 GARBAGE_TABLE = {1: 0, 2: 1, 3: 2, 4: 4}
 
-# 每消 10 行升 1 级；等级只用来算分与给客户端一个统一的降速基准
+# 每消 10 行升 1 级；等级既用于算分（倍率）也用于客户端重力间隔
 LINES_PER_LEVEL = 10
+
+# 预览队列长度（客户端显示「下一块」+ 再往后两块）
+PREVIEW_COUNT = 3
 
 
 def create_board() -> list[list[int]]:
@@ -106,6 +109,18 @@ def draw_piece(queue: list[str], rng: random.Random) -> str:
     if not queue:
         queue.extend(_refill_bag(rng))
     return queue.pop(0)
+
+
+def _refill_preview(gs: dict, uid: int) -> None:
+    """把该玩家的预览队列补到 `PREVIEW_COUNT` 块。
+
+    **预览只是「提前抽出来放着」**，抽取顺序与逐块 `draw_piece` 完全一致，所以
+    同种子的公平性不变。预览不消费方块，消费发生在 `spawn_next` / 换暂存时。
+    """
+    preview = gs["previews"][uid]
+    while len(preview) < PREVIEW_COUNT:
+        preview.append(draw_piece(gs["queues"][uid], gs["rngs"][uid]))
+    gs["next_piece"][uid] = preview[0] if preview else None
 
 
 def cells_of(piece: str, rotation: int, x: int, y: int) -> list[tuple[int, int]]:
@@ -265,26 +280,39 @@ def top_out(board: list[list[int]]) -> bool:
     return any(cell != EMPTY for row in board[:2] for cell in row)
 
 
-def level_of(lines: int) -> int:
-    """每 10 行升 1 级，从 1 起算（给客户端一个统一的降速基准）。"""
-    return 1 + lines // LINES_PER_LEVEL
+def level_of(lines: int, start_level: int = 1) -> int:
+    """起始档 + 每 10 行升 1 级。
+
+    起始档同时抬高**分数倍率**与**重力速度**（标准俄罗斯方块的做法）：三档之间
+    分差因此不是同一条计分线，但同一房间里所有人同档，排名仍然公平。
+    """
+    return max(1, start_level) + lines // LINES_PER_LEVEL
 
 
-def create_game(seeds: dict[int, int], player_ids: list[int]) -> dict:
+def create_game(
+    seeds: dict[int, int],
+    player_ids: list[int],
+    start_level: int = 1,
+) -> dict:
     """新建一局：每人一份空盘 + 一份同种子的方块队列。
 
-    `seeds[uid]` 由调用方给（同种子公平）。返回的 gs 直接可被 persistence 落盘
-    （rng 走 `__rng__` 编码器）。
+    `seeds[uid]` 由调用方给（同种子公平）；`start_level` 是房间设置里的起始速度档。
+    返回的 gs 直接可被 persistence 落盘（rng 走 `__rng__` 编码器）。
     """
+    start_level = max(1, int(start_level))
     return {
         "boards": {uid: create_board() for uid in player_ids},
         "rngs": {uid: create_seeded_rng(seeds[uid]) for uid in player_ids},
         "queues": {uid: [] for uid in player_ids},
         "current": {},          # uid -> 当前方块 {piece, rotation, x, y}
         "next_piece": {},       # uid -> 下一个方块名（客户端预览用）
+        "previews": {uid: [] for uid in player_ids},   # uid -> [接下来 3 块]
+        "held": {uid: None for uid in player_ids},     # uid -> 暂存的方块名
+        "hold_used": {uid: False for uid in player_ids},  # 本块是否已用过暂存
+        "start_level": start_level,
         "scores": {uid: 0 for uid in player_ids},
         "lines": {uid: 0 for uid in player_ids},
-        "level": {uid: 1 for uid in player_ids},
+        "level": {uid: start_level for uid in player_ids},
         "garbage_received": {uid: 0 for uid in player_ids},   # 本局被顶了多少攻击行（展示用）
         "game_over_flags": {uid: False for uid in player_ids},
         "finish_reasons": {uid: None for uid in player_ids},
@@ -297,8 +325,9 @@ def create_game(seeds: dict[int, int], player_ids: list[int]) -> dict:
 
 def spawn_next(gs: dict, uid: int) -> bool:
     """给 uid 出下一个方块；顶死返回 False（并标记该玩家结束）。"""
-    piece = gs["next_piece"].get(uid) or draw_piece(gs["queues"][uid], gs["rngs"][uid])
-    gs["next_piece"][uid] = draw_piece(gs["queues"][uid], gs["rngs"][uid])
+    _refill_preview(gs, uid)
+    piece = gs["previews"][uid].pop(0)
+    _refill_preview(gs, uid)
     cur = spawn(piece)
     if not is_valid(gs["boards"][uid], piece, cur["rotation"], cur["x"], cur["y"]):
         gs["game_over_flags"][uid] = True
@@ -306,6 +335,38 @@ def spawn_next(gs: dict, uid: int) -> bool:
         gs["current"][uid] = None
         return False
     gs["current"][uid] = cur
+    return True
+
+
+def hold_piece(gs: dict, uid: int) -> bool:
+    """暂存 / 换出当前方块。每块只能用一次（锁定后重置）。
+
+    规则：没有暂存块时，把当前块存起来、从预览队首取一块；已有暂存块时两块互换。
+    **换出来的方块从顶部重新出生**（与真实俄罗斯方块一致），所以它可能直接顶死。
+    返回是否真的执行了（已用过 / 当前没有方块时返回 False，调用方静默处理）。
+    """
+    if gs["hold_used"].get(uid):
+        return False
+    cur = gs["current"].get(uid)
+    if cur is None:
+        return False
+    held = gs["held"].get(uid)
+    gs["held"][uid] = cur["piece"]
+    gs["hold_used"][uid] = True
+    if held is None:
+        _refill_preview(gs, uid)
+        piece = gs["previews"][uid].pop(0)
+        _refill_preview(gs, uid)
+    else:
+        piece = held
+    new_cur = spawn(piece)
+    if not is_valid(gs["boards"][uid], piece, new_cur["rotation"],
+                    new_cur["x"], new_cur["y"]):
+        gs["game_over_flags"][uid] = True
+        gs["finish_reasons"][uid] = "top_out"
+        gs["current"][uid] = None
+        return True
+    gs["current"][uid] = new_cur
     return True
 
 
@@ -341,6 +402,18 @@ def apply_action(gs: dict, uid: int, action: str) -> dict:
         # 重力推进一格；落不下去就锁定
         if not move(board, cur, 0, 1):
             locked = True
+    elif action == "hold":
+        # 暂存是**即时换块**，不锁定当前块：客户端要的是「换出来的是什么」，
+        # 所以调用方收到 `held: True` 要立刻回一份权威状态（见 room_manager）。
+        done = hold_piece(gs, uid)
+        return {
+            "ok": done, "locked": False, "held": done, "cleared": 0,
+            "score_gained": 0, "garbage_sent": 0,
+            "player_finished": (
+                gs["finish_reasons"].get(uid)
+                if gs["game_over_flags"].get(uid) else None
+            ),
+        }
     else:
         return {"ok": False, "error": f"未知动作 {action}"}
 
@@ -365,7 +438,9 @@ def _lock_and_settle(gs: dict, uid: int) -> dict:
     gained = LINE_SCORES.get(cleared, 0) * gs["level"].get(uid, 1) if cleared else 0
     gs["scores"][uid] = gs["scores"].get(uid, 0) + gained
     gs["lines"][uid] = gs["lines"].get(uid, 0) + cleared
-    gs["level"][uid] = level_of(gs["lines"][uid])
+    gs["level"][uid] = level_of(gs["lines"][uid], gs.get("start_level", 1))
+    # 暂存每块限一次：锁定后重置
+    gs["hold_used"][uid] = False
 
     garbage = GARBAGE_TABLE.get(cleared, 0)
     victims = deliver_garbage(gs, uid, garbage) if garbage else []
@@ -469,6 +544,11 @@ def game_to_sync(gs: dict, user_id: int) -> dict:
         "board": gs["boards"].get(uid, []),
         "current": gs["current"].get(uid),
         "next_piece": gs["next_piece"].get(uid),
+        # 预览队列（接下来 3 块）与暂存块；`hold_used` 决定暂存入口还能不能点
+        "next_pieces": list(gs["previews"].get(uid, [])),
+        "held": gs["held"].get(uid),
+        "hold_used": bool(gs["hold_used"].get(uid)),
+        "start_level": gs.get("start_level", 1),
         "shapes": {
             name: [[list(c) for c in state] for state in states]
             for name, states in PIECES.items()

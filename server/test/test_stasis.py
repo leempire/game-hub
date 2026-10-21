@@ -2556,3 +2556,25 @@ class TestRegressions:
             st.advance(gs, st.TICK_MS, rng)
         assert p1["in_bed"] is True
         assert p1["bio"] > st.START_BIO
+
+
+class TestDifficulty:
+    """v1.18.1 三档难度：只乘静默体血量/门伤/进化速度，默认标准。"""
+
+    def test_entity_hp_follows_the_difficulty_multiplier(self):
+        base = st.ENTITY_HP[0] * st.PLAYER_COUNT_HP_MULT[2]
+        for key, spec in st.DIFFICULTY_SPECS.items():
+            gs = st.create_game([1, 2], seed=1, difficulty=key)
+            assert gs["difficulty"] == key
+            assert gs["entity"]["max_hp"] == pytest.approx(base * spec["hp"])
+
+    def test_unknown_difficulty_falls_back_to_normal(self):
+        gs = st.create_game([1, 2], seed=1, difficulty="nightmare")
+        assert gs["difficulty"] == st.DEFAULT_DIFFICULTY
+        assert st.difficulty_spec(gs) == st.DIFFICULTY_SPECS[st.DEFAULT_DIFFICULTY]
+
+    def test_sync_carries_difficulty(self):
+        gs = st.create_game([1, 2], seed=1, difficulty="hard")
+        sync = st.game_to_sync(gs, 1)
+        assert sync["difficulty"] == "hard"
+        assert sync["difficulty_label"] == st.DIFFICULTY_SPECS["hard"]["label"]

@@ -217,6 +217,10 @@ export class RoomSocket {
    * **不能排队**（同 move2048/ludo 的动作类消息）：序列过期后重放会作用到新方块上，
    * 盘面立刻与服务端分叉——未连接时直接丢弃，靠 sync 兜底。
    */
+  /** 2048 单人局撤销上一步（服务端裁决；多人局会回 error）。 */
+  undo2048(): void {
+    this.send({ type: 'undo2048' });
+  }
   tetrisActions(actions: string[]): void {
     if (actions.length === 0) return;
     this.send({ type: 'tetris_actions', actions });

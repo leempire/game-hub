@@ -244,6 +244,9 @@ def game_to_sync(gs: dict, user_id: int) -> dict:
         "finish_reason": (gs.get("finish_reasons") or {}).get(pid),
         "seed": gs["seed"],
         "move_count": gs["move_counts"].get(pid, 0),
+        # 撤销只在单人局开放（多人局各玩各的、同种子竞速，撤销会破坏可比性），
+        # 这里把「能不能撤销」直接下发，客户端不必自己推断
+        "undo_available": bool((gs.get("undo_stacks") or {}).get(pid)),
         "your_color": gs["player_colors"].get(pid),
         "player_count": len(gs["boards"]),
         "leaderboard": leaderboard(gs),

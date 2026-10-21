@@ -8,6 +8,7 @@
     python test/balance_stasis.py                 # 默认 16 局/档
     python test/balance_stasis.py --games 32      # 每档 32 局
     python test/balance_stasis.py --style turtle  # 只跑一种打法
+    python test/balance_stasis.py --difficulty easy --games 8   # 轻松档 24 局
 
 **为什么这个脚本要进版本库**：v2 那一版跑平衡的脚本没进版本库，后来重跑时发现
 文档里那张表复现不出来（见 `设计.md` §1.5.1 的说明），只能改用「同策略对照」来
@@ -300,9 +301,10 @@ def decide(gs: dict, uid: int, style: str) -> dict | None:
     return STYLES[style](gs, uid, p)
 
 
-def play(style: str, n_players: int, seed: int, map_id: str = "dorm") -> dict:
+def play(style: str, n_players: int, seed: int, map_id: str = "dorm",
+         difficulty: str = st.DEFAULT_DIFFICULTY) -> dict:
     uids = list(range(1, n_players + 1))
-    gs = st.create_game(uids, seed=seed, map_id=map_id)
+    gs = st.create_game(uids, seed=seed, map_id=map_id, difficulty=difficulty)
     rng = gs["rng"]
     tick = 0
     while not gs["finished"] and tick < MAX_TICKS:
@@ -329,6 +331,9 @@ def main() -> None:
     ap.add_argument("--style", type=str, default=",".join(BASE_STYLES))
     ap.add_argument("--map", dest="map_id", type=str, default="dorm",
                     help="地图 id（dorm / suite / atrium）")
+    ap.add_argument("--difficulty", type=str, default=st.DEFAULT_DIFFICULTY,
+                    choices=list(st.DIFFICULTY_SPECS),
+                    help="难度档位（easy / normal / hard）")
     args = ap.parse_args()
 
     counts = [int(x) for x in args.players.split(",")]
@@ -336,6 +341,7 @@ def main() -> None:
     base_seed = 20261013
 
     print(f"地图 {args.map_id}（{M.get_map(args.map_id).name}）"
+          f" · 难度 {st.DIFFICULTY_SPECS[args.difficulty]['label']}({args.difficulty})"
           f" · 每档 {args.games} 局")
     for style in styles:
         row = []
@@ -343,7 +349,7 @@ def main() -> None:
             tally = collections.Counter()
             levels = []
             for i in range(args.games):
-                out = play(style, n, base_seed + i, args.map_id)
+                out = play(style, n, base_seed + i, args.map_id, args.difficulty)
                 tally[out["reason"]] += 1
                 levels.append(out["level"])
             killed = tally[st.REASON_KILLED]

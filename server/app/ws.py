@@ -202,6 +202,8 @@ async def _handle_message(code: str, user_id: int, data: dict):
         await _handle_swap_respond(code, user_id, data)
     elif msg_type == "move2048":
         await _handle_move2048(code, user_id, data)
+    elif msg_type == "undo2048":
+        await _handle_undo2048(code, user_id, data)
     elif msg_type == "tetris_actions":
         await _handle_tetris_actions(code, user_id, data)
     elif msg_type == "uno_play":
@@ -591,6 +593,9 @@ async def _handle_flag(code: str, user_id: int, data: dict):
         "x": result["x"],
         "y": result["y"],
         "flagged": result["flagged"],
+        # 三态：flag / question / none（问号是纯笔记，不参与裁决）
+        "questioned": result.get("questioned", False),
+        "state": result.get("state", "flag" if result["flagged"] else "none"),
         "seat": result["seat"],
     })
 
@@ -1055,6 +1060,20 @@ async def _send_battleship_to_all(code: str, gs: dict, msg: dict):
             await ws.send_json({**msg, "game": bs_game_to_sync(gs, pid)})
 
 
+def _public_weapon_shots(shots: list, hide_type: bool) -> list:
+    """击沉不报舰种时，连**协议里的 ship_id** 也一并抹掉。
+
+    只让客户端「不显示」是假隐藏——消息线路上仍带着舰种，等于没做这条房规。
+    位置（x/y/cells）与是否击沉保留，这些是公开信息。
+    """
+    if not hide_type:
+        return shots
+    return [
+        {k: v for k, v in shot.items() if k != "ship_id"} if isinstance(shot, dict) else shot
+        for shot in shots
+    ]
+
+
 async def _broadcast_battleship_action(
     code: str, room: dict, user_id: int, result: dict,
 ):
@@ -1064,6 +1083,7 @@ async def _broadcast_battleship_action(
     避免三处各写一遍导致协议漂移。
     """
     gs = room["game_state"]
+    hide_type = bool(gs.get("hide_sunk_ship_type"))
     if result.get("weapon"):
         await _send_battleship_to_all(code, gs, {
             "type": "weapon_used",
@@ -1073,7 +1093,7 @@ async def _broadcast_battleship_action(
             "x": result["x"],
             "y": result["y"],
             "cells": result["cells"],
-            "shots": result["shots"],
+            "shots": _public_weapon_shots(result["shots"], hide_type),
         })
         # 雷达结果只回给使用者——对手只看到他放了一次雷达，看不到探测结果
         if result.get("radar") is not None:
@@ -1092,7 +1112,7 @@ async def _broadcast_battleship_action(
             "x": shot["x"],
             "y": shot["y"],
             "result": shot["result"],
-            "ship_id": shot.get("ship_id"),
+            "ship_id": None if hide_type else shot.get("ship_id"),
             "sunk_cells": shot.get("sunk_cells"),
             "shooter_color": gs["player_colors"].get(user_id, ""),
             # 命中续射：连着打时客户端要保持「轮到你」的高亮
@@ -1174,6 +1194,29 @@ async def _handle_move2048(code: str, user_id: int, data: dict):
         await _broadcast(code, {"type": "game_over", **result["game_over"]})
 
 
+async def _handle_undo2048(code: str, user_id: int, data: dict):
+    """单人 2048 撤销：只回给本人（盘面私有；多人局由服务端拒绝）。"""
+    result = rm.game2048_undo(code, user_id)
+    conns = _connections.get(code, {})
+    ws = conns.get(user_id)
+    if not result["ok"]:
+        if result.get("silent"):
+            return
+        if ws:
+            await ws.send_json({"type": "error", "message": result["error"]})
+        return
+    if ws:
+        await ws.send_json({
+            "type": "undo2048",
+            "user_id": user_id,
+            "board": result["board"],
+            "score": result["score"],
+            "move_count": result["move_count"],
+            "undo_available": result["undo_available"],
+            "leaderboard": result["leaderboard"],
+        })
+
+
 async def _handle_tetris_actions(code: str, user_id: int, data: dict):
     """俄罗斯方块：重放客户端攒下的一段动作序列，然后**逐人下发**新状态。
 
@@ -1201,7 +1244,7 @@ async def _handle_tetris_actions(code: str, user_id: int, data: dict):
     leaderboard = tetris_leaderboard(gs)
     conns = _connections.get(code, {})
 
-    # ① 本人：完整新状态（锁定了才推；没锁定 = 两边分叉，见下面的兜底）
+    # ① 本人：完整新状态（锁定 / 暂存换块 / 兜底重同步三种情况都要推）
     if result["locked"]:
         ws = conns.get(user_id)
         if ws:
@@ -1219,6 +1262,18 @@ async def _handle_tetris_actions(code: str, user_id: int, data: dict):
                 "player_finished": result.get("player_finished"),
                 "leaderboard": leaderboard,
                 "last_action": "lock",
+            })
+    elif result.get("held"):
+        # 暂存换了当前块（没有锁定）：盘面不变，但 current / next / held 都变了
+        ws = conns.get(user_id)
+        if ws:
+            await ws.send_json({
+                "type": "tetris_state",
+                **tetris_game_to_sync(gs, user_id),
+                "user_id": user_id,
+                "leaderboard": leaderboard,
+                "last_action": "hold",
+                "player_finished": result.get("player_finished"),
             })
     else:
         # **分叉兜底**：客户端只在「方块下不动了」时才把动作序列发上来（或点了硬降），
@@ -2220,7 +2275,9 @@ async def _bot_do_placement(code: str, bot_id: int):
     if gs["placement_ready"].get(bot_id):
         return  # 已布阵（热重启重复调度时幂等）
     # 人机布阵按**这一局那张棋盘**的舰队与尺寸（v13：尺寸是房间级设置）
-    ships = bs_random_placement(size=gs.get("size"))
+    ships = bs_random_placement(
+        size=gs.get("size"), no_touch=bool(gs.get("adjacent_placement")),
+    )
     result = rm.battleship_set_placement(code, bot_id, ships)
     if not result["ok"]:
         return

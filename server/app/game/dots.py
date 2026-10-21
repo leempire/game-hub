@@ -239,6 +239,7 @@ def snapshot(gs: dict) -> dict:
         "v": gs["v"],
         "boxes": gs["boxes"],
         "scores": gs["scores"],
+        "moves": gs.get("moves", []),
         "winner": gs["winner"],
         "reason": gs["reason"],
     }

@@ -206,6 +206,21 @@ def main():
         assert len([1 for r, _ in cells2 if r >= ROWS - 4]) == 4, f'硬降的块没落到底部：{cells2}'
         ok('硬降：服务端重放并回权威盘面 + 下一块')
 
+        # 暂存（v1.18.1）：点一下立刻换块（不锁定），每块限一次，回包前冻结输入
+        click(pa, 't-hold', wait=800)
+        hold_box = pa.locator('[data-testid="t-hold"]')
+        assert '已用' in hold_box.inner_text(), '暂存后入口应标「已用」'
+        held_piece = hold_box.get_attribute('aria-label') or ''
+        assert '（空）' not in held_piece, f'暂存框应显示存下的方块：{held_piece}'
+        after_hold = top_cells(pa)
+        assert after_hold, '暂存后应立刻出现换出来的新方块'
+        # 不锁定：底部落定的那 4 格还在（换块不消行、不落子）
+        assert len(named_cells(read_board(pa))) >= 8, '暂存不应吞掉盘面'
+        click(pa, 't-hold', wait=350)
+        assert '已经暂存过' in pa.locator('body').inner_text(), \
+            '同一块再点暂存要有提示（不能点了没反应）'
+        ok('暂存：即时换块、每块限一次、用过的点击有提示')
+
         # B 的盘面没有被 A 的操作影响（各玩各的）。
         # 断言「底部 4 行没有落定的块」而不是「B 恰好 4 格」：B 的方块一直在
         # 自己下落，逐格读 200 个 DOM 节点的过程中会跨过一两次重力 tick，读到的

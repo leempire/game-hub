@@ -1,16 +1,21 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal, TextInput,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import { useAuth } from '../auth';
-import { createRoom, joinRoom } from '../api';
+import { createRoom, joinRoom, fetchMyStats, MyStats } from '../api';
 import { colors, spacing, radius, fontSize } from '../theme';
 import { useModalBackGuard } from '../backGuard';
 import { GameHelpButton } from '../help';
+import { CreateRoomModal } from '../roomForms';
+import {
+  HomeHero, RecentGames, GameFilters, type CategoryFilter,
+} from '../homeSections';
 // 游戏目录（名字 / 说明 / 徽标 / 分类 / 图标）的唯一来源。
-import { GAMES, GAME_CATEGORIES, type GameEntry } from '../games';
+import { GAMES, GAME_CATEGORIES, type GameEntry, type GameKey } from '../games';
 
 interface Props {
   onNavigateToRooms: () => void;
@@ -19,6 +24,7 @@ interface Props {
 
 export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props) {
   const { token } = useAuth();
+  const isFocused = useIsFocused();
   // 当前打开的是哪个游戏的「创建 / 加入」弹窗（null = 关着）。
   // 13 个布尔 state + 13 个弹窗收成一个 —— 它们本来就逐字相同。
   const [picked, setPicked] = useState<GameEntry | null>(null);
@@ -32,6 +38,30 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
   // 提交中点取消后，已在路上的请求回来时不能再导航
   const createCancelledRef = useRef(false);
   const joinCancelledRef = useRef(false);
+  // 主页顶部：主 CTA 的「快速创建」/ 最近玩过 / 搜索筛选
+  const [showQuickCreate, setShowQuickCreate] = useState(false);
+  const [quickGame, setQuickGame] = useState<GameKey>('gomoku');
+  const [quickName, setQuickName] = useState('');
+  const [quickPwd, setQuickPwd] = useState('');
+  const [quickCreating, setQuickCreating] = useState(false);
+  const [quickError, setQuickError] = useState<string | null>(null);
+  const quickCancelledRef = useRef(false);
+  const [stats, setStats] = useState<MyStats | null>(null);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<CategoryFilter>('all');
+
+  const loadStats = useCallback(async () => {
+    if (!token) return;
+    try {
+      setStats(await fetchMyStats(token));
+    } catch {
+      // 最近玩过只是锦上添花，失败不打扰用户
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (isFocused) void loadStats();
+  }, [isFocused, loadStats]);
 
   const closePicked = () => {
     createCancelledRef.current = true;
@@ -45,8 +75,35 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
     setJoinPwd('');
     setModalError(null);
   };
+  const closeQuickCreate = () => {
+    quickCancelledRef.current = true;
+    setShowQuickCreate(false);
+    setQuickName('');
+    setQuickPwd('');
+    setQuickError(null);
+  };
   useModalBackGuard(picked !== null, closePicked);
   useModalBackGuard(showJoinModal, closeJoin);
+  useModalBackGuard(showQuickCreate, closeQuickCreate);
+
+  const handleQuickCreate = async () => {
+    if (!token) return;
+    quickCancelledRef.current = false;
+    setQuickError(null);
+    setQuickCreating(true);
+    try {
+      const room = await createRoom(token, quickGame, quickName || null, quickPwd || null);
+      if (quickCancelledRef.current) return;
+      setShowQuickCreate(false);
+      setQuickName('');
+      setQuickPwd('');
+      onNavigateToRoom(room.code);
+    } catch (err) {
+      if (!quickCancelledRef.current) setQuickError((err as Error).message);
+    } finally {
+      setQuickCreating(false);
+    }
+  };
 
   const handleCreateRoom = async () => {
     if (!token || !picked) return;
@@ -92,60 +149,113 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
     }
   };
 
+  const q = query.trim().toLowerCase();
+  const matches = (g: GameEntry) => {
+    if (category !== 'all' && g.category !== category) return false;
+    if (!q) return true;
+    return [g.title, g.short, g.desc, g.badge]
+      .some((text) => text.toLowerCase().includes(q));
+  };
+  const filtered = GAMES.filter(matches);
+  // 「全部 + 无搜索」时按分类分组；一旦筛选或搜索就平铺，省掉多余的分组头
+  const grouped = category === 'all' && q === '';
+
+  const renderCard = (g: GameEntry) => (
+    <TouchableOpacity
+      key={g.key}
+      testID={`game-card-${g.key}`}
+      style={styles.gameCard}
+      onPress={() => setPicked(g)}
+      activeOpacity={0.8}
+    >
+      <View style={styles.cardIconWrap}>
+        <g.Icon size={44} />
+      </View>
+      <View style={styles.cardInfo}>
+        <Text style={styles.cardTitle}>{g.title}</Text>
+        <Text style={styles.cardDesc}>{g.desc}</Text>
+        <View style={styles.cardBadge}>
+          <Text style={styles.cardBadgeText}>{g.badge}</Text>
+        </View>
+      </View>
+      <View style={styles.cardHelpCol}>
+        <GameHelpButton game={g.key} />
+      </View>
+    </TouchableOpacity>
+  );
+
+  const recent = stats?.recent_games.map((r) => r.game) ?? [];
+
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.sectionTitle}>选择游戏</Text>
+        <HomeHero
+          onCreate={() => {
+            setQuickGame('gomoku');
+            setQuickError(null);
+            setShowQuickCreate(true);
+          }}
+          onJoin={() => setShowJoinModal(true)}
+          onBrowse={onNavigateToRooms}
+        />
+        <RecentGames
+          games={recent}
+          onPick={(key) => {
+            const g = GAMES.find((x) => x.key === key);
+            if (g) setPicked(g);
+          }}
+        />
+        <GameFilters
+          query={query}
+          onChangeQuery={setQuery}
+          category={category}
+          onChangeCategory={setCategory}
+        />
 
-        {GAME_CATEGORIES.map((cat) => {
-          const games = GAMES.filter((g) => g.category === cat.key);
-          if (games.length === 0) return null;
-          return (
-            <View key={cat.key} style={styles.category}>
-              <View style={styles.categoryHead}>
-                <Text style={styles.categoryName}>{cat.name}</Text>
-                <Text style={styles.categoryBlurb}>{cat.blurb}</Text>
-                <Text style={styles.categoryCount}>{games.length}</Text>
+        {grouped ? (
+          GAME_CATEGORIES.map((cat) => {
+            const games = filtered.filter((g) => g.category === cat.key);
+            if (games.length === 0) return null;
+            return (
+              <View key={cat.key} style={styles.category}>
+                <View style={styles.categoryHead}>
+                  <Text style={styles.categoryName}>{cat.name}</Text>
+                  <Text style={styles.categoryBlurb}>{cat.blurb}</Text>
+                  <Text style={styles.categoryCount}>{games.length}</Text>
+                </View>
+                {games.map(renderCard)}
               </View>
-              {games.map((g) => (
-                <TouchableOpacity
-                  key={g.key}
-                  testID={`game-card-${g.key}`}
-                  style={styles.gameCard}
-                  onPress={() => setPicked(g)}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.cardIconWrap}>
-                    <g.Icon size={44} />
-                  </View>
-                  <View style={styles.cardInfo}>
-                    <Text style={styles.cardTitle}>{g.title}</Text>
-                    <Text style={styles.cardDesc}>{g.desc}</Text>
-                    <View style={styles.cardBadge}>
-                      <Text style={styles.cardBadgeText}>{g.badge}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.cardHelpCol}>
-                    <GameHelpButton game={g.key} />
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          );
-        })}
-
-        {/* Quick actions */}
-        <View style={styles.actions}>
-          <TouchableOpacity style={styles.actionBtn} onPress={onNavigateToRooms}>
-            <Ionicons name="home" size={32} color={colors.primary} />
-            <Text style={styles.actionBtnText}>浏览房间</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => setShowJoinModal(true)}>
-            <Ionicons name="key" size={32} color={colors.primary} />
-            <Text style={styles.actionBtnText}>加入房间</Text>
-          </TouchableOpacity>
-        </View>
+            );
+          })
+        ) : filtered.length === 0 ? (
+          <View style={styles.noResult}>
+            <Ionicons name="search-outline" size={40} color={colors.textMuted} />
+            <Text style={styles.noResultText}>没有找到匹配的游戏</Text>
+            <TouchableOpacity
+              style={styles.noResultBtn}
+              onPress={() => { setQuery(''); setCategory('all'); }}
+            >
+              <Text style={styles.noResultBtnText}>清除筛选</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.category}>{filtered.map(renderCard)}</View>
+        )}
       </ScrollView>
+
+      <CreateRoomModal
+        visible={showQuickCreate}
+        game={quickGame}
+        name={quickName}
+        password={quickPwd}
+        error={quickError}
+        submitting={quickCreating}
+        onPickGame={setQuickGame}
+        onChangeName={setQuickName}
+        onChangePassword={setQuickPwd}
+        onSubmit={() => void handleQuickCreate()}
+        onClose={closeQuickCreate}
+      />
 
       {/* 建房 / 加入（13 个游戏共用这一个弹窗） */}
       <Modal visible={picked !== null} transparent animationType="fade" onRequestClose={closePicked}>
@@ -243,13 +353,6 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: spacing.md, paddingBottom: spacing.xxl },
-  sectionTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  // 分类：标题行 + 一句玩法说明 + 该类的游戏数（数是给「这一类有多大」一个量感）
   category: { marginBottom: spacing.md },
   categoryHead: {
     flexDirection: 'row',
@@ -307,21 +410,18 @@ const styles = StyleSheet.create({
   },
   cardBadgeComingSoon: { backgroundColor: colors.textMuted },
   cardBadgeText: { color: colors.white, fontSize: fontSize.xs, fontWeight: '600' },
-  actions: {
-    flexDirection: 'row',
-    gap: spacing.md,
+  noResult: { alignItems: 'center', paddingVertical: spacing.xxl },
+  noResultText: { fontSize: fontSize.md, color: colors.textSecondary, marginTop: spacing.sm },
+  noResultBtn: {
     marginTop: spacing.md,
-  },
-  actionBtn: {
-    flex: 1,
-    backgroundColor: colors.card,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
     borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
   },
-  actionBtnText: { fontSize: fontSize.sm, color: colors.text, marginTop: spacing.xs },
+  noResultBtnText: { fontSize: fontSize.sm, color: colors.text, fontWeight: '600' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
