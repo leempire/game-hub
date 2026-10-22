@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from app import persistence
 from app import room_settings
+from app.game import spider
 from app.game import stasis as stasis_engine
 from app.game import stasis_ai
 
@@ -395,8 +396,8 @@ def get_all_rooms() -> list[dict]:
     """
     rooms = [
         r for r in _rooms.values()
-        if r["status"] == "playing"
-        or (r["status"] == "waiting" and _has_human_online(r))
+        if r["game"] != "spider" and (r["status"] == "playing"
+        or (r["status"] == "waiting" and _has_human_online(r)))
     ]
     rooms.sort(key=lambda r: r["created_at"], reverse=True)
     return rooms
@@ -460,13 +461,20 @@ def create_room(
 ) -> dict:
     """Create a new room."""
     if game not in ("gomoku", "reversi", "minesweeper", "battleship", "dots", "ludo",
-                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi"):
+                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider"):
         raise ValueError("不支持的游戏类型")
+    if game == "spider":
+        # 每个账号只保留一个私有牌局，入口再次点击即续玩。
+        for saved in _rooms.values():
+            if saved["game"] == "spider" and saved["host_id"] == user["id"]:
+                return saved
     code = _generate_code()
     room_name = name or f"{user['username']}的房间"
     # 深空休眠 6 人（12 间舱室 / 12 个座位），其余多人游戏 4 人上限
     max_players = 6 if game == "stasis" else (
         4 if game in ("minesweeper", "ludo", "2048", "tetris", "uno") else 2)
+    if game == "spider":
+        max_players = 1
     room = {
         "code": code,
         "name": room_name,
@@ -710,6 +718,11 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
     room = _rooms.get(code)
     if not room:
         return ("closed", None)
+    if room["game"] == "spider":
+        if user_id != room["host_id"]:
+            raise ValueError("这是其他玩家的单人牌局")
+        _touch_activity(room)
+        return ("removed", room)  # 单人离开只保存，不结束或清空牌局。
     is_host = user_id == room["host_id"]
     if room["status"] == "playing":
         if room["game"] == "stasis":
@@ -848,6 +861,8 @@ def start_game(code: str, user_id: int) -> dict | None:
     # 开局后座位就锁死了：还挂着的换位请求一律作废（否则下一局回到大厅时
     # 会有一条「上一局之前」的请求突然生效）
     room["swap_requests"] = []
+    if room["game"] == "spider":
+        return _start_spider(room)
     if room["game"] == "minesweeper":
         return _start_minesweeper(room)
     if room["game"] == "reversi":
@@ -893,6 +908,44 @@ def start_game(code: str, user_id: int) -> dict | None:
     room["game_state"] = game_state
     _touch_activity(room)
     return game_state
+
+
+def _start_spider(room: dict) -> dict:
+    revision = (room.get("game_state") or {}).get("revision", -1) + 1
+    room["game_state"] = spider.create_game()
+    room["game_state"]["revision"] = revision
+    room.update(status="playing", game_started_at=_now_iso(), empty_since=None)
+    _touch_activity(room)
+    return room["game_state"]
+
+
+def spider_action(code: str, user_id: int, data: dict) -> dict:
+    room = get_room(code)
+    if not room or room["game"] != "spider" or room["host_id"] != user_id:
+        return {"error": "这不是你的蜘蛛纸牌牌局"}
+    gs = room.get("game_state")
+    if not gs:
+        return {"error": "牌局尚未开始"}
+    if type(data.get("revision")) is not int or data["revision"] != gs["revision"]:
+        return {"error": "牌局已更新，请按当前牌面操作"}
+    action = data.get("action")
+    if action == "new":
+        if not gs["finished"]:
+            gs["finished"] = True
+            _set_game_over(room, "end", "restart")
+        _start_spider(room)
+    else:
+        if room["status"] != "playing":
+            return {"error": "本局已结束，请开始新牌局"}
+        error = spider.apply_action(gs, action, data.get("source"),
+                                    data.get("index"), data.get("target"))
+        if error:
+            return {"error": error}
+        if gs["finished"]:
+            _set_game_over(room, "solo", "completed")
+        else:
+            _touch_activity(room)
+    return {"game": spider.game_to_sync(room["game_state"])}
 
 
 def _start_minesweeper(room: dict) -> dict:
@@ -1761,7 +1814,7 @@ def reconnect_seconds_left(room: dict, player: dict) -> int | None:
     客户端拿它做「等待重连（N 秒）」的倒计时起点——重连后 sync 给的是**剩余**
     秒数而不是总时长，所以刷新页面/换设备回来看到的倒计时也是准的。
     """
-    if room.get("status") != "playing" or player.get("connected", True):
+    if room.get("game") == "spider" or room.get("status") != "playing" or player.get("connected", True):
         return None
     started = player.get("disconnected_at")
     if not started:
@@ -2856,6 +2909,8 @@ def handle_player_disconnect(code: str, user_id: int, loop: asyncio.AbstractEven
             p["disconnected_at"] = _time.time()   # 供重连倒计时算剩余秒数
             break
     persistence.save_room(room)
+    if room["game"] == "spider":
+        return  # 单人存档允许离线，不使用多人对局的掉线判负。
     # 等待中（含刚打完一局回到等待态的房间）：**不立即移出玩家**。
     # 客户端从对局页返回房间时是「先关对局页连接、再重连房间页」，两步之间有
     # 窗口期；立即移出会让房间瞬间没人而被销毁（返回房间 → 房间不存在）。
@@ -3160,6 +3215,8 @@ def sweep_idle_rooms():
         room = _rooms.get(code)
         if not room:
             continue
+        if room["game"] == "spider":
+            continue  # 每账号一个续玩存档，不按多人房间的闲置时间回收。
         if room["status"] == "waiting":
             es = room.get("empty_since")
             if es is not None and (now - es) > WAITING_EMPTY_TTL:

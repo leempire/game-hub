@@ -140,6 +140,15 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
 
 ## 关键机制（改动前必读）
 
+### 蜘蛛纸牌（单人）
+
+`game/spider.py` 为纯规则引擎，`spider` 每账号一个私有牌局；首页直接开始/续玩。
+**离线不判负，也不执行多人房间闲置清理或恢复后的 waiting 清退**。
+`spider_action` 经 revision 校验后完成动作、落盘、再回权威视图；暗牌和余牌顺序不下发。
+撤销保留最近 200 步；新局与自然终局经 `_set_game_over` 记录战绩，单人返回只保存。
+接入说明、协议与验证见 `docs/游戏设计/蜘蛛纸牌/设计.md`，调研见同目录 `增强调研.md`。
+回归：`server/test/test_spider.py`、`server/test/test_ws_spider.py`、`test/e2e_spider_smoke.py`。
+
 ### 返回操作（backGuard.tsx）
 优先级：弹窗 > 对局页确认 > 主 Tab 双击退出（2s 窗口）。
 - 原生：`BackHandler` 单监听（initBackGuard）+ 各对局屏 `beforeRemove` 弹确认（仅原生）。

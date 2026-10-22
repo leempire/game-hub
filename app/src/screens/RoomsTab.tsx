@@ -221,7 +221,7 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
             {/* 13 个游戏从目录表里生成（`games.tsx`）—— 以前这里是 13 段逐字相同的
                 JSX（图标名 + 短名各手抄一遍），加一个游戏要改三处。 */}
             <View style={styles.gameTypeRow}>
-              {GAMES.map((g) => {
+              {GAMES.filter(g => g.key !== 'spider').map((g) => {
                 const active = createGame === g.key;
                 return (
                   <TouchableOpacity

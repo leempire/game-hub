@@ -17,6 +17,7 @@ import ReversiScreen from './screens/ReversiScreen';
 import BattleshipScreen from './screens/BattleshipScreen';
 import DotsScreen from './screens/DotsScreen';
 import Game2048Screen from './screens/Game2048Screen';
+import SpiderScreen from './screens/SpiderScreen';
 import MineScreen from './screens/MineScreen';
 import LudoScreen from './screens/LudoScreen';
 import XiangqiScreen from './screens/XiangqiScreen';
@@ -43,6 +44,7 @@ export type RootStackParamList = {
   Battleship: { code: string };
   Dots: { code: string };
   Game2048: { code: string };
+  Spider: { code: string };
   Minesweeper: { code: string };
   Ludo: { code: string };
   Xiangqi: { code: string };
@@ -212,6 +214,7 @@ function GamesTabWrapper() {
     <GamesTab
       onNavigateToRooms={() => nav.navigate('Rooms')}
       onNavigateToRoom={(code: string) => nav.navigate('Room', { code })}
+      onNavigateToSpider={(code: string) => nav.navigate('Spider', { code })}
     />
   );
 }
@@ -251,6 +254,8 @@ function RoomScreenWrapper({ route, navigation }: { route: any; navigation: any 
           navigation.navigate('Dots', { code: c });
         } else if (game === 'ludo') {
           navigation.navigate('Ludo', { code: c });
+        } else if (game === 'spider') {
+          navigation.navigate('Spider', { code: c });
         } else if (game === '2048') {
           navigation.navigate('Game2048', { code: c });
         } else if (game === 'xiangqi') {
@@ -383,6 +388,11 @@ function DotsScreenWrapper({ route, navigation }: { route: any; navigation: any 
   );
 }
 
+function SpiderScreenWrapper({ route, navigation }: { route: any; navigation: any }) {
+  return <SpiderScreen code={route.params.code}
+    onLeave={() => navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] })} />;
+}
+
 // Game2048 screen wrapper
 function Game2048ScreenWrapper({ route, navigation }: { route: any; navigation: any }) {
   const { code } = route.params;
@@ -463,6 +473,11 @@ export default function AppNavigation() {
             name="Game2048"
             component={Game2048ScreenWrapper}
             options={{ headerShown: true, title: gameTitle('2048'), headerStyle: { backgroundColor: colors.card } }}
+          />
+          <Stack.Screen
+            name="Spider"
+            component={SpiderScreenWrapper}
+            options={{ headerShown: true, title: gameTitle('spider'), headerStyle: { backgroundColor: colors.card } }}
           />
           <Stack.Screen
             name="Minesweeper"

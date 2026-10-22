@@ -4,7 +4,7 @@ import React from 'react';
 import Svg, { Circle, Defs, Ellipse, G, Line, LinearGradient, Path, Polygon, Rect, Stop, Text } from 'react-native-svg';
 // UNO 的牌色直接取 theme（「颜色只有 theme.ts 一个来源」是硬规则——本文件其余
 // 图标用的是各自的局部常量，UNO 不再复制一份 hex）
-import { unoColors, unoWild, unoInk, unoOnWild } from './theme';
+import { unoColors, unoWild, unoInk, unoOnWild, colors, spiderTable } from './theme';
 // 深空休眠的整套令牌也一律从 theme 取（同上：不在图标里写死 hex）
 // **v5 起只剩这一组**：各单位的贴图搬到 `stasisArt.tsx` 了（那边的贴图是
 // 「整格 44px 的俯视 sprite」，与这里 64px 的「正面图标」不是一套画法）。
@@ -20,6 +20,16 @@ const STONE_EDGE = '#D4D4D4';
 const TILE = '#C7CDD6';
 const TILE_LIGHT = '#EDF1F5';
 const TILE_DARK = '#98A2B3';
+
+export function SpiderIcon({ size = 56 }: { size?: number }) {
+  return <Svg width={size} height={size} viewBox="0 0 64 64">
+    <Rect x="3" y="3" width="58" height="58" rx="14" fill={spiderTable} />
+    <G transform="rotate(-15 24 32)"><Rect x="10" y="13" width="28" height="39" rx="4" fill={colors.primary} stroke={colors.white} strokeWidth="2" /></G>
+    <G transform="rotate(10 38 32)"><Rect x="25" y="12" width="28" height="40" rx="4" fill={colors.white} />
+      <Path d="M39 21C36 26 30 28 30 33a5 5 0 0 0 8 4c0 3-1 4-3 5h8c-2-1-3-2-3-5a5 5 0 0 0 8-4c0-5-6-7-9-12Z" fill={colors.text} />
+    </G>
+  </Svg>;
+}
 
 // 应用 Logo（方案C）：圆角方形渐变底 + 白色六芒星与外接圆
 export function AppLogo({ size = 56 }: { size?: number }) {
