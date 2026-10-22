@@ -86,7 +86,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
         pa = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
         pb = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
@@ -194,6 +193,7 @@ def main():
         ok('双方「返回房间」回到房间大厅，房间保留可续开')
 
         # 终局把真人非房主复位为未准备：B 回到房间页应看到「准 备」而不是「已准备」
+        pb.get_by_text('准 备', exact=True).wait_for(timeout=10000)
         body_b = pb.locator('body').inner_text()
         assert '准 备' in body_b or '取消准备' not in body_b, \
             f'终局后 B 应回到未准备状态: {body_b[:200]}'
@@ -227,9 +227,7 @@ def main():
         pb.get_by_text('确认退出', exact=True).click()
         pa.get_by_text('退出', exact=True).click()
         pa.get_by_text('确认退出', exact=True).click()
-        pa.wait_for_timeout(1200)
-        pa.get_by_text('退出房间', exact=True).click()
-        pa.wait_for_timeout(1200)
+        pa.get_by_text('创建', exact=True).first.wait_for(timeout=15000)
         pa.get_by_text('创建', exact=True).first.click()
         pa.get_by_text('重力四子棋', exact=True).last.click()
         pa.get_by_text('创建', exact=True).last.click()

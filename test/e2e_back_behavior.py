@@ -41,7 +41,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
 
         # --- Part 1: 主Tab 双击返回离开；弹窗返回关闭 ---

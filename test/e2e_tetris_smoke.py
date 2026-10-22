@@ -50,14 +50,17 @@ def register(page, username):
 def read_board(page):
     """读当前盘面：20×10 的标签矩阵（`empty` / `I`..`L` / `garbage`）。"""
     cells = page.locator('[data-testid^="t-c-"]')
-    n = cells.count()
+    cells.first.wait_for(timeout=20000)
+    # 一次读取整盘，避免逐格跨进程读取期间重力推进导致撕裂。
+    snapshot = cells.evaluate_all("nodes => nodes.map(n => [n.dataset.testid, n.getAttribute('aria-label')])")
+    n = len(snapshot)
     assert n == ROWS * COLS, f'棋盘格子数应为 {ROWS * COLS}，实际 {n}'
     labels = []
     for i in range(n):
         r, c = divmod(i, COLS)
-        assert cells.nth(i).get_attribute('data-testid') == f't-c-{r}-{c}', \
+        assert snapshot[i][0] == f't-c-{r}-{c}', \
             '棋盘格子顺序被打乱（渲染顺序必须等于盘面顺序）'
-        labels.append(cells.nth(i).get_attribute('aria-label'))
+        labels.append(snapshot[i][1])
     return [labels[r * COLS:(r + 1) * COLS] for r in range(ROWS)]
 
 
@@ -82,13 +85,9 @@ def top_cells(page, rows=6):
     手势用例要在一秒内读好几次盘面，逐格读 200 个节点会跨过重力 tick；
     而且下落中的方块必然在顶部，读 6 行足够。
     """
-    out = []
-    for r in range(rows):
-        for c in range(COLS):
-            label = page.locator(f'[data-testid="t-c-{r}-{c}"]').get_attribute('aria-label')
-            if label not in ('empty', 'garbage'):
-                out.append((r, c))
-    return sorted(out)
+    board = read_board(page)
+    return [(r, c) for r in range(rows) for c in range(COLS)
+            if board[r][c] not in ('empty', 'garbage')]
 
 
 def main():
@@ -96,7 +95,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
         ctx_args = {'viewport': {'width': 390, 'height': 844}}
         pa = browser.new_context(**ctx_args).new_page()

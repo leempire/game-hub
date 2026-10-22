@@ -109,7 +109,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
         for game, label, marker in GAMES:
             run_case(browser, game, label, marker)

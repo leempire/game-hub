@@ -60,16 +60,16 @@ game_hub/
 ## 快速启动
 
 ```bash
-# 后端
-cd server && pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 50541
+# 在仓库根准备后端虚拟环境
+python3 -m venv server/.venv
+server/.venv/bin/python -m pip install -r server/requirements.txt
 
-# 前端 Web（手机浏览器/PC）
-cd app && npm install
-npm run web            # expo start --web --port 50540
+# 安装前端依赖，完成上面的本机配置后启动前后端
+(cd app && npm ci)
+bash scripts/start.sh
 
 # 前端原生开发（Expo Go 扫码）
-cd app && npm start
+(cd app && npm start)
 ```
 
 改地址只改一处：`server/config/config.json` 的 `public_base`（或环境变量 `PUBLIC_BASE` / `IP`）。
@@ -89,10 +89,18 @@ bash bin/release-apk.sh <版本号>   # 如 1.3.0，versionCode 自动 +1
 
 ## 测试
 
+首次准备测试环境（从仓库根执行；后续测试使用这里激活的虚拟环境）：
+
+```bash
+server/.venv/bin/python -m pip install -r server/requirements-dev.txt
+server/.venv/bin/python -m playwright install chromium
+source server/.venv/bin/activate
+```
+
 ```bash
 # 后端单测（引擎/AI/战绩/WS 协议）
-cd server && python -m pytest test/ -q
-cd server && python test/test_ws_game.py        # 脚本式：真实后端五子棋对局/断线重连（需后端已启动）
+(cd server && python -m pytest test/ -q)
+(cd server && python test/test_ws_game.py)      # 脚本式：真实后端五子棋对局/断线重连（需后端已启动）
 
 # 浏览器 E2E（需前后端都已启动）
 python test/e2e_web_game.py           # 双人五子棋 11 步（含断线重连）
