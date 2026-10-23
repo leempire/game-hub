@@ -81,6 +81,8 @@ def browser_checks(api):
         pages, latest, errors = [], [{}, {}], []
         for seat in range(2):
             context = browser.new_context(viewport={"width": 390, "height": 844})
+            if seat == 1:
+                context.add_init_script("Object.defineProperty(Element.prototype, 'requestFullscreen', { value: undefined, configurable: true });")
             context.route("**/api/**", lambda route: route.continue_(url=api + urlsplit(route.request.url).path +
                           ("?" + urlsplit(route.request.url).query if urlsplit(route.request.url).query else "")))
             context.add_init_script("""
@@ -150,15 +152,53 @@ def browser_checks(api):
         host.screenshot(path=str(OUT / "spider-mobile.png"))
         print("PASS 1: 统一创建/加入房间、准备、双端同时进入 15 列合作牌桌", flush=True)
 
+        full = host.get_by_test_id("spider-fullscreen")
+        frame = host.get_by_test_id("spider-play-area").bounding_box()
+        button = full.bounding_box()
+        assert frame and button and button["height"] >= 44
+        assert abs(frame["x"] + frame["width"] - button["x"] - button["width"] - 12) < 2
+        assert abs(frame["y"] + frame["height"] - button["y"] - button["height"] - 12) < 2
+        full.click()
+        expect(full).to_have_attribute("aria-label", "退出横屏全屏")
+        host.wait_for_function("document.fullscreenElement !== null")
+        host.wait_for_function("getComputedStyle(document.querySelector('[data-testid=spider-stage]')).width === '844px'")
+        rect = host.get_by_test_id("spider-stage").bounding_box()
+        assert rect and abs(rect["x"]) < 1 and abs(rect["y"]) < 1
+        assert abs(rect["width"] - 390) < 1 and abs(rect["height"] - 844) < 1
+        assert latest[0]["revision"] == 0
+        peer.get_by_test_id("spider-fullscreen").click()
+        expect(peer.get_by_test_id("spider-fullscreen")).to_have_attribute("aria-label", "退出横屏全屏")
+        assert peer.evaluate("document.fullscreenElement === null")
+        peer.set_viewport_size({"width": 844, "height": 390})
+        peer.screenshot(path=str(OUT / "spider-fullscreen-landscape.png"))
+
         move(0, initial["legal_moves"][0])
         after_host = both(lambda game: game["revision"] == 1)
         move(1, after_host["legal_moves"][0])
         both(lambda game: game["revision"] == 2)
-        peer.get_by_test_id("spider-undo").click()
-        peer.get_by_text("确认撤销", exact=True).click()
+        host.get_by_test_id("spider-undo").click()
+        host.get_by_text("确认撤销", exact=True).click()
         undone = both(lambda game: game["revision"] == 3)
         assert undone["columns"] == after_host["columns"]
         print("PASS 2: 两人均可移动任意牌组，撤销全队最近一步并同步", flush=True)
+
+        full.click()
+        expect(full).to_have_attribute("aria-label", "横屏全屏")
+        host.wait_for_function("document.fullscreenElement === null")
+        host.set_viewport_size({"width": 390, "height": 844})
+        full.click()
+        host.wait_for_function("document.fullscreenElement !== null")
+        host.evaluate("document.exitFullscreen()")
+        expect(full).to_have_attribute("aria-label", "横屏全屏")
+        peer.keyboard.press("Escape")
+        expect(peer.get_by_test_id("spider-fullscreen")).to_have_attribute("aria-label", "横屏全屏")
+        peer.set_viewport_size({"width": 390, "height": 844})
+        peer.get_by_test_id("spider-fullscreen").click()
+        peer.go_back(wait_until="commit")
+        expect(peer.get_by_test_id("spider-fullscreen")).to_have_attribute("aria-label", "横屏全屏")
+        peer.get_by_test_id("spider-board").wait_for()
+        assert latest[0]["revision"] == latest[1]["revision"] == 3
+        print("PASS 2a: 右下角全屏、横屏操作与弹窗、无全屏 API 回退、退出/Escape/返回恢复且不丢牌", flush=True)
 
         disjoint = next((a, b) for a in undone["legal_moves"] for b in undone["legal_moves"]
                         if not {a["source"], a["target"]} & {b["source"], b["target"]})

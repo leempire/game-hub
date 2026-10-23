@@ -439,7 +439,7 @@ export default function AppNavigation() {
   }
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, orientation: 'portrait' }}>
       {!token ? (
         <Stack.Screen name="Auth" component={AuthScreen} />
       ) : (

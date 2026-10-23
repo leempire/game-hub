@@ -37,10 +37,9 @@ def admin_credentials():
     return user, pwd
 # 浏览器专属交互 API：原生端 undefined，调用即崩（历史 bug：window.confirm）
 WEB_ONLY_API = re.compile(r'window\.(confirm|alert|prompt)|(?<![\w.$])(alert|confirm|prompt)\s*\(')
-# DOM 事件/对象 API：仅允许出现在 backGuard.tsx（Web 返回 + 键盘枢纽）——它内部用
-# IS_WEB 守卫，原生端不碰 window。历史 bug：对局屏裸调 window.addEventListener 白屏。
+# DOM API 只允许在有平台守卫的浏览器适配层；对局屏不得裸调 DOM。
 DOM_API = re.compile(r'window\.(addEventListener|removeEventListener|dispatchEvent)|(?<![\w.$])document\.|new\s+CustomEvent')
-DOM_API_ALLOWED_FILES = {'backGuard.tsx'}
+DOM_API_ALLOWED_FILES = {'backGuard.tsx', 'spiderFullscreen.ts'}
 EMOJI = re.compile(r'[\U0001F000-\U0001FAFF' + chr(0x2600) + '-' + chr(0x27BF) + chr(0xFE0F) + chr(0x2B00) + '-' + chr(0x2BFF) + ']')
 RESULTS = []
 
@@ -95,7 +94,7 @@ def audit_source_static():
             if f.name not in DOM_API_ALLOWED_FILES and DOM_API.search(code):
                 bad_dom.append(f'{f.name}:{i}: {line.strip()[:60]}')
     check('源码静态', '无浏览器专属confirm/alert/prompt', not bad, str(bad[:3]))
-    check('源码静态', 'DOM事件API仅在backGuard', not bad_dom, str(bad_dom[:3]))
+    check('源码静态', 'DOM API仅在平台适配层', not bad_dom, str(bad_dom[:3]))
 
 
 def audit_back_wiring():

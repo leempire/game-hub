@@ -1,18 +1,29 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Platform, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../auth';
 import { RoomSocket } from '../socket';
 import { Room, leaveRoom } from '../api';
-import { onConfirmLeave, useModalBackGuard } from '../backGuard';
+import { onConfirmLeave, useWebKeys, useModalBackGuard } from '../backGuard';
 import { GameHelpButton } from '../help';
 import { colors, spacing, radius, spiderTable } from '../theme';
 import SpiderBoard, { Spade } from '../SpiderBoard';
 import { SpiderState } from '../spider';
+import { requestSpiderFullscreen } from '../spiderFullscreen';
 
 export default function SpiderScreen({ code, onLeave }: { code: string; onLeave: () => void }) {
   const { token, user } = useAuth();
   const navigation = useNavigation();
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [fullscreen, setFullscreen] = useState(false);
+  const stopFullscreen = useRef<(() => void) | null>(null);
+  const exitFullscreen = useCallback(() => {
+    stopFullscreen.current?.(); stopFullscreen.current = null; setFullscreen(false);
+  }, []);
   const socket = useRef<RoomSocket | null>(null);
   const [game, setGame] = useState<SpiderState | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
@@ -24,7 +35,18 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
   const [message, setMessage] = useState('全员共享牌桌，点选明牌后再点目标列');
   const [confirm, setConfirm] = useState<'leave' | 'end' | 'undo' | null>(null);
   const leaving = useRef(false);
+  useModalBackGuard(fullscreen, exitFullscreen);
   useModalBackGuard(confirm !== null, () => setConfirm(null));
+  useWebKeys(key => {
+    if (key !== 'Escape') return false;
+    exitFullscreen(); return true;
+  }, fullscreen && confirm === null);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: !fullscreen, orientation: fullscreen ? 'landscape' : 'portrait',
+      navigationBarHidden: fullscreen, autoHideHomeIndicator: fullscreen });
+  }, [navigation, fullscreen]);
+  useEffect(() => () => stopFullscreen.current?.(), []);
 
   useEffect(() => {
     if (!token) return;
@@ -63,12 +85,13 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
   useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', event => {
       if (Platform.OS !== 'web' && !leaving.current) {
-        event.preventDefault(); setConfirm('leave');
+        event.preventDefault();
+        if (fullscreen) exitFullscreen(); else setConfirm('leave');
       }
     });
-    const off = onConfirmLeave(() => setConfirm('leave'));
+    const off = onConfirmLeave(() => fullscreen ? exitFullscreen() : setConfirm('leave'));
     return () => { unsub(); off(); };
-  }, [navigation]);
+  }, [navigation, fullscreen, exitFullscreen]);
 
   const act = (action: string, fields: Record<string, number> = {}) => {
     const current = gameRef.current;
@@ -113,32 +136,49 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
   };
   const inactive = !game || game.finished || game.departed.includes(user?.id ?? -1);
   const isHost = room?.host_id === user?.id;
+  const rotated = fullscreen && width < height;
+  const landscapeStyle = rotated ? { position: 'absolute' as const, width: height, height: width,
+    left: (width - height) / 2, top: (height - width) / 2, transform: [{ rotate: '90deg' }] } : undefined;
 
-  return <View style={styles.page}>
-    <View style={styles.header}>
+  return <View style={styles.page} testID="spider-screen">
+    <StatusBar hidden={fullscreen} style="auto" />
+    <View testID="spider-stage" style={[styles.stage, landscapeStyle, fullscreen && !rotated && {
+      paddingLeft: insets.left, paddingRight: insets.right, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+    {!fullscreen && <View style={styles.header}>
       <View><Text style={styles.eyebrow}>合作接龙 · 房间 {code}</Text><Text style={styles.title}>一起把顺牌收齐</Text></View>
       <GameHelpButton game="spider" />
-    </View>
-    <View style={styles.stats}>
+    </View>}
+    <View style={[styles.stats, fullscreen && styles.fullscreenStats]}>
       <Text style={styles.stat} testID="spider-progress">已收齐 {game?.completed ?? 0} / {game?.total_runs ?? 8} 组</Text>
       <Text style={styles.stat} testID="spider-moves">{game?.move_count ?? 0} 步</Text>
       <Text style={styles.stat}>{connected ? pending ? '保存中…' : '已自动保存' : '正在连接…'}</Text>
     </View>
-    <Text accessibilityLiveRegion="polite" style={styles.message} testID="spider-message">{message}</Text>
+    <Text accessibilityLiveRegion="polite" style={[styles.message, fullscreen && styles.fullscreenMessage]} testID="spider-message">{message}</Text>
+    <View style={styles.playFrame} testID="spider-play-area">
     <ScrollView style={styles.playArea} contentContainerStyle={styles.playContent} nestedScrollEnabled>
       {!game ? <View style={styles.loading}>{!connected && <ActivityIndicator color={colors.white} />}<Text style={styles.light}>等待房间中的牌局</Text></View> : <>
         {game.finished && <View style={styles.win} testID="spider-win">
           <Text style={styles.winTitle}>{game.reason === 'completed' ? '合作通关' : '本局已结束'}</Text><Text style={styles.light}>已收齐 {game.completed} / {game.total_runs} 组，共 {game.move_count} 步</Text>
           <Text style={styles.light}>这局已记入历史战绩，返回房间后可开始下一局。</Text>
         </View>}
-        <View style={styles.foundations}>{Array.from({ length: game.total_runs }, (_, i) =>
+        {!fullscreen && <View style={styles.foundations}>{Array.from({ length: game.total_runs }, (_, i) =>
           <View key={i} style={[styles.foundation, i < game.completed && styles.complete]}>
             <Spade size={17} color={i < game.completed ? colors.text : colors.white} />
             <Text style={{ color: i < game.completed ? colors.text : colors.white, fontSize: 11 }}>{i < game.completed ? 'K—A' : `${i + 1}`}</Text>
-          </View>)}</View>
+          </View>)}</View>}
         <SpiderBoard game={game} selected={selected} onPick={pick} />
       </>}
     </ScrollView>
+      <TouchableOpacity style={styles.fullscreenButton} testID="spider-fullscreen" accessibilityRole="button"
+        accessibilityLabel={fullscreen ? '退出横屏全屏' : '横屏全屏'}
+        onPress={() => {
+          if (fullscreen) exitFullscreen();
+          else { setFullscreen(true); stopFullscreen.current = requestSpiderFullscreen(exitFullscreen); }
+        }}>
+        <Ionicons name={fullscreen ? 'contract-outline' : 'expand-outline'} size={20} color={colors.text} />
+        <Text style={styles.buttonText}>{fullscreen ? '退出全屏' : '全屏'}</Text>
+      </TouchableOpacity>
+    </View>
     {!inactive && <View style={styles.controls}>
       <TouchableOpacity style={styles.primary} testID="spider-deal" onPress={() => {
         if (!game?.can_deal) { setMessage(game?.stock_count ? '请先填满所有空列，再发牌' : '余牌已经发完'); return; }
@@ -149,12 +189,14 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
       }}><Text style={styles.buttonText}>撤销</Text></TouchableOpacity>
       <TouchableOpacity style={styles.button} testID="spider-hint" onPress={hint}><Text style={styles.buttonText}>提示</Text></TouchableOpacity>
     </View>}
-    <View style={styles.footer}>
+    {!fullscreen && <View style={styles.footer}>
       {isHost && !inactive && <TouchableOpacity style={styles.button} testID="spider-end" onPress={() => setConfirm('end')}><Text style={styles.buttonText}>结束本局</Text></TouchableOpacity>}
       <TouchableOpacity style={styles.button} testID="spider-back" onPress={() => inactive ? backToRoom() : setConfirm('leave')}><Text style={styles.buttonText}>{inactive ? '返回房间' : '离开本局'}</Text></TouchableOpacity>
+    </View>}
     </View>
-    <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
-      <View style={styles.overlay}><View style={styles.dialog}>
+    <Modal visible={confirm !== null} transparent animationType="fade" supportedOrientations={['portrait', 'landscape']}
+      onRequestClose={() => setConfirm(null)}>
+      <View style={[styles.overlay, landscapeStyle]}><View style={styles.dialog}>
         <Text style={styles.dialogTitle}>{confirm === 'end' ? '结束全队牌局？' : confirm === 'undo' ? '撤销全队最近一步？' : '离开本局？'}</Text>
         <Text style={styles.dialogBody}>{confirm === 'end' ? '当前牌局会结束并记录到战绩。全员返回房间后可重新准备开局。' : confirm === 'undo' ? '会回退共享牌桌的最近一步，包括队友的操作。' : '你将退出本局并返回房间，队友可以继续。最后一人离开时本局结束。'}</Text>
         <TouchableOpacity style={styles.primary} onPress={() => { if (confirm === 'leave') { if (inactive) backToRoom(); else void exitGame(); } else { const action = confirm; setConfirm(null); if (action) act(action); } }}>
@@ -167,13 +209,20 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
+  stage: { flex: 1, backgroundColor: colors.bg },
+  playFrame: { flex: 1, backgroundColor: spiderTable },
   header: { padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   eyebrow: { fontSize: 12, color: colors.textSecondary, marginBottom: 4 },
   title: { fontSize: 20, fontWeight: '800', color: colors.text },
   stats: { paddingHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  fullscreenStats: { paddingTop: 6, paddingHorizontal: 12 },
   stat: { fontSize: 12, color: colors.textSecondary },
   message: { color: colors.textSecondary, fontSize: 12, minHeight: 44, padding: 12 },
-  playArea: { flex: 1, backgroundColor: spiderTable }, playContent: { paddingBottom: 24 },
+  fullscreenMessage: { minHeight: 28, padding: 6 },
+  playArea: { flex: 1, backgroundColor: spiderTable }, playContent: { paddingBottom: 72 },
+  fullscreenButton: { position: 'absolute', right: 12, bottom: 12, minHeight: 44, paddingHorizontal: 12,
+    flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radius.md, backgroundColor: colors.card },
   loading: { padding: 40, alignItems: 'center', gap: 16 }, light: { color: colors.white, fontSize: 13, lineHeight: 22 },
   foundations: { padding: 12, flexDirection: 'row', justifyContent: 'center', gap: 6, flexWrap: 'wrap' },
   foundation: { width: 34, height: 48, borderRadius: 5, borderWidth: 1, borderColor: colors.borderStrong,
