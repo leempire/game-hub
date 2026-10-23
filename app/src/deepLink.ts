@@ -34,6 +34,7 @@ const ROUTE_BY_PATH: Record<string, string> = {
   tetris: 'Tetris',
   uno: 'Uno',
   stasis: 'Stasis',
+  spider: 'Spider',
 };
 
 function parseUrl(url: string | null | undefined): PendingRoute | null {

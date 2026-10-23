@@ -15,6 +15,9 @@ app/dist/
 test/tmp/
 .DS_Store
 
+# IDE（JetBrains）
+.idea/
+
 .claude/
 
 # skill 工具状态

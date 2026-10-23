@@ -119,7 +119,7 @@ python test/e2e_dots_smoke.py         # 点格棋 8 步（画边/回合移交/�
 python test/e2e_ludo_smoke.py         # 飞行棋 6 步（掷骰广播/认输弃权/排名结算）
 python test/e2e_2048_smoke.py         # 2048 竞速 12 步（同种子/各自走子/认输只结束自己/单人开局）
 python test/e2e_luzhanqi_smoke.py     # 军棋 20 步（明棋/暗棋选择→布阵→走子→认输；暗棋下对手只画牌背）
-python test/e2e_spider_smoke.py       # 单人蜘蛛纸牌：独立测试库，移动/撤销/续玩/通关/战绩
+python test/e2e_spider_smoke.py       # 蜘蛛纸牌合作：独立测试库，双端移动/撤销/全屏/房主移交/通关/战绩
 python test/visual_audit.py           # 视觉审计 + 浏览器专属 API 静态扫描
 ```
 
