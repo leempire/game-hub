@@ -24,7 +24,7 @@ from app import room_manager as rm
 from app import room_settings as rs
 
 #: 有房间级设置的五个游戏（其余游戏 `settings` 应当压根不下发）。
-GAMES = ("minesweeper", "luzhanqi", "stasis", "battleship", "uno")
+GAMES = ("minesweeper", "luzhanqi", "stasis", "battleship", "tetris", "uno")
 
 
 @pytest.fixture(autouse=True)

@@ -37,8 +37,8 @@ def admin_credentials():
     return user, pwd
 # 浏览器专属交互 API：原生端 undefined，调用即崩（历史 bug：window.confirm）
 WEB_ONLY_API = re.compile(r'window\.(confirm|alert|prompt)|(?<![\w.$])(alert|confirm|prompt)\s*\(')
-# DOM 事件/对象 API：仅允许出现在 backGuard.tsx（唯一 Web 返回枢纽，内部 IS_WEB 守卫）。
-# 历史 bug：对局屏裸调 window.addEventListener('gh:confirm-leave') → 原生挂载即 TypeError 白屏
+# DOM 事件/对象 API：仅允许出现在 backGuard.tsx（Web 返回 + 键盘枢纽）——它内部用
+# IS_WEB 守卫，原生端不碰 window。历史 bug：对局屏裸调 window.addEventListener 白屏。
 DOM_API = re.compile(r'window\.(addEventListener|removeEventListener|dispatchEvent)|(?<![\w.$])document\.|new\s+CustomEvent')
 DOM_API_ALLOWED_FILES = {'backGuard.tsx'}
 EMOJI = re.compile(r'[\U0001F000-\U0001FAFF' + chr(0x2600) + '-' + chr(0x27BF) + chr(0xFE0F) + chr(0x2B00) + '-' + chr(0x2BFF) + ']')

@@ -143,6 +143,7 @@ from app.game.game2048 import (
     has_won as g2048_has_won,
     max_tile as g2048_max_tile,
     create_seeded_rng as g2048_create_seeded_rng,
+    leaderboard as g2048_leaderboard,
 )
 from app.game.uno import (
     create_game as uno_create_game,
@@ -452,6 +453,9 @@ def _make_bot_player(code: str, seq: int = 1) -> dict:
 # 深空休眠的地图同一套），这里只是房间刚建出来时的初值——房主不选也能直接开局。
 DEFAULT_MINE_DIFFICULTY = "intermediate"
 
+# 2048 单人局撤销栈上限：最多回退 20 步。每一步只存 4×4 盘面 + 分数，体积很小。
+G2048_MAX_UNDO = 20
+
 
 def create_room(
     user: dict,
@@ -493,17 +497,27 @@ def create_room(
     }
     if game == "minesweeper":
         room["difficulty"] = DEFAULT_MINE_DIFFICULTY
+        # 每日固定盘（v1.18.1）：雷盘种子取 UTC 日期
+        room["mine_daily"] = False
     if game == "stasis":
         # 地图由房主在等待大厅里选（v9）。**默认不写这个键**：`create_game` 收到
         # `None` 会退回 `stasis_map.DEFAULT_MAP_ID`，不必在这里复制一份默认值。
         room["stasis_map_id"] = None
+        # 难度三档（v1.18.1）：默认标准，只调静默体的血量/门伤/进化速度
+        room["stasis_difficulty"] = stasis_engine.DEFAULT_DIFFICULTY
     if game == "luzhanqi":
         # 明棋 / 暗棋，以及暗棋下「阵亡是否公开身份」—— 都由房主在等待大厅里选。
         room["luzhanqi_mode"] = "open"
         room["luzhanqi_reveal"] = True
+    if game == "tetris":
+        # 起始速度档（v1.18.1）：默认 1 级，房主可在等待大厅调到 5 / 10 级
+        room["tetris_start_level"] = 1
     if game == "battleship":
         # **棋盘尺寸 / 舰队配置**（v13）：房主在等待大厅里选，默认标准 10×10。
         room["bs_size"] = BS_DEFAULT_SIZE
+        # 两条优化房规（v1.18.1），默认关：保持既有对局的布阵与信息量不变
+        room["bs_adjacent"] = False
+        room["bs_hide_sunk_type"] = False
     _rooms[code] = room
     _touch_activity(room)
     return room
@@ -756,6 +770,7 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
                 gs["reason"] = "eliminated"
                 from app.game.minesweeper import _reveal_all_mines
                 _reveal_all_mines(gs)
+                _mine_finalize_times(gs)
                 players_info = _get_players_info(room)
                 ranking = mine_compute_ranking(gs, players_info)
                 _set_mine_game_over(room, ranking)
@@ -949,10 +964,17 @@ def spider_action(code: str, user_id: int, data: dict) -> dict:
 
 
 def _start_minesweeper(room: dict) -> dict:
-    """Start a minesweeper game (1-4 players, competitive)."""
+    """Start a minesweeper game (1-4 players, competitive).
+
+    每日固定盘（房规 `daily`）：雷盘种子取 UTC 日期（`yyyymmdd`），同一天同一
+    难度开局拿到同一份种子。第一下翻开的 3×3 安全区仍会随格子移动，所以是
+    「同种子」而不是逐格完全相同的雷盘（seed 语义见 `generate_mines`）。
+    """
     diff = room.get("difficulty", "intermediate")
+    daily = bool(room.get("mine_daily"))
+    seed = int(datetime.now(timezone.utc).strftime("%Y%m%d")) if daily else None
     num_players = len(room["players"])
-    game_state = mine_create_game(diff, num_players)
+    game_state = mine_create_game(diff, num_players, seed=seed, daily=daily)
     room["status"] = "playing"
     room["game_started_at"] = _now_iso()
     room["game_state"] = game_state
@@ -1090,6 +1112,11 @@ def _start_battleship(room: dict) -> dict | None:
         "radar_results": {host["id"]: [], other["id"]: []},
         # 命中续射的「先手第一发」补偿标记，只有真实开炮会置位
         "first_shot_done": False,
+        # ── 房规（v1.18.1）──
+        # 舰船不可相邻（含斜角）：布阵校验与随机布阵都按它来
+        "adjacent_placement": bool(room.get("bs_adjacent")),
+        # 击沉只公开位置、不公开舰种（协议层就不下发 ship_id）
+        "hide_sunk_ship_type": bool(room.get("bs_hide_sunk_type")),
     }
     room["game_state"] = gs
     room["empty_since"] = None
@@ -1126,8 +1153,12 @@ def _start_tetris(room: dict) -> dict | None:
     seed = random.randint(0, 2**31 - 1)
     colors = ["blue", "red", "green", "yellow"]
     player_ids = [p["id"] for p in players]
-    # 所有人同一个 seed → 方块序列完全一致（公平，与 2048 同种子出块同理）
-    gs = tetris_create_game({pid: seed for pid in player_ids}, player_ids)
+    # 所有人同一个 seed → 方块序列完全一致（公平，与 2048 同种子出块同理）。
+    # 起始速度档由房主在等待大厅里选（房间设置注册表的 tetris/start_level）。
+    gs = tetris_create_game(
+        {pid: seed for pid in player_ids}, player_ids,
+        start_level=room.get("tetris_start_level") or 1,
+    )
     gs["player_colors"] = {
         p["id"]: colors[i % len(colors)] for i, p in enumerate(players)
     }
@@ -1162,6 +1193,8 @@ def _start_2048(room: dict) -> dict | None:
         "finish_reasons": {p["id"]: None for p in players},    # reach_2048 | stuck
         "finish_order": [],                                    # 结束先后（玩家 id）
         "move_counts": {p["id"]: 0 for p in players},
+        # 撤销栈（仅单人局使用）：每步存一份走子前的盘面/分数/步数
+        "undo_stacks": {p["id"]: [] for p in players},
         "player_colors": {
             p["id"]: colors[i % len(colors)] for i, p in enumerate(players)
         },
@@ -1258,8 +1291,11 @@ def _start_stasis(room: dict) -> dict | None:
     if not stasis_engine.PLAYER_MIN <= len(players) <= stasis_engine.PLAYER_MAX:
         return None
     seed = random.randint(0, 2**31 - 1)
-    gs = stasis_engine.create_game([p["id"] for p in players], seed=seed,
-                                   map_id=room.get("stasis_map_id"))
+    gs = stasis_engine.create_game(
+        [p["id"] for p in players], seed=seed,
+        map_id=room.get("stasis_map_id"),
+        difficulty=room.get("stasis_difficulty") or stasis_engine.DEFAULT_DIFFICULTY,
+    )
     # 引擎的随机源跟着对局状态一起走：热重启后从落盘的 rng 状态继续，
     # 保证「同种子 + 同输入 ⇒ 同结果」这条不变量跨重启成立。
     gs["rng"] = random.Random(seed ^ 0x5EED)
@@ -1318,9 +1354,23 @@ async def _stasis_tick_loop(code: str):
     # 延迟导入：ws 模块 import 了 room_manager，模块级导入会成环。
     from app import ws as _ws
     ticks = 0
+    # **按截止时间排 tick，不是「干完活再睡 200ms」**。原来每轮固定
+    # `sleep(0.2)`，处理耗时与定时器误差全部累加：Windows 上实测平均间隔
+    # 205ms（定时器粒度 ~15.6ms），而引擎每轮按 200ms 推进 —— 游戏时间比真实
+    # 时间慢 2.6%，客户端按真实时间预演，于是每个 tick 都被往回拽一截。
+    # 落后超过一个 tick（进程卡顿、热重启）就**重新对齐、不补帧**：补帧等于让
+    # 静默体在一瞬间连走好几步。
+    period = STASIS_TICK_MS / 1000
+    loop = asyncio.get_running_loop()
+    next_at = loop.time()
     try:
         while True:
-            await asyncio.sleep(STASIS_TICK_MS / 1000)
+            next_at += period
+            delay = next_at - loop.time()
+            if delay < -period:
+                next_at = loop.time()
+                delay = 0
+            await asyncio.sleep(max(0.0, delay))
             room = _rooms.get(code)
             if room is None or room["status"] != "playing" \
                     or room["game"] != "stasis":
@@ -1577,12 +1627,17 @@ def _tetris_apply_actions(code: str, user_id: int, actions: list) -> dict:
         return {"ok": False, "error": "动作序列过长"}
 
     locked = False
+    held = False
     cleared = score_gained = garbage_sent = 0
     victims: list[int] = []
     for action in actions:
         if not isinstance(action, str):
             continue
         res = tetris_apply_action(gs, user_id, action)
+        if res.get("held"):
+            # 暂存已经换块：即使这一串动作没锁定，也要立刻回权威状态
+            # （客户端要知道换出来的是哪一块、新的 next 队列）
+            held = True
         if not res.get("ok") or not res.get("locked"):
             continue
         locked = True
@@ -1595,7 +1650,7 @@ def _tetris_apply_actions(code: str, user_id: int, actions: list) -> dict:
             break
 
     result = {
-        "ok": True, "locked": locked, "cleared": cleared,
+        "ok": True, "locked": locked, "held": held, "cleared": cleared,
         "score_gained": score_gained, "garbage_sent": garbage_sent,
         # 收到攻击行的玩家（含被顶死的）：WS 层要给这些人也推一次新盘面，
         # 他们的盘变了但不是他们自己动的
@@ -1686,6 +1741,18 @@ def _game2048_make_move(code: str, user_id: int, direction: str) -> dict:
     if not moved:
         # silent：往「走不动」的方向滑/点是 2048 的正常操作，不该弹错误提示
         return {"ok": False, "silent": True, "error": "无效移动"}
+    if len(gs["boards"]) == 1:
+        # 撤销栈只在单人局维护：多人局是「同种子竞速」，撤销会破坏可比性。
+        # 只回滚盘面/分数/步数，**不回滚 RNG**——撤销后重新走子会拿到不同的新块，
+        # 这是可接受的（单人局没有跨玩家公平性问题），也省下每步 625 个随机数的落盘。
+        stack = gs.setdefault("undo_stacks", {}).setdefault(pid, [])
+        stack.append({
+            "board": [row[:] for row in board],
+            "score": gs["scores"][pid],
+            "move_count": gs["move_counts"].get(pid, 0),
+        })
+        if len(stack) > G2048_MAX_UNDO:
+            stack.pop(0)
     gs["boards"][pid] = new_board
     gs["scores"][pid] += score_gained
     gs["move_counts"][pid] = gs["move_counts"].get(pid, 0) + 1
@@ -1713,6 +1780,47 @@ def _game2048_make_move(code: str, user_id: int, direction: str) -> dict:
     if go:
         result["game_over"] = go
     return result
+
+
+def game2048_undo(code: str, user_id: int) -> dict:
+    """单人 2048：回退上一步（盘面 / 分数 / 步数）。
+
+    **多人局禁用**：同种子竞速下撤销会让两个人不再可比，而且「谁撤了几步」本身
+    就是新的作弊面。对局结束（卡死/合出 2048）后也不允许——撤销只用于「这一步走
+    坏了」，不用于复活已结束的局面（结束会触发全员结算并回到大厅）。
+    """
+    result = _game2048_undo(code, user_id)
+    _finish_action(code, result)
+    return result
+
+
+def _game2048_undo(code: str, user_id: int) -> dict:
+    room = _rooms.get(code)
+    if not room or room["status"] != "playing" or room["game"] != "2048":
+        return {"ok": False, "error": "游戏未在进行中"}
+    gs = room["game_state"]
+    pid = user_id
+    if pid not in gs["boards"]:
+        return {"ok": False, "error": "你不是游戏玩家"}
+    if len(gs["boards"]) != 1:
+        return {"ok": False, "error": "多人对局不支持撤销"}
+    if gs["game_over_flags"].get(pid, False) or gs["winner"]:
+        return {"ok": False, "error": "本局已结束，无法撤销"}
+    stack = gs.get("undo_stacks", {}).get(pid) or []
+    if not stack:
+        return {"ok": False, "error": "还没有可以撤销的步数"}
+    frame = stack.pop()
+    gs["boards"][pid] = [row[:] for row in frame["board"]]
+    gs["scores"][pid] = frame["score"]
+    gs["move_counts"][pid] = frame["move_count"]
+    return {
+        "ok": True,
+        "board": gs["boards"][pid],
+        "score": gs["scores"][pid],
+        "move_count": gs["move_counts"][pid],
+        "undo_available": bool(stack),
+        "leaderboard": g2048_leaderboard(gs),
+    }
 
 
 def _finish_2048_player(gs: dict, pid: int, reason: str):
@@ -2252,8 +2360,12 @@ def _battleship_set_placement(
     if not color:
         return {"ok": False, "error": "你不是游戏玩家"}
     n = gs.get("size") or BS_DEFAULT_SIZE
-    if not validate_placement(ships, n):
-        return {"ok": False, "error": "布阵不合法"}
+    no_touch = bool(gs.get("adjacent_placement"))
+    if not validate_placement(ships, n, no_touch=no_touch):
+        return {
+            "ok": False,
+            "error": "舰船不能相邻（含斜角），请留出一圈水" if no_touch else "布阵不合法",
+        }
     # Apply placement
     board = gs["boards"][user_id]
     apply_placement(board, ships, n)
@@ -2505,6 +2617,43 @@ def _apply_weapon_shots(
     return {**payload, "game_over": None}
 
 
+def _mine_touch_time(gs: dict, seat: int) -> None:
+    """Record a successful reveal/chord on the wall clock.
+
+    The engine itself never reads the clock（它要能在单测里瞬间跑完）；计时只在
+    房间层写入，引擎只负责存与排序。`elapsed_ms` 的语义是「本局第一次翻开 →
+    该玩家最后一次翻开」的跨度，不是「从开局到现在」——后者会让先开始玩的人
+    在平局时吃亏，也会把等待时间算进去。
+    """
+    now_ms = int(_time.time() * 1000)
+    if gs.get("started_at_ms") is None:
+        gs["started_at_ms"] = now_ms
+    player = gs.get("players", {}).get(seat)
+    if player is None:
+        return
+    if player.get("first_action_ms") is None:
+        player["first_action_ms"] = now_ms
+    player["last_action_ms"] = now_ms
+
+
+def _mine_finalize_times(gs: dict) -> None:
+    """Settle `elapsed_ms` for every player before compute_ranking()."""
+    if gs.get("finished_at_ms") is None:
+        gs["finished_at_ms"] = int(_time.time() * 1000)
+    start = gs.get("started_at_ms")
+    end = gs["finished_at_ms"]
+    for player in gs.get("players", {}).values():
+        if player.get("elapsed_ms") is not None:
+            continue
+        first = player.get("first_action_ms")
+        last = player.get("last_action_ms")
+        if first is None:
+            # 全程没翻过格子的人没有「用时」可言 —— 留 None，界面不显示 0.0 秒
+            player["elapsed_ms"] = None
+        else:
+            player["elapsed_ms"] = max(0, (last or end) - (start or first))
+
+
 def mine_reveal_action(code: str, user_id: int, x: int, y: int) -> dict:
     """Reveal a minesweeper cell. Returns result dict for WS broadcast."""
     room = _rooms.get(code)
@@ -2517,9 +2666,11 @@ def mine_reveal_action(code: str, user_id: int, x: int, y: int) -> dict:
     gs = room["game_state"]
     result = mine_reveal(gs, x, y, seat)
     if result["ok"]:
+        _mine_touch_time(gs, seat)
         _touch_activity(room)
     if result["ok"] and result["game_over"]:
         # Compute ranking and finalize game
+        _mine_finalize_times(gs)
         players_info = _get_players_info(room)
         ranking = mine_compute_ranking(gs, players_info)
         result["game_over"]["ranking"] = ranking
@@ -2542,8 +2693,10 @@ def mine_chord_action(code: str, user_id: int, x: int, y: int) -> dict:
     gs = room["game_state"]
     result = mine_chord(gs, x, y, seat)
     if result["ok"]:
+        _mine_touch_time(gs, seat)
         _touch_activity(room)
     if result["ok"] and result["game_over"]:
+        _mine_finalize_times(gs)
         players_info = _get_players_info(room)
         ranking = mine_compute_ranking(gs, players_info)
         result["game_over"]["ranking"] = ranking
@@ -2876,6 +3029,7 @@ def _mine_surrender(room: dict, user_id: int) -> dict | None:
         gs["reason"] = "eliminated"
         from app.game.minesweeper import _reveal_all_mines
         _reveal_all_mines(gs)
+        _mine_finalize_times(gs)
         players_info = _get_players_info(room)
         ranking = mine_compute_ranking(gs, players_info)
         _set_mine_game_over(room, ranking)
@@ -2992,6 +3146,7 @@ def _on_dc_timeout(code: str, user_id: int):
                 gs["reason"] = "eliminated"
                 from app.game.minesweeper import _reveal_all_mines
                 _reveal_all_mines(gs)
+                _mine_finalize_times(gs)
                 players_info = _get_players_info(room)
                 ranking = mine_compute_ranking(gs, players_info)
                 _set_mine_game_over(room, ranking)

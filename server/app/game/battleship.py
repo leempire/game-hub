@@ -167,8 +167,23 @@ def validate_ship(
     return all(_in_bounds(cx, cy, board) for cx, cy in cells)
 
 
-def validate_placement(ships: list[dict], size: int | None = None) -> bool:
+def _touch_zone(cells: list[tuple[int, int]]) -> set[tuple[int, int]]:
+    """这艘舰自身 + 周围一圈（8 邻域）。「舰船不可相邻」用切比雪夫距离 1。"""
+    return {
+        (cx + dx, cy + dy)
+        for cx, cy in cells
+        for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+    }
+
+
+def validate_placement(
+    ships: list[dict], size: int | None = None, no_touch: bool = False,
+) -> bool:
     """Validate a full placement: all ships in bounds, no overlaps, correct count.
+
+    `no_touch=True` 时舰船之间**不能相邻（含斜角）**：船体四周留一圈水。
+    房规由 `room_settings` 的 `adjacent_placement` 决定，服务端是唯一裁决方；
+    客户端的禁用提示只是为了少一次往返。
 
     Each ship dict: {"id": int, "x": int, "y": int, "horizontal": bool}
     """
@@ -176,6 +191,7 @@ def validate_placement(ships: list[dict], size: int | None = None) -> bool:
     if len(ships) != len(fleet):
         return False
     occupied: set[tuple[int, int]] = set()
+    blocked: set[tuple[int, int]] = set()
     ids_seen: set[int] = set()
     for ship in ships:
         sid = ship["id"]
@@ -190,7 +206,10 @@ def validate_placement(ships: list[dict], size: int | None = None) -> bool:
             return False
         if any(c in occupied for c in cells):
             return False
+        if no_touch and any(c in blocked for c in cells):
+            return False
         occupied.update(cells)
+        blocked.update(_touch_zone(cells))
     return True
 
 
@@ -205,22 +224,29 @@ def apply_placement(board: list[list[int]], ships: list[dict],
             board[cy][cx] = ship["id"]
 
 
-def random_placement(rng: random.Random | None = None,
-                     size: int | None = None) -> list[dict]:
+def random_placement(
+    rng: random.Random | None = None,
+    size: int | None = None,
+    no_touch: bool = False,
+) -> list[dict]:
     """Generate a random valid placement for **这一局的整个舰队**.
+
+    `no_touch=True` 时避开「已放舰船及其一圈邻格」，与 `validate_placement`
+    同一条规则——人机的随机布阵也必须遵守房规，否则会提交后被服务端拒绝。
 
     Returns list of {"id", "x", "y", "horizontal"} dicts.
     """
     _rng = rng or random
     n = size or DEFAULT_SIZE
     fleet = fleet_of(n)
-    for _attempt in range(1000):
+    for _attempt in range(2000):
         ships: list[dict] = []
         board = create_board(n)
+        blocked: set[tuple[int, int]] = set()
         ok = True
         for sdef in fleet:
             placed = False
-            for _try in range(200):
+            for _try in range(300):
                 horizontal = _rng.choice([True, False])
                 if horizontal:
                     x = _rng.randint(0, n - sdef["size"])
@@ -231,8 +257,11 @@ def random_placement(rng: random.Random | None = None,
                 cells = _ship_cells(x, y, sdef["size"], horizontal)
                 if any(board[cy][cx] != EMPTY for cx, cy in cells):
                     continue
+                if no_touch and any(c in blocked for c in cells):
+                    continue
                 for cx, cy in cells:
                     board[cy][cx] = sdef["id"]
+                blocked.update(_touch_zone(cells))
                 ships.append({
                     "id": sdef["id"], "x": x, "y": y,
                     "horizontal": horizontal,
@@ -428,8 +457,14 @@ def game_to_sync(gs: dict, user_id: int) -> dict:
         gs["boards"].get(opp_uid, create_board(n)) if opp_uid else create_board(n),
         own_attack,
         opp_ships,
+        hide_type=bool(gs.get("hide_sunk_ship_type")),
     )
     return {
+        # 本局房规（客户端用于布阵提示：不可相邻时落点直接标红/拒绝）
+        "rules": {
+            "adjacent_placement": bool(gs.get("adjacent_placement")),
+            "hide_sunk_ship_type": bool(gs.get("hide_sunk_ship_type")),
+        },
         "board_size": gs.get("size") or DEFAULT_SIZE,
         # **这一局的舰队**（v13）：尺寸档位不同，舰队也不同 —— 客户端的布阵 UI
         # （船卡片、格数、武器挂靠）全靠它，所以组成只能有一个来源（服务端）。
@@ -482,14 +517,23 @@ def _visible_opp_ships(
     opp_board: list[list[int]],
     attack_board: list[list[int]],
     opp_ships: list[dict],
+    hide_type: bool = False,
 ) -> list[dict]:
-    """Return opponent ships that have been sunk (revealed positions)."""
+    """Return opponent ships that have been sunk (revealed positions).
+
+    `hide_type`（房规 `hide_sunk_ship_type`）开启时只公开**格子位置**，不带
+    `id`（舰种）——否则「击沉不报舰种」在协议层就失效了，客户端即使不显示也
+    能从消息里读到。位置本身仍然公开：不公开就无法标出已沉船体。
+    """
     visible = []
     for ship in opp_ships:
         cells = get_ship_cells(opp_board, ship["id"])
         all_hit = all(attack_board[cy][cx] == HIT for cx, cy in cells)
         if all_hit:
-            visible.append({**ship, "cells": cells, "sunk": True})
+            entry = {"cells": cells, "sunk": True}
+            if not hide_type:
+                entry.update(ship)
+            visible.append(entry)
     return visible
 
 

@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
-import { getRoom, leaveRoom, Room } from '../api';
+import { getRoom, leaveRoom, fetchMyStats, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
 import { colors, spacing, radius, fontSize } from '../theme';
 import { notify } from '../utils';
@@ -17,6 +17,7 @@ import { GameHelpButton } from '../help';
 import { settingValueLabel } from '../roomSettings';
 import {
   MineGameState, MineRankingEntry, RevealedCell, NUMBER_COLORS,
+  formatMineElapsed,
 } from '../minesweeper';
 
 // 旗子压在覆盖格 #CBD5E1 上，需 ≥3:1（原 #EF4444 只有 2.53）
@@ -33,7 +34,12 @@ interface Props {
 interface CellState {
   value: number | null;   // null = unrevealed, -1 = mine, 0-8 = count
   flagged: boolean;
+  /** 问号笔记（v1.18.1）：不参与 chord / 通关判定，翻开时自动清掉 */
+  questioned?: boolean;
 }
+
+/** 问号笔记的颜色：压在未翻开格上要够清楚，与旗子的红刻意区分开。 */
+const MINE_QUESTION = '#475569';
 
 export default function MineScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
@@ -41,6 +47,8 @@ export default function MineScreen({ code, onLeave }: Props) {
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<MineGameState | null>(null);
   const [grid, setGrid] = useState<CellState[][] | null>(null);
+  /** 各难度历史最佳用时（毫秒）；从战绩聚合接口拿，进屏时读取一次 */
+  const [bestTimes, setBestTimes] = useState<Record<string, number>>({});
   const [showGameOver, setShowGameOver] = useState(false);
   const [hasAnyDisconnect, setHasAnyDisconnect] = useState(false);
   // 断线倒计时（多人局：取所有断线玩家里**最紧**的那个剩余时间）
@@ -55,6 +63,13 @@ export default function MineScreen({ code, onLeave }: Props) {
   );
   const socketRef = useRef<RoomSocket | null>(null);
   const gameOverShownRef = useRef(false);
+
+  useEffect(() => {
+    if (!token) return;
+    fetchMyStats(token)
+      .then((s) => setBestTimes(s.best_times || {}))
+      .catch(() => {});
+  }, [token]);
   // Track whether we're in flag mode (tap to flag instead of reveal)
   const [flagMode, setFlagMode] = useState(false);
   // Player stats bar: collapsed by default (only my chip), expandable to all
@@ -185,6 +200,12 @@ export default function MineScreen({ code, onLeave }: Props) {
         g2[y][x] = { ...g2[y][x], flagged: true };
       }
     }
+    // Apply question marks（老对局态没有这个字段）
+    for (const [x, y] of g.questioned || []) {
+      if (g2[y] && g2[y][x] !== undefined && g2[y][x].value === null) {
+        g2[y][x] = { ...g2[y][x], questioned: true };
+      }
+    }
     return g2;
   }, []);
 
@@ -264,7 +285,7 @@ export default function MineScreen({ code, onLeave }: Props) {
         const next = prev.map((row) => row.map((c) => ({ ...c })));
         for (const [x, y, v] of cells) {
           if (next[y] && next[y][x]) {
-            next[y][x] = { value: v, flagged: false };
+            next[y][x] = { value: v, flagged: false, questioned: false };
           }
         }
         return next;
@@ -298,11 +319,17 @@ export default function MineScreen({ code, onLeave }: Props) {
       const x = msg.x as number;
       const y = msg.y as number;
       const isFlagged = msg.flagged as boolean;
+      // 三态：flag / question / none。旧服务端只给 flagged，按两态兜底。
+      const state = (msg.state as string) || (isFlagged ? 'flag' : 'none');
       setGrid((prev) => {
         if (!prev) return prev;
         const next = prev.map((row) => row.map((c) => ({ ...c })));
         if (next[y] && next[y][x]) {
-          next[y][x] = { ...next[y][x], flagged: isFlagged };
+          next[y][x] = {
+            ...next[y][x],
+            flagged: state === 'flag',
+            questioned: state === 'question',
+          };
         }
         return next;
       });
@@ -404,27 +431,25 @@ export default function MineScreen({ code, onLeave }: Props) {
       }
       return;
     }
-    // 已插旗格子：翻开模式下点击无效（防误触），仅插旗模式下再次点击可取消
-    if (cell.flagged) {
-      if (flagMode) socketRef.current?.send({ type: 'flag', x, y });
-      return;
-    }
     if (flagMode) {
+      // 插旗模式：空 → 旗 → 问号 → 空（服务端裁决，客户端只发动作）
       socketRef.current?.send({ type: 'flag', x, y });
       return;
     }
+    // 翻开模式下，插旗格点击无效（防误触）；问号格可以直接翻开（问号只是笔记）
+    if (cell.flagged) return;
     socketRef.current?.send({ type: 'reveal', x, y });
   }, [game, grid, flagMode, isEliminated]);
 
-  // Long press (or web right-click): place a flag.
-  // 取消插旗必须切到插旗模式点击，长按不拔旗（与点开无效一致，防误触）
+  // Long press (or web right-click): cycle 空 → 旗 → 问号 → 空.
+  // v1.18.1 起不再是「只能插旗」：三态轮换是桌面扫雷的通行做法，也省掉「切模式再点」
+  // 才能拔旗的一步。长按后消费随后的 click，避免一次长按触发两个动作。
   const handleCellLongPress = useCallback((x: number, y: number) => {
     if (!game || game.finished) return;
     if (isEliminated) return;
     if (!grid || !grid[y] || !grid[y][x]) return;
     const cell = grid[y][x];
     if (cell.value !== null) return;
-    if (cell.flagged) return;
     longPressConsumedRef.current = true;
     socketRef.current?.send({ type: 'flag', x, y });
     if (Platform.OS !== 'web') Vibration.vibrate(10);
@@ -454,6 +479,15 @@ export default function MineScreen({ code, onLeave }: Props) {
     setConfirmSurrender(false);
     socketRef.current?.surrender();
   };
+
+  // 终局返回：关闭 socket 后直接回房间。Android 返回键（Modal 的
+  // onRequestClose）与「返回房间」按钮走同一条路径。
+  const handleBackToRoom = useCallback(() => {
+    setShowGameOver(false);
+    skipRemoveRef.current = true;
+    socketRef.current?.close();
+    navigation.goBack();
+  }, [navigation]);
 
   // Player status chips: one per player showing alive/eliminated + revealed count.
   // 4 人局横排放不下，默认收起（只显示自己），点右侧 chevron 展开全部。
@@ -562,6 +596,12 @@ export default function MineScreen({ code, onLeave }: Props) {
     const numVal = cell.value !== null && cell.value > 0 ? cell.value : 0;
     if (cell.flagged && !isRevealed) {
       return <Ionicons name="flag" size={cellSize * 0.55} color={MINE_FLAG} />;
+    }
+    if (cell.questioned && !isRevealed) {
+      // 问号是「还不确定」的笔记：形状与颜色都和旗子分开（WCAG 1.4.1）
+      return (
+        <Text style={[styles.cellQuestion, { fontSize: cellSize * 0.6 }]}>?</Text>
+      );
     }
     if (isRevealed && isMine) {
       return <Ionicons name="warning" size={cellSize * 0.55} color="#FFF" />;
@@ -672,6 +712,10 @@ export default function MineScreen({ code, onLeave }: Props) {
     ? '所有安全格已翻开'
     : game?.reason === 'eliminated' ? '全员淘汰' : '';
 
+  // 个人最佳用时（按难度）：只用于展示与「新纪录」提示，裁决仍在服务端
+  const bestTime = game?.difficulty ? bestTimes[game.difficulty] : undefined;
+  const myElapsedMs = game?.ranking?.find((r) => r.username === user?.username)?.elapsed_ms ?? null;
+
   return (
     <View style={styles.container}>
       {/* Top info bar */}
@@ -685,12 +729,20 @@ export default function MineScreen({ code, onLeave }: Props) {
             <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
             <Text style={styles.statText}>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}</Text>
           </View>
+          {bestTime != null && (
+            <View style={styles.statItem}>
+              <Ionicons name="trophy-outline" size={14} color={colors.warning} />
+              <Text style={styles.statText}>{formatMineElapsed(bestTime)}</Text>
+            </View>
+          )}
         </View>
         <View style={styles.topRight}>
           <GameHelpButton game="minesweeper" size={24} />
           {difficultyLabel ? (
             // 难度名由服务端下发（`room.settings`）—— 客户端不再自己抄一份档位表
-            <Text style={styles.diffChip}>{difficultyLabel}</Text>
+            <Text style={styles.diffChip}>
+              {difficultyLabel}{game?.daily ? ' · 今日盘' : ''}
+            </Text>
           ) : null}
           <Text style={styles.roomCode}>#{code}</Text>
         </View>
@@ -765,7 +817,7 @@ export default function MineScreen({ code, onLeave }: Props) {
       </View>
 
       {/* Leave confirmation modal */}
-      <Modal visible={confirmLeave} transparent animationType="fade">
+      <Modal visible={confirmLeave} transparent animationType="fade" onRequestClose={() => setConfirmLeave(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons name="exit-outline" size={36} color={colors.danger} />
@@ -792,7 +844,7 @@ export default function MineScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Surrender confirmation modal */}
-      <Modal visible={confirmSurrender} transparent animationType="fade">
+      <Modal visible={confirmSurrender} transparent animationType="fade" onRequestClose={() => setConfirmSurrender(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons name="flag-outline" size={36} color={colors.warning} />
@@ -817,7 +869,7 @@ export default function MineScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over / ranking modal */}
-      <Modal visible={showGameOver} transparent animationType="fade">
+      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>游戏结束</Text>
@@ -829,6 +881,15 @@ export default function MineScreen({ code, onLeave }: Props) {
                   color={game.reason === 'cleared' ? colors.warning : colors.danger}
                 />
                 <Text style={styles.modalReason}>{reasonLabel}</Text>
+                {myElapsedMs != null && (
+                  <Text style={styles.modalBest}>
+                    {bestTime == null
+                      ? `本难度首次通关：${formatMineElapsed(myElapsedMs)}`
+                      : myElapsedMs < bestTime
+                        ? `新纪录！最佳用时 ${formatMineElapsed(myElapsedMs)}`
+                        : `本难度最佳用时 ${formatMineElapsed(bestTime)}`}
+                  </Text>
+                )}
               </>
             )}
             {game?.ranking && game.ranking.length > 0 && (
@@ -869,6 +930,11 @@ export default function MineScreen({ code, onLeave }: Props) {
                       <Text style={styles.rankingStatText}>
                         翻 {r.revealed_count}
                       </Text>
+                      {formatMineElapsed(r.elapsed_ms) ? (
+                        <Text style={styles.rankingStatText}>
+                          用时 {formatMineElapsed(r.elapsed_ms)}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 ))}
@@ -876,12 +942,7 @@ export default function MineScreen({ code, onLeave }: Props) {
             )}
             <TouchableOpacity
               style={[styles.modalBtn, styles.modalBtnPrimary]}
-              onPress={() => {
-                setShowGameOver(false);
-                skipRemoveRef.current = true;
-                socketRef.current?.close();
-                navigation.goBack();
-              }}
+              onPress={handleBackToRoom}
             >
               <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
             </TouchableOpacity>
@@ -1136,6 +1197,7 @@ const styles = StyleSheet.create({
   cellNumber: {
     fontWeight: '800',
   },
+  cellQuestion: { fontWeight: '800', color: MINE_QUESTION },
   // Bottom bar
   bottomBar: {
     flexDirection: 'row',
@@ -1179,6 +1241,10 @@ const styles = StyleSheet.create({
   modalReason: {
     fontSize: fontSize.md, color: colors.textSecondary, marginBottom: spacing.sm,
     textAlign: 'center',
+  },
+  modalBest: {
+    fontSize: fontSize.sm, color: colors.warning, fontWeight: '700',
+    textAlign: 'center', marginBottom: spacing.sm,
   },
   modalBtn: {
     width: '100%', borderRadius: radius.md, paddingVertical: spacing.sm + 4,

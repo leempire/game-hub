@@ -118,7 +118,9 @@ def browser_checks(api):
 
         def open_game():
             page.get_by_test_id("game-card-spider").click()
-            assert page.get_by_text("加入房间", exact=True).count() == 1
+            # 单人游戏没有房间概念：入口弹窗里不能出现「加入房间」（v1.18.1 主页的
+            # 快捷入口叫「输入房间号」，所以这里断言 0 而不是数页面上有几处）。
+            assert page.get_by_text("加入房间", exact=True).count() == 0
             page.get_by_text("开始 / 继续牌局", exact=True).click()
             page.get_by_test_id("spider-board").wait_for()
 

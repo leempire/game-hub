@@ -1,40 +1,65 @@
-import React, { useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppLogo } from '../icons';
-import { useAuth } from '../auth';
+import { useAuth, LAST_USERNAME_KEY } from '../auth';
 import { colors, spacing, radius, fontSize } from '../theme';
-import { notify } from '../utils';
 
 type Tab = 'login' | 'register';
 
 export default function AuthScreen() {
-  const { login, register } = useAuth();
+  const { login, register, authError, clearAuthError } = useAuth();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const passwordRef = useRef<TextInput>(null);
+  const confirmRef = useRef<TextInput>(null);
+
+  // 上次登录的用户名（改密 / token 过期被踢回时预填，免去重新输入）
+  useEffect(() => {
+    AsyncStorage.getItem(LAST_USERNAME_KEY)
+      .then((v) => { if (v) setUsername((cur) => cur || v); })
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async () => {
-    if (!username.trim() || !password) {
-      notify('提示', '请填写用户名和密码');
+    setFormError(null);
+    clearAuthError();
+    const name = username.trim();
+    if (!name || !password) {
+      setFormError('请填写用户名和密码');
       return;
     }
-    if (tab === 'register' && password !== confirmPwd) {
-      notify('提示', '两次密码不一致');
-      return;
+    if (tab === 'register') {
+      if (!/^[A-Za-z0-9_]{3,20}$/.test(name)) {
+        setFormError('用户名需为 3-20 位字母、数字或下划线');
+        return;
+      }
+      if (password.length < 6 || password.length > 32) {
+        setFormError('密码需为 6-32 位');
+        return;
+      }
+      if (password !== confirmPwd) {
+        setFormError('两次密码不一致');
+        return;
+      }
     }
     setSubmitting(true);
     try {
       if (tab === 'login') {
-        await login(username.trim(), password);
+        await login(name, password);
       } else {
-        await register(username.trim(), password);
+        await register(name, password);
       }
     } catch (err) {
-      notify('登录失败', (err as Error).message);
+      // **按 tab 区分文案**（以前注册失败也写「登录失败」）。错误留在表单里，
+      // 不用 toast —— 它 2.6 秒就消失，用户来不及看清。
+      setFormError((err as Error).message);
     } finally {
       setSubmitting(false);
     }
@@ -44,7 +69,11 @@ export default function AuthScreen() {
     setTab(t);
     setPassword('');
     setConfirmPwd('');
+    setFormError(null);
+    clearAuthError();
   };
+
+  const shownError = formError || authError;
 
   return (
     <KeyboardAvoidingView
@@ -84,18 +113,31 @@ export default function AuthScreen() {
               placeholderTextColor={colors.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
+              autoFocus
+              autoComplete="username"
+              textContentType="username"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
             />
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>密码</Text>
             <TextInput
+              ref={passwordRef}
               style={styles.input}
               value={password}
               onChangeText={setPassword}
               placeholder={tab === 'register' ? '6-32位' : '请输入密码'}
               placeholderTextColor={colors.textFaint}
               secureTextEntry
+              autoComplete={tab === 'register' ? 'new-password' : 'current-password'}
+              textContentType={tab === 'register' ? 'newPassword' : 'password'}
+              returnKeyType={tab === 'register' ? 'next' : 'go'}
+              onSubmitEditing={() => {
+                if (tab === 'register') confirmRef.current?.focus();
+                else void handleSubmit();
+              }}
             />
           </View>
 
@@ -103,15 +145,24 @@ export default function AuthScreen() {
             <View style={styles.inputGroup}>
               <Text style={styles.label}>确认密码</Text>
               <TextInput
+                ref={confirmRef}
                 style={styles.input}
                 value={confirmPwd}
                 onChangeText={setConfirmPwd}
                 placeholder="再次输入密码"
                 placeholderTextColor={colors.textFaint}
                 secureTextEntry
+                autoComplete="new-password"
+                textContentType="newPassword"
+                returnKeyType="go"
+                onSubmitEditing={() => void handleSubmit()}
               />
             </View>
           )}
+
+          {shownError ? (
+            <Text style={styles.errorText} accessibilityRole="alert">{shownError}</Text>
+          ) : null}
 
           <TouchableOpacity
             style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
@@ -223,6 +274,13 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 6,
     alignItems: 'center',
     marginTop: spacing.sm,
+  },
+  errorText: {
+    fontSize: fontSize.sm,
+    color: colors.danger,
+    textAlign: 'center',
+    marginTop: spacing.xs,
+    lineHeight: 20,
   },
   submitBtnDisabled: {
     opacity: 0.6,

@@ -7,12 +7,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
-import { getRoom, leaveRoom, Room } from '../api';
+import { getRoom, leaveRoom, fetchMyStats, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
 import { colors, spacing, radius, fontSize, g2048Tile, playerColors, withAlpha } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
-import { useModalBackGuard, onConfirmLeave } from '../backGuard';
+import { useModalBackGuard, onConfirmLeave, useWebKeys } from '../backGuard';
 import { GameHelpButton } from '../help';
 
 interface LeaderRow {
@@ -48,6 +48,8 @@ interface GameState {
   reason: null | string;
   seed: number;
   move_count: number;
+  /** 单人局且撤销栈非空时为 true（多人局服务端恒为 false） */
+  undo_available?: boolean;
   your_color?: null | string;
 }
 
@@ -295,6 +297,8 @@ export default function Game2048Screen({ code, onLeave }: Props) {
   const [showGameOver, setShowGameOver] = useState(false);
   const [confirm, setConfirm] = useState<'surrender' | 'leave' | null>(null);
   const [lbOpen, setLbOpen] = useState(false);
+  /** 历史最佳分（从战绩聚合；只用于对比展示，不参与裁决） */
+  const [bestScore, setBestScore] = useState<number | null>(null);
   const [boardBox, setBoardBox] = useState<{ width: number; height: number } | null>(null);
   const socketRef = useRef<RoomSocket | null>(null);
   // 我方颜色由服务端 sync/game_start 下发（host=blue、加入者=red），ref 避免闭包过期
@@ -305,6 +309,14 @@ export default function Game2048Screen({ code, onLeave }: Props) {
   const gameOverRef = useRef(false);
   gameOverRef.current = showGameOver;
   useModalBackGuard(confirm !== null, () => setConfirm(null));
+
+  // 个人最佳分：战绩聚合接口一次拿回，之后本局刷新纪录就本地更新
+  useEffect(() => {
+    if (!token) return;
+    fetchMyStats(token)
+      .then((s) => setBestScore(s.best_scores?.['2048'] ?? null))
+      .catch(() => {});
+  }, [token]);
 
   // ── Board sizing ────────────────────────────────────
   // 棋盘随「实际剩余空间」缩放：竖向溢出就是因为原来只按宽度算、写死 400。
@@ -456,6 +468,8 @@ export default function Game2048Screen({ code, onLeave }: Props) {
             next.move_count = prev.move_count + 1;
           }
           next.score = msg.score as number;
+          // 单人局每走一步就多一层撤销栈（服务端上限 20 步）
+          next.undo_available = next.player_count === 1 && next.move_count > 0;
           if (msg.player_finished) {
             next.game_over = true;
             next.finish_reason = msg.player_finished as string;
@@ -463,6 +477,23 @@ export default function Game2048Screen({ code, onLeave }: Props) {
         }
         return next;
       });
+    };
+
+    /** 撤销成功：盘面整体回退，**不播滑行动画**（直接重建棋子） */
+    const handleUndo2048 = (msg: SocketMessage) => {
+      const board = msg.board as number[][] | undefined;
+      if (!board) return;
+      flushSettle();
+      resetTiles(board);
+      setGame((prev) => (prev ? {
+        ...prev,
+        board,
+        score: msg.score as number,
+        move_count: msg.move_count as number,
+        max_tile: maxTileOf(board),
+        undo_available: !!msg.undo_available,
+        leaderboard: (msg.leaderboard as LeaderRow[]) || prev.leaderboard,
+      } : prev));
     };
 
     const handleGameOver = (msg: SocketMessage) => {
@@ -490,6 +521,7 @@ export default function Game2048Screen({ code, onLeave }: Props) {
     ws.on('lobby', handleLobby);
     ws.on('game_start', handleGameStart);
     ws.on('move2048', handleMove2048);
+    ws.on('undo2048', handleUndo2048);
     ws.on('game_over', handleGameOver);
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
@@ -497,12 +529,46 @@ export default function Game2048Screen({ code, onLeave }: Props) {
     ws.connect();
 
     return () => { ws.close(); };
-  }, [token, code, user?.id, onLeave, applyMove, resetTiles]);
+  }, [token, code, user?.id, onLeave, applyMove, resetTiles, flushSettle]);
+
+  const undoMove = useCallback(() => {
+    if (!game || game.winner || game.game_over) return;
+    if (game.player_count !== 1) {
+      notify('提示', '多人对局不支持撤销');
+      return;
+    }
+    if (!game.undo_available) {
+      notify('提示', '还没有可以撤销的步数');
+      return;
+    }
+    socketRef.current?.undo2048();
+  }, [game]);
 
   const sendMove = useCallback((direction: string) => {
     if (!game || game.winner || game.game_over) return;
     socketRef.current?.send({ type: 'move2048', direction });
   }, [game]);
+
+  // 网页键盘：方向键 / WASD 走子，Ctrl/⌘+Z 撤销。
+  // 一次按键只走一步（按住不连发，2048 连发等于乱走）；撤销只在单人局可用。
+  const KEY_DIR: Record<string, string> = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    w: 'up', s: 'down', a: 'left', d: 'right',
+  };
+  const sendMoveRef = useRef(sendMove);
+  sendMoveRef.current = sendMove;
+  const undoRef = useRef(undoMove);
+  undoRef.current = undoMove;
+  useWebKeys((key, e) => {
+    if ((e.ctrlKey || e.metaKey) && key === 'z') {
+      undoRef.current();
+      return true;
+    }
+    const dir = KEY_DIR[key];
+    if (!dir) return false;
+    if (!e.repeat) sendMove(dir);
+    return true;
+  }, !!game && !game.winner && !game.game_over && confirm === null);
 
   // ── 排行榜浮层：可拖动 ───────────────────────────────────
   // 浮层展开后会盖住棋盘一角，所以允许拖走。拖动只由「胶囊」和「面板标题行」两个
@@ -557,8 +623,7 @@ export default function Game2048Screen({ code, onLeave }: Props) {
   // PanResponder 手势：必须用 useMemo + ref 读取易变状态。
   // 踩坑：原来用 useRef(PanResponder.create(...)).current，回调永远闭包在首帧的
   // sendMove 上，而首帧 game === null，被守卫拦掉 → 滑动完全没反应（方向键正常）。
-  const sendMoveRef = useRef(sendMove);
-  sendMoveRef.current = sendMove;
+  // `sendMoveRef` 在上面的键盘区声明（滑动与键盘共用同一份最新回调）。
   const boardEdgeRef = useRef(boardEdge);
   boardEdgeRef.current = boardEdge;
 
@@ -641,6 +706,9 @@ export default function Game2048Screen({ code, onLeave }: Props) {
       <View style={styles.topBar}>
         <View style={styles.topLeft}>
           <Text style={styles.myColor}>2048 竞速</Text>
+          {bestScore != null && (
+            <Text style={styles.bestText}>最佳 {bestScore}</Text>
+          )}
         </View>
         <View style={styles.topRight}>
           <GameHelpButton game="2048" size={24} />
@@ -795,6 +863,13 @@ export default function Game2048Screen({ code, onLeave }: Props) {
 
       {/* Action buttons */}
       <View style={styles.bottomBar}>
+        {/* 撤销只在单人局出现：多人局由服务端拒绝，客户端也不展示入口 */}
+        {game && !game.winner && game.player_count === 1 && (
+          <TouchableOpacity style={styles.undoBtn} onPress={undoMove} testID="g2048-undo">
+            <Ionicons name="arrow-undo-outline" size={18} color={colors.text} />
+            <Text style={styles.undoBtnText}>撤销</Text>
+          </TouchableOpacity>
+        )}
         {game && !game.winner && (
           <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
             <Text style={styles.surrenderBtnText}>认输</Text>
@@ -806,7 +881,7 @@ export default function Game2048Screen({ code, onLeave }: Props) {
       </View>
 
       {/* Confirm modal */}
-      <Modal visible={confirm !== null} transparent animationType="fade">
+      <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons
@@ -844,7 +919,7 @@ export default function Game2048Screen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade">
+      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>对局结束</Text>
@@ -873,6 +948,13 @@ export default function Game2048Screen({ code, onLeave }: Props) {
                   <Text style={styles.modalReason}>{subtitle}</Text>
                   {game.reason && REASON_LABELS[game.reason] && (
                     <Text style={styles.modalReason}>{REASON_LABELS[game.reason]}</Text>
+                  )}
+                  {bestScore != null && (
+                    <Text style={[styles.modalReason, game.score > bestScore && styles.recordText]}>
+                      {game.score > bestScore
+                        ? `新纪录！个人最佳 ${game.score}`
+                        : `个人最佳 ${bestScore}`}
+                    </Text>
                   )}
                   <View style={styles.rankList}>
                     {rows.map((r) => (
@@ -911,6 +993,8 @@ const styles = StyleSheet.create({
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   topRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   myColor: { fontSize: fontSize.md, fontWeight: '700', color: colors.text },
+  bestText: { fontSize: fontSize.xs, color: colors.textSecondary, fontWeight: '600' },
+  recordText: { color: colors.success, fontWeight: '700' },
   roomCode: {
     fontSize: fontSize.sm, color: colors.textSecondary,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
@@ -1004,6 +1088,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row', gap: spacing.md, paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm, paddingBottom: spacing.md,
   },
+  undoBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 6,
+    backgroundColor: colors.card, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.borderStrong,
+  },
+  undoBtnText: { color: colors.text, fontWeight: '600', fontSize: fontSize.md },
   surrenderBtn: {
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm + 6,
     backgroundColor: colors.danger, borderRadius: radius.md,

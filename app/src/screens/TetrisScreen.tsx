@@ -16,7 +16,7 @@ import {
 } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
-import { useModalBackGuard, onConfirmLeave } from '../backGuard';
+import { useModalBackGuard, onConfirmLeave, useWebKeys } from '../backGuard';
 import { GameHelpButton } from '../help';
 import {
   TetrisPiece, TetrisRules, TetrisLeaderRow, gravityMs, GARBAGE_LABEL,
@@ -32,6 +32,13 @@ interface TetrisPayload {
   board: number[][];
   current: TetrisPiece | null;
   next_piece: string | null;
+  /** 接下来 3 块（服务端预览队列，旧版服务端可能没有） */
+  next_pieces?: string[];
+  /** 暂存的方块名（空 = 还没存过） */
+  held?: string | null;
+  /** 本块是否已经用过暂存（锁一块后重置） */
+  hold_used?: boolean;
+  start_level?: number;
   shapes: TetrisRules['shapes'];
   kicks: number[];
   your_color: string;
@@ -155,6 +162,8 @@ export default function TetrisScreen({ code, onLeave }: Props) {
   const rulesRef = useRef<TetrisRules | null>(null);
   const awaitingRef = useRef(false);
   const finishedRef = useRef(false);
+  /** 本块是否已暂存过（服务端随每次状态下发；用于点击反馈，不自己推规则） */
+  const holdUsedRef = useRef(false);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gameOverShownRef = useRef(false);
   /** 程序化导航（回房间/退出）时放行 beforeRemove，别弹确认。 */
@@ -241,6 +250,22 @@ export default function TetrisScreen({ code, onLeave }: Props) {
     flush();
   }, [flush, setLocal]);
 
+  /**
+   * 暂存 / 换出当前方块：**本地无法预演**（换出来的是暂存块还是预览队首，
+   * 以及新的 next 队列，只有服务端知道），所以立刻把积攒的动作连同 `hold`
+   * 发上去，等权威状态回来再放开输入。每块限一次，用过的点击给一句提示
+   * （禁用态在本项目等于「点了没反应」，不能只置灰）。
+   */
+  const holdNow = useCallback(() => {
+    if (!curRef.current || awaitingRef.current || finishedRef.current) return;
+    if (holdUsedRef.current) {
+      flash('这一块已经暂存过了');
+      return;
+    }
+    pendingRef.current.push('hold');
+    flush();
+  }, [flush, flash]);
+
   // ── 重力：固定节拍，与移动无关 ────────────────────────────
   // 踩坑预案：如果把定时器挂在 cur/board 上，每动一下都会重置计时 →
   // 一直按着方向键方块就永远不掉（等于无限锁定延迟）。
@@ -253,6 +278,21 @@ export default function TetrisScreen({ code, onLeave }: Props) {
     const id = setInterval(() => stepRef.current(), gravityMs(level));
     return () => clearInterval(id);
   }, [playing, awaiting, level]);
+
+  // ── 网页键盘：←→/AD 移动、↑/W/X 顺时针、Z 逆时针、↓/S 软降、C 暂存、空格落底 ──
+  // 按住方向键靠系统的自动连发；落底/暂存不连发（按住空格会把后面几块全砸下去）
+  useWebKeys((key, e) => {
+    switch (key) {
+      case 'ArrowLeft': case 'a': act('left'); return true;
+      case 'ArrowRight': case 'd': act('right'); return true;
+      case 'ArrowUp': case 'w': case 'x': act('rotate_cw'); return true;
+      case 'z': act('rotate_ccw'); return true;
+      case 'ArrowDown': case 's': stepAndMaybeLock(); return true;
+      case 'c': if (!e.repeat) holdNow(); return true;
+      case ' ': if (!e.repeat) act('hard_drop'); return true;
+      default: return false;
+    }
+  }, playing && confirm === null);
 
   // ── WS ────────────────────────────────────────────────────
   useEffect(() => {
@@ -274,6 +314,7 @@ export default function TetrisScreen({ code, onLeave }: Props) {
       pendingRef.current = [];
       setAwaitRef(false);
       setFinishedRef(!!g.finished);
+      holdUsedRef.current = !!g.hold_used;
       setLocal(g.board || [], g.current || null);
     };
 
@@ -321,6 +362,7 @@ export default function TetrisScreen({ code, onLeave }: Props) {
       pendingRef.current = [];
       setAwaitRef(false);
       setFinishedRef(!!g.finished);
+      holdUsedRef.current = !!g.hold_used;
       setLocal(g.board || [], g.current || null);
       if (attacked) {
         flash(`被 ${nameOfRef.current(g.garbage_from ?? -1)} 顶了 ${g.garbage_count || 0} 行`);
@@ -478,10 +520,13 @@ export default function TetrisScreen({ code, onLeave }: Props) {
       .map(([rr, cc]) => `${rr},${cc}`));
   }, [rules, view]);
 
-  const nextShape = useMemo(() => {
-    if (!rules || !game?.next_piece) return [];
-    return rules.shapes[game.next_piece]?.[0] || [];
-  }, [rules, game?.next_piece]);
+  /** 预览队列（最多 3 块）；旧服务端只给 `next_piece` 时退回单块预览。 */
+  const nextPieces = useMemo(() => {
+    const list = game?.next_pieces?.length
+      ? game.next_pieces
+      : (game?.next_piece ? [game.next_piece] : []);
+    return list.slice(0, 3);
+  }, [game?.next_pieces, game?.next_piece]);
 
   const nameOf = (uid: number): string => {
     const p = room?.players?.find((x) => x.id === uid);
@@ -610,10 +655,17 @@ export default function TetrisScreen({ code, onLeave }: Props) {
               <HudStat label="等级" value={game?.level ?? 1} />
               <HudStat label="被顶" value={game?.garbage_received ?? 0} />
             </View>
-            <NextPreview
-              shape={nextShape}
-              piece={game?.next_piece || null}
-              cell={Math.max(9, Math.min(13, Math.round(cell * 0.42)))}
+            <HoldPreview
+              piece={game?.held || null}
+              shape={game?.held && rules ? rules.shapes[game.held]?.[0] || [] : []}
+              used={!!game?.hold_used}
+              cell={Math.max(7, Math.min(11, Math.round(cell * 0.38)))}
+              onPress={holdNow}
+            />
+            <NextPreviews
+              pieces={nextPieces}
+              shapes={rules?.shapes || {}}
+              cell={Math.max(8, Math.min(13, Math.round(cell * 0.42)))}
             />
           </View>
         </View>
@@ -740,31 +792,78 @@ function HudStat({ label, value }: { label: string; value: number }) {
   );
 }
 
-function NextPreview({ shape, piece, cell }: { shape: number[][]; piece: string | null; cell: number }) {
+/**
+ * 一块方块的 4×4 预览井。
+ *
+ * 预览自带一小块井底：紫 T / 红 Z / 蓝 J 直接压在面板上只有 2.1~2.3，达不到
+ * 图形阈值 3:1（压井底则 ≥4.48，见 theme.ts）。
+ */
+function PieceWell({ shape, piece, cell }: { shape: number[][]; piece: string | null; cell: number }) {
   const filled = new Set(shape.map(([r, c]) => `${r},${c}`));
   const color = piece ? tetrisPieceColors[piece] : tetrisSlot;
   return (
-    <View style={styles.nextBox} accessibilityLabel={`下一块 ${piece || ''}`}>
-      <Text style={styles.nextLabel}>下一块</Text>
-      {/* 预览自带一小块井底：紫 T / 红 Z / 蓝 J 直接压在面板上只有 2.1~2.3，
-          达不到图形阈值 3:1（压井底则 ≥4.48，见 theme.ts） */}
-      <View style={[styles.nextWell, { width: cell * 4 + 8, height: cell * 4 + 8 }]}>
-        {[0, 1, 2, 3].map((r) => (
-          <View key={r} style={styles.boardRow}>
-            {[0, 1, 2, 3].map((c) => (
-              <View
-                key={c}
-                style={{
-                  width: cell, height: cell,
-                  backgroundColor: filled.has(`${r},${c}`) ? color : 'transparent',
-                  borderWidth: filled.has(`${r},${c}`) ? 1 : 0,
-                  borderColor: tetrisEdge,
-                }}
-              />
-            ))}
-          </View>
-        ))}
-      </View>
+    <View style={[styles.nextWell, { width: cell * 4 + 8, height: cell * 4 + 8 }]}>
+      {[0, 1, 2, 3].map((r) => (
+        <View key={r} style={styles.boardRow}>
+          {[0, 1, 2, 3].map((c) => (
+            <View
+              key={c}
+              style={{
+                width: cell, height: cell,
+                backgroundColor: filled.has(`${r},${c}`) ? color : 'transparent',
+                borderWidth: filled.has(`${r},${c}`) ? 1 : 0,
+                borderColor: tetrisEdge,
+              }}
+            />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * 暂存入口 = 预览框本身（点一下换块），键盘 `C` 也可以。
+ *
+ * 用的那一块**不置灰到看不见**：标签改成「暂存 · 已用」并压暗一档——禁用态在本
+ * 项目等于「点了没反应」，所以仍然可点，点了给一句「这一块已经暂存过了」。
+ */
+function HoldPreview({ piece, shape, used, cell, onPress }: {
+  piece: string | null; shape: number[][]; used: boolean;
+  cell: number; onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.previewBox, used && styles.previewUsed]}
+      onPress={onPress}
+      testID="t-hold"
+      accessibilityLabel={`暂存${piece ? ` ${piece}` : '（空）'}`}
+      accessibilityHint="点一下把当前方块暂存，或换出暂存的方块"
+    >
+      <Text style={[styles.nextLabel, used && styles.previewUsedText]}>
+        {used ? '暂存 · 已用' : '暂存'}
+      </Text>
+      <PieceWell shape={shape} piece={piece} cell={cell} />
+    </TouchableOpacity>
+  );
+}
+
+/** 接下来三块（自上而下）。每块都自带井底，形状与颜色一眼可辨。 */
+function NextPreviews({ pieces, shapes, cell }: {
+  pieces: string[]; shapes: TetrisRules['shapes']; cell: number;
+}) {
+  return (
+    <View style={styles.previewBox} accessibilityLabel={`接下来 ${pieces.join(' ')}`}>
+      <Text style={styles.nextLabel}>接下来</Text>
+      {pieces.map((piece, i) => (
+        <View key={`${piece}-${i}`} style={i > 0 ? styles.nextSlot : undefined}>
+          <PieceWell
+            shape={shapes[piece]?.[0] || []}
+            piece={piece}
+            cell={i === 0 ? cell : Math.max(6, cell - 3)}
+          />
+        </View>
+      ))}
     </View>
   );
 }
@@ -789,13 +888,17 @@ const styles = StyleSheet.create({
     width: '100%', flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between', paddingHorizontal: spacing.md,
   },
-  nextBox: { alignItems: 'center' },
+  previewBox: { alignItems: 'center' },
   nextLabel: { fontSize: fontSize.xs, color: tetrisOnPanelMuted, marginBottom: 2 },
   nextWell: {
     backgroundColor: tetrisBoard, borderRadius: radius.sm,
     borderWidth: 1, borderColor: tetrisEdge,
     padding: 4, alignItems: 'center', justifyContent: 'center',
   },
+  nextSlot: { marginTop: 4 },
+  // 「已用」不是只压暗颜色：标签文字同时改成「暂存 · 已用」（颜色不作为唯一通道）
+  previewUsed: { opacity: 0.55 },
+  previewUsedText: { color: tetrisOnPanel },
 
   // 街机面板
   panel: {

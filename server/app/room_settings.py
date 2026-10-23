@@ -33,7 +33,7 @@
 from dataclasses import dataclass
 from typing import Callable
 
-from app.game import battleship, minesweeper, stasis_map, uno_rules
+from app.game import battleship, minesweeper, stasis as stasis_engine, stasis_map, uno_rules
 
 KIND_CHOICE = "choice"
 KIND_TOGGLE = "toggle"
@@ -72,25 +72,67 @@ class Setting:
 
 
 def _mine_settings() -> list[Setting]:
-    return [Setting(
-        key="difficulty", label="难度", kind=KIND_CHOICE,
-        store="difficulty", default="intermediate", in_summary=True,
-        choices=tuple(
-            {"value": d, "label": minesweeper.DIFFICULTY_LABELS[d],
-             "blurb": minesweeper.difficulty_blurb(d)}
-            for d in minesweeper.DIFFICULTIES
+    return [
+        Setting(
+            key="difficulty", label="难度", kind=KIND_CHOICE,
+            store="difficulty", default="intermediate", in_summary=True,
+            choices=tuple(
+                {"value": d, "label": minesweeper.DIFFICULTY_LABELS[d],
+                 "blurb": minesweeper.difficulty_blurb(d)}
+                for d in minesweeper.DIFFICULTIES
+            ),
         ),
-    )]
+        Setting(
+            key="daily", label="每日固定盘", kind=KIND_TOGGLE,
+            store="mine_daily", default=False, in_summary=True,
+            toggle_labels=("今日盘", "随机盘"),
+            blurb="开启后雷盘按 UTC 日期定种子：同一天同一难度，所有人拿到同一份盘，"
+                  "适合比最佳用时。第一下翻开的 3×3 安全区仍随落点移动。",
+        ),
+    ]
 
 
 def _stasis_settings() -> list[Setting]:
-    return [Setting(
-        key="map", label="地图", kind=KIND_CHOICE,
-        store="stasis_map_id", default=stasis_map.DEFAULT_MAP_ID, in_summary=True,
-        choices=tuple(
-            {"value": mid, "label": spec.name, "blurb": spec.blurb}
-            for mid, spec in stasis_map.SPECS.items()
+    return [
+        Setting(
+            key="map", label="地图", kind=KIND_CHOICE,
+            store="stasis_map_id", default=stasis_map.DEFAULT_MAP_ID, in_summary=True,
+            choices=tuple(
+                {"value": mid, "label": spec.name, "blurb": spec.blurb}
+                for mid, spec in stasis_map.SPECS.items()
+            ),
         ),
+        Setting(
+            key="difficulty", label="难度", kind=KIND_CHOICE,
+            store="stasis_difficulty", default=stasis_engine.DEFAULT_DIFFICULTY,
+            in_summary=True,
+            choices=tuple(
+                {"value": key, "label": spec["label"], "blurb": spec["blurb"]}
+                for key, spec in stasis_engine.DIFFICULTY_SPECS.items()
+            ),
+        ),
+    ]
+
+
+TETRIS_START_LEVEL = 1
+
+
+def _tetris_settings() -> list[Setting]:
+    """起始速度档：只给三档，不做自由滑条。
+
+    档位同时抬高分倍率与重力速度（引擎 `level_of(lines, start_level)`），
+    同一房间里所有人同档，所以排名公平。三档就是引擎 `gravityMs` 表的
+    第 1 / 5 / 10 行，客户端不需要为「起始速度」再写一套映射。
+    """
+    return [Setting(
+        key="start_level", label="起始速度", kind=KIND_CHOICE,
+        store="tetris_start_level", default=TETRIS_START_LEVEL, in_summary=True,
+        choices=(
+            {"value": 1, "label": "慢", "blurb": "从 1 级起步，方块下落最慢，适合熟悉操作。"},
+            {"value": 5, "label": "标准", "blurb": "从 5 级起步，下落明显更快，分数倍率也高。"},
+            {"value": 10, "label": "快", "blurb": "从 10 级起步，方块几乎贴地掉；高手档。"},
+        ),
+        value_label=lambda room, value: f"{value} 级",
     )]
 
 
@@ -101,15 +143,29 @@ def _bs_label(size: int) -> str:
 
 
 def _battleship_settings() -> list[Setting]:
-    return [Setting(
-        key="board_size", label="棋盘", kind=KIND_CHOICE,
-        store="bs_size", default=battleship.DEFAULT_SIZE, in_summary=True,
-        choices=tuple(
-            {"value": n, "label": p["name"], "blurb": p["blurb"]}
-            for n, p in battleship.SIZE_PRESETS.items()
+    return [
+        Setting(
+            key="board_size", label="棋盘", kind=KIND_CHOICE,
+            store="bs_size", default=battleship.DEFAULT_SIZE, in_summary=True,
+            choices=tuple(
+                {"value": n, "label": p["name"], "blurb": p["blurb"]}
+                for n, p in battleship.SIZE_PRESETS.items()
+            ),
+            value_label=lambda room, value: _bs_label(value),
         ),
-        value_label=lambda room, value: _bs_label(value),
-    )]
+        Setting(
+            key="adjacent_placement", label="舰船不可相邻", kind=KIND_TOGGLE,
+            store="bs_adjacent", default=False, in_summary=True,
+            blurb="开启后舰船之间必须留出一圈水（含斜角），布阵更讲究掩护与走位；"
+                  "人机的随机布阵也会遵守。",
+        ),
+        Setting(
+            key="hide_sunk_ship_type", label="击沉不报舰种", kind=KIND_TOGGLE,
+            store="bs_hide_sunk_type", default=False, in_summary=True,
+            blurb="开启后击沉只公开船体位置，不告诉你沉的是哪一艘——"
+                  "得靠剩余舰种与武器挂靠自己推。",
+        ),
+    ]
 
 
 def _luzhanqi_settings() -> list[Setting]:
@@ -193,6 +249,7 @@ _GAMES: dict[str, list[Setting]] = {
     "luzhanqi": _luzhanqi_settings(),
     "stasis": _stasis_settings(),
     "battleship": _battleship_settings(),
+    "tetris": _tetris_settings(),
     "uno": [_uno_preset_setting(), *_uno_rule_settings()],
 }
 

@@ -406,6 +406,26 @@ MAX_ENTITY_LEVEL = 10
 # 仍然让 2/4/6 人档拉开差距（见设计 §1.5.1 的新表），所以没动。
 PLAYER_COUNT_HP_MULT = {2: 1.3, 3: 1.8, 4: 2.3, 5: 2.8, 6: 3.3}
 
+# 三档难度（v1.18.1，房规 `stasis_difficulty`）：**只调已经平衡过的乘数**，
+# 不做自由滑条，也不改地图与建造表。三条乘数分别作用在静默体的血量、门伤与
+# 「砸门多久进化一级」上——正好覆盖「扛不扛得住 / 打不打得死 / 它长多快」。
+# 标准档全部 ×1.0，所以既有战绩与文档里的平衡表仍然对应标准档。
+DIFFICULTY_SPECS = {
+    "easy": {"label": "轻松", "hp": 0.8, "dps": 0.8, "evolve": 1.3,
+             "blurb": "静默体更脆、砸门更慢、进化更晚，适合第一次玩或带新手。"},
+    "normal": {"label": "标准", "hp": 1.0, "dps": 1.0, "evolve": 1.0,
+               "blurb": "与既有平衡表一致的原版难度。"},
+    "hard": {"label": "挑战", "hp": 1.2, "dps": 1.2, "evolve": 0.8,
+             "blurb": "更肉、砸门更疼、进化更快；需要明确分工与及时升级炮台。"},
+}
+DEFAULT_DIFFICULTY = "normal"
+
+
+def difficulty_spec(gs: dict) -> dict:
+    """当前对局的难度乘数；老存档没有该字段时退回标准档。"""
+    return DIFFICULTY_SPECS.get(gs.get("difficulty") or DEFAULT_DIFFICULTY,
+                                DIFFICULTY_SPECS[DEFAULT_DIFFICULTY])
+
 ENTITY_SPEED = 2.0                 # 格/秒
 # 撤退时瘸着走。**这个值是「能不能反杀」的总开关**（设计 §1.5.1 缺陷 2）：
 # 撤退和前进同速时它退回气闸几乎不花时间，就没有击杀窗口。
@@ -702,7 +722,8 @@ def _cell_of(pos) -> tuple[int, int]:
 
 
 def create_game(user_ids: list[int], seed: int | None = None,
-                map_id: str | None = None) -> dict:
+                map_id: str | None = None,
+                difficulty: str = DEFAULT_DIFFICULTY) -> dict:
     """建一局：按 `map_id` 取图、随机分配每间舱室的房型，所有人从气闸下方出生，
     进入**跑动阶段**。
 
@@ -770,6 +791,7 @@ def create_game(user_ids: list[int], seed: int | None = None,
         "seat_uids": list(user_ids),
         "player_colors": {uid: PLAYER_COLORS[i] for i, uid in enumerate(user_ids)},
         "seed": seed,
+        "difficulty": difficulty if difficulty in DIFFICULTY_SPECS else DEFAULT_DIFFICULTY,
         "rng": rng,
         "phase": "run",                    # run → playing → over
         "run_ms": RUN_MS,                  # 跑动倒计时（自己走，不占 clock_ms）
@@ -782,7 +804,7 @@ def create_game(user_ids: list[int], seed: int | None = None,
             "airlock": list(m.airlock),
         },
         "players": players,
-        "entity": _spawn_entity(n, m),
+        "entity": _spawn_entity(n, m, difficulty),
         "winner": None,
         "finished": False,
         "reason": None,
@@ -790,9 +812,11 @@ def create_game(user_ids: list[int], seed: int | None = None,
     }
 
 
-def _spawn_entity(num_players: int, m: M.Map) -> dict:
+def _spawn_entity(num_players: int, m: M.Map,
+                  difficulty: str = DEFAULT_DIFFICULTY) -> dict:
     """静默体在气闸待命。跑动阶段它不动（`advance` 里按 phase 挡住）。"""
-    hp = ENTITY_HP[0] * PLAYER_COUNT_HP_MULT[num_players]
+    spec = DIFFICULTY_SPECS.get(difficulty) or DIFFICULTY_SPECS[DEFAULT_DIFFICULTY]
+    hp = ENTITY_HP[0] * PLAYER_COUNT_HP_MULT[num_players] * spec["hp"]
     return {
         "level": 1,
         "hp": hp,
@@ -1584,7 +1608,8 @@ def _combat(gs: dict, dt_ms: int, events: list[dict]) -> None:
             if e["rage_door"] != tid and not raging:
                 e["rage_door"] = None
             mult = cryo_mult(room) if room is not None else 1.0
-            dmg = ENTITY_DPS[e["level"] - 1] * (RAGE_MULT if raging else 1.0) * dt
+            dmg = (ENTITY_DPS[e["level"] - 1] * difficulty_spec(gs)["dps"]
+                   * (RAGE_MULT if raging else 1.0) * dt)
             if shielded:
                 dmg = 0.0                      # 力场把这 3 秒的门血全吃掉
             elif bound:
@@ -1666,14 +1691,14 @@ def _combat(gs: dict, dt_ms: int, events: list[dict]) -> None:
     #    **再生期间不进化**：那会让 max_hp 一路上涨、「回血到 40%」的目标跟着
     #    往后跑，它就会卡在气闸外回血回一整局（实测踩过）。
     if e["state"] != "regenerate" and e["level"] < MAX_ENTITY_LEVEL \
-            and e["attack_ms"] >= EVOLVE_ATTACK_MS:
+            and e["attack_ms"] >= EVOLVE_ATTACK_MS * difficulty_spec(gs)["evolve"]:
         e["level"] += 1
         # **清零而不是扣掉阈值**（不累积超过一级）：积压多级会在界面上连成一串
         # 进化提示，玩家读不出发生了什么；而且热重启恢复的老存档里这个字段是
         # 旧口径的绝对值（上千），清零刚好把它自愈掉。
         e["attack_ms"] = 0.0
         mult = PLAYER_COUNT_HP_MULT[gs["num_players"]]
-        new_max = ENTITY_HP[e["level"] - 1] * mult
+        new_max = ENTITY_HP[e["level"] - 1] * mult * difficulty_spec(gs)["hp"]
         e["hp"] += max(0.0, new_max - e["max_hp"]) * 0.5
         e["max_hp"] = new_max
         events.append({"type": "entity_evolve", "level": e["level"]})
@@ -2299,6 +2324,9 @@ def game_to_sync(gs: dict, uid: int) -> dict:
         "your_seat": seat_of(gs, uid),
         "your_uid": uid,
         "phase": gs["phase"],
+        # 本局难度（客户端只用于显示；数值裁决在引擎里）
+        "difficulty": gs.get("difficulty") or DEFAULT_DIFFICULTY,
+        "difficulty_label": difficulty_spec(gs)["label"],
         "run_ms": max(0, gs["run_ms"]),
         "clock_ms": gs["clock_ms"],
         # **参考时长，不是终点**（v8）：一局没有时长上限，客户端拿它画不了进度条，

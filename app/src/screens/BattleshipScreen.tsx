@@ -19,6 +19,7 @@ import {
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
+import { GameHelpButton } from '../help';
 import { useDisconnectCountdown } from '../disconnect';
 
 // 命中/击沉标记：都压在深蓝棋盘上，提亮到 ≥4:1（原 #EF4444 只有 3.06:1）
@@ -59,7 +60,10 @@ interface GameSync {
   own_attack_board: number[][];
   incoming_board: number[][];
   own_ships: Array<{ id: number; x: number; y: number; horizontal: boolean }>;
-  opp_ships: Array<{ id: number; x: number; y: number; horizontal: boolean; cells: number[][]; sunk: boolean }>;
+  // 房规 hide_sunk_ship_type 下，沉舰只公开位置、不带 id（舰种）
+  opp_ships: Array<{ id?: number; x?: number; y?: number; horizontal?: boolean; cells: number[][]; sunk: boolean }>;
+  /** 本局房规（v1.18.1）：布阵提示与落点校验用 */
+  rules?: { adjacent_placement: boolean; hide_sunk_ship_type: boolean };
   opp_ship_count: number;
   own_sunk_count: number;
   opp_sunk_count: number;
@@ -126,8 +130,12 @@ const NOTICE_MS = 2200;
 
 // --- Random placement generator (client-side) ---
 
-function randomPlacementClient(size: number, fleet: ShipDef[]): ShipPlacement[] {
+function randomPlacementClient(
+  size: number, fleet: ShipDef[], noTouch: boolean = false,
+): ShipPlacement[] {
   const board: number[][] = Array.from({ length: size }, () => Array(size).fill(0));
+  // 房规「不可相邻」：已放舰船自身 + 一圈邻格都视为禁区（与引擎同一条规则）
+  const blocked = new Set<string>();
   const ships: ShipPlacement[] = [];
   for (const sdef of fleet) {
     let placed = false;
@@ -142,11 +150,20 @@ function randomPlacementClient(size: number, fleet: ShipDef[]): ShipPlacement[] 
       for (let i = 0; i < sdef.size; i++) {
         const cx = horizontal ? x + i : x;
         const cy = horizontal ? y : y + i;
-        if (board[cy][cx] !== 0) { ok = false; break; }
+        if (board[cy][cx] !== 0 || (noTouch && blocked.has(`${cx},${cy}`))) {
+          ok = false; break;
+        }
         cells.push([cx, cy]);
       }
       if (!ok) continue;
       for (const [cx, cy] of cells) board[cy][cx] = sdef.id;
+      if (noTouch) {
+        for (const [cx, cy] of cells) {
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) blocked.add(`${cx + dx},${cy + dy}`);
+          }
+        }
+      }
       ships.push({ id: sdef.id, x, y, horizontal, cells, placed: true });
       placed = true;
       break;
@@ -158,6 +175,23 @@ function randomPlacementClient(size: number, fleet: ShipDef[]): ShipPlacement[] 
   return ships;
 }
 
+/** 两艘舰是否相邻（含斜角）——房规 `adjacent_placement` 的本地判定。 */
+function shipsTouch(ships: ShipPlacement[]): boolean {
+  const placed = ships.filter((s) => s.placed);
+  for (let i = 0; i < placed.length; i++) {
+    for (let j = i + 1; j < placed.length; j++) {
+      const a = placed[i].cells;
+      const b = placed[j].cells;
+      for (const [ax, ay] of a) {
+        for (const [bx, by] of b) {
+          if (Math.abs(ax - bx) <= 1 && Math.abs(ay - by) <= 1) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 function shipCells(x: number, y: number, size: number, horizontal: boolean): number[][] {
   return Array.from({ length: size }, (_, i) =>
     horizontal ? [x + i, y] : [x, y + i]
@@ -167,11 +201,26 @@ function shipCells(x: number, y: number, size: number, horizontal: boolean): num
 function canPlace(
   board: number[][], x: number, y: number, size: number,
   horizontal: boolean, excludeId: number, boardSize: number = DEFAULT_BOARD,
+  noTouch: boolean = false,
 ): boolean {
   const cells = shipCells(x, y, size, horizontal);
   for (const [cx, cy] of cells) {
     if (cx < 0 || cx >= boardSize || cy < 0 || cy >= boardSize) return false;
     if (board[cy][cx] !== 0 && board[cy][cx] !== excludeId) return false;
+  }
+  if (!noTouch) return true;
+  // 切比雪夫距离 1 内不能有别的舰船（含斜角）——服务端 `validate_placement`
+  // 是最终裁决，这里只做即时反馈，避免玩家拖到一个会被拒的位置
+  for (const [cx, cy] of cells) {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || nx >= boardSize || ny < 0 || ny >= boardSize) continue;
+        const v = board[ny][nx];
+        if (v !== 0 && v !== excludeId) return false;
+      }
+    }
   }
   return true;
 }
@@ -209,6 +258,8 @@ function useShipDrag(params: {
   board: number[][];
   horizontal: boolean;
   disabled: boolean;
+  /** 房规「舰船不可相邻」：拖动预览的落点合法性也要跟着变 */
+  noTouch: boolean;
   /** 棋盘在窗口中的原点（由 PlacementView 在棋盘挂载/换 Tab 时量好） */
   boardOriginRef: React.RefObject<{ x: number; y: number }>;
   /** 拖动态成立时回调（把分段切回「我的海域」，保证预览可见） */
@@ -237,7 +288,11 @@ function useShipDrag(params: {
     const p = paramsRef.current;
     const x = Math.floor(localX / p.cellSize) - cur.grabDX;
     const y = Math.floor(localY / p.cellSize) - cur.grabDY;
-    apply({ ...cur, x, y, valid: canPlace(p.board, x, y, cur.size, cur.horizontal, cur.shipId) });
+    apply({
+      ...cur, x, y,
+      valid: canPlace(p.board, x, y, cur.size, cur.horizontal, cur.shipId,
+        p.board.length, p.noTouch),
+    });
   };
   const finish = (commit: boolean) => {
     clearHold();
@@ -823,11 +878,21 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave]);
 
+  const noTouch = !!game?.rules?.adjacent_placement;
+
+  // 房规「不可相邻」：初始预置布阵是按「可相邻」随机出来的，规则到达后若不合规
+  // 就整体重掷，否则玩家点「完成布阵」会被服务端拒绝（看到一句没头没脑的报错）。
+  useEffect(() => {
+    if (game?.phase !== 'placing' || !noTouch) return;
+    setPlacementShips((prev) => (shipsTouch(prev)
+      ? randomPlacementClient(boardSize, fleet, true) : prev));
+  }, [game?.phase, noTouch, boardSize, fleet]);
+
   // --- Placement actions ---
   const handleReroll = useCallback(() => {
-    setPlacementShips(randomPlacementClient(boardSize, fleet));
+    setPlacementShips(randomPlacementClient(boardSize, fleet, noTouch));
     setSelectedShipId(null);
-  }, [boardSize, fleet]);
+  }, [boardSize, fleet, noTouch]);
 
   const handleRotate = useCallback(() => {
     setHorizontal((h) => !h);
@@ -853,25 +918,40 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
     if (selectedShipId === null) return;
     const def = fleet.find((d) => d.id === selectedShipId);
     if (!def) return;
-    if (!canPlace(placementBoard, x, y, def.size, horizontal, selectedShipId, boardSize)) return;
+    if (!canPlace(placementBoard, x, y, def.size, horizontal,
+      selectedShipId, boardSize, noTouch)) {
+      // 新规则不能静默吞掉：相邻违规要给一句能看懂的原因
+      if (noTouch && canPlace(placementBoard, x, y, def.size, horizontal,
+        selectedShipId, boardSize, false)) {
+        setNotice('舰船不能相邻（含斜角），请留出一圈水');
+      }
+      return;
+    }
     const cells = shipCells(x, y, def.size, horizontal);
     setPlacementShips((prev) => prev.map((s) =>
       s.id === selectedShipId ? { ...s, x, y, horizontal, cells, placed: true } : s,
     ));
     setSelectedShipId(null);
-  }, [placementShips, selectedShipId, placementBoard, horizontal, fleet, boardSize]);
+  }, [placementShips, selectedShipId, placementBoard, horizontal, fleet, boardSize, noTouch]);
 
   // 拖放落位：整艘舰搬到 (x,y)，保持朝向。落点非法时静默回原位（不弹窗）。
   const handleMoveShip = useCallback((shipId: number, x: number, y: number, horizontal: boolean) => {
     const def = fleet.find((d) => d.id === shipId);
     if (!def) return;
-    if (!canPlace(placementBoard, x, y, def.size, horizontal, shipId, boardSize)) return;
+    if (!canPlace(placementBoard, x, y, def.size, horizontal,
+      shipId, boardSize, noTouch)) {
+      if (noTouch && canPlace(placementBoard, x, y, def.size, horizontal,
+        shipId, boardSize, false)) {
+        setNotice('舰船不能相邻（含斜角），请留出一圈水');
+      }
+      return;
+    }
     const cells = shipCells(x, y, def.size, horizontal);
     setPlacementShips((prev) => prev.map((s) =>
       s.id === shipId ? { ...s, x, y, horizontal, cells, placed: true } : s,
     ));
     setSelectedShipId(null);
-  }, [placementBoard, fleet, boardSize]);
+  }, [placementBoard, fleet, boardSize, noTouch]);
 
   const handleSubmitPlacement = useCallback(() => {
     if (!allPlaced) return;
@@ -1039,7 +1119,10 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
           <Text style={styles.myColor}>{myColorLabel}</Text>
           <Text style={[styles.turnHint, isMyTurn && styles.turnActive]}>{turnText}</Text>
         </View>
-        <Text style={styles.roomCode}>#{code}</Text>
+        <View style={styles.topRight}>
+          <GameHelpButton game="battleship" size={24} />
+          <Text style={styles.roomCode}>#{code}</Text>
+        </View>
       </View>
 
       {/* Disconnected banner */}
@@ -1122,7 +1205,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
       </View>
 
       {/* Confirm modal */}
-      <Modal visible={confirm !== null} transparent animationType="fade">
+      <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons
@@ -1159,7 +1242,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade">
+      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>对局结束</Text>
@@ -1223,8 +1306,10 @@ function PlacementView({
       wrapRef.current?.measureInWindow((wx, wy) => setGhostOffset({ x: bx - wx, y: by - wy }));
     });
   }, [cellSize, viewTab]);
+  const noTouch = !!game?.rules?.adjacent_placement;
   const { drag, boardHandlers, cardHandlers, pressedId } = useShipDrag({
-    cellSize, ships, fleet, board, horizontal, disabled: placementSubmitted, boardOriginRef,
+    cellSize, ships, fleet, board, horizontal, disabled: placementSubmitted, noTouch,
+    boardOriginRef,
     onDragArm: () => onTabChange('own'),
     onDrop: onMoveShip, onTapCell: onCellPress, onTapShipCard: onSelectShip,
   });
@@ -1244,7 +1329,9 @@ function PlacementView({
             panHandlers={boardHandlers.panHandlers} containerRef={boardRef} />
           <View style={styles.dragHintRow}>
             <Text style={[styles.dragHint, drag && !drag.valid && styles.dragHintBad]}>
-              {drag ? (drag.valid ? '松手放置' : '此处放不下，松手回原位') : '长按舰船可拖动摆放'}
+              {drag
+                ? (drag.valid ? '松手放置' : '此处放不下，松手回原位')
+                : (noTouch ? '长按舰船可拖动摆放 · 本局舰船不能相邻' : '长按舰船可拖动摆放')}
             </Text>
           </View>
         </>
@@ -1739,6 +1826,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   topLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  topRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   myColor: { fontSize: fontSize.md, fontWeight: '700', color: colors.text },
   turnHint: { fontSize: fontSize.sm, color: colors.textSecondary },
   turnActive: { color: colors.primary, fontWeight: '600' },

@@ -3,9 +3,15 @@
 from fastapi import APIRouter, Depends
 
 from app.security import get_current_user_id
-from app.database import get_user_history
+from app.database import get_user_history, get_user_stats
 
 router = APIRouter(prefix="/api/history", tags=["history"])
+
+
+@router.get("/stats")
+def my_stats(user_id: int = Depends(get_current_user_id)):
+    """Aggregated stats for the profile card + home "recent games"."""
+    return get_user_stats(user_id)
 
 
 @router.get("/mine")

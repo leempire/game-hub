@@ -619,7 +619,7 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
       </View>
 
       {/* 认输 / 退出确认 */}
-      <Modal visible={confirm !== null} transparent animationType="fade">
+      <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Ionicons
@@ -654,7 +654,7 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* 结算 */}
-      <Modal visible={showGameOver} transparent animationType="fade">
+      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>对局结束</Text>

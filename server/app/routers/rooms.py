@@ -8,6 +8,8 @@ from app.schemas import CreateRoomRequest, JoinRoomRequest
 from app import room_manager as rm
 
 router = APIRouter(prefix="/api/rooms", tags=["rooms"])
+ROOM_NAME_MAX = 20
+ROOM_PASSWORD_MAX = 32
 
 
 def _get_user(user_id: int) -> dict:
@@ -23,10 +25,16 @@ def _get_user(user_id: int) -> dict:
 
 @router.post("")
 def create_room(req: CreateRoomRequest, user_id: int = Depends(get_current_user_id)):
+    # 房名随房间列表广播给所有人：限长，空白当作没填（用默认房名）
+    name = (req.name or "").strip() or None
+    if name is not None and len(name) > ROOM_NAME_MAX:
+        raise HTTPException(400, f"房间名最多{ROOM_NAME_MAX}个字")
+    if req.password is not None and len(req.password) > ROOM_PASSWORD_MAX:
+        raise HTTPException(400, f"房间密码最多{ROOM_PASSWORD_MAX}位")
     user = _get_user(user_id)
     try:
         room = rm.create_room(
-            user, req.name, req.password,
+            user, name, req.password or None,
             game=req.game,
         )
     except ValueError as e:

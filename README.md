@@ -64,9 +64,14 @@ game_hub/
 python3 -m venv server/.venv
 server/.venv/bin/python -m pip install -r server/requirements.txt
 
-# 安装前端依赖，完成上面的本机配置后启动前后端
+# 安装前端依赖（用 lockfile 里的确切版本）
 (cd app && npm ci)
+
+# 启动前后端（对外服务；web 默认生产模式 bundle，手机浏览器玩家连的就是它）
 bash scripts/start.sh
+
+# 只调试前端热更新时才单独起 Metro（开发模式）
+(cd app && npm run web)    # expo start --web --port 50540
 
 # 前端原生开发（Expo Go 扫码）
 (cd app && npm start)
@@ -100,7 +105,7 @@ source server/.venv/bin/activate
 ```bash
 # 后端单测（引擎/AI/战绩/WS 协议）
 (cd server && python -m pytest test/ -q)
-(cd server && python test/test_ws_game.py)      # 脚本式：真实后端五子棋对局/断线重连（需后端已启动）
+(cd server && python test/test_ws_game.py)      # 脚本式：真实后端对局/断线重连（需后端已启动）
 
 # 浏览器 E2E（需前后端都已启动）
 python test/e2e_web_game.py           # 双人五子棋 11 步（含断线重连）
@@ -115,11 +120,16 @@ python test/e2e_ludo_smoke.py         # 飞行棋 6 步（掷骰广播/认输弃
 python test/e2e_2048_smoke.py         # 2048 竞速 12 步（同种子/各自走子/认输只结束自己/单人开局）
 python test/e2e_luzhanqi_smoke.py     # 军棋 20 步（明棋/暗棋选择→布阵→走子→认输；暗棋下对手只画牌背）
 python test/e2e_spider_smoke.py       # 单人蜘蛛纸牌：独立测试库，移动/撤销/续玩/通关/战绩
-python test/visual_audit.py           # 本地视觉审计 41 项 + 浏览器专属 API 静态扫描
+python test/visual_audit.py           # 视觉审计 + 浏览器专属 API 静态扫描
 ```
+
+完整的脚本清单、每一步断言与发布前自检顺序见
+[docs/测试矩阵.md](docs/测试矩阵.md)。
 
 ## 文档
 
-- [CLAUDE.md](CLAUDE.md) —— 项目架构、关键机制、常用命令、已知坑（维护必读）
+- [CLAUDE.md](CLAUDE.md) —— 跨游戏通用约定、关键机制、常用命令、已知坑（维护必读）
+- [docs/游戏设计/](docs/游戏设计/README.md) —— 游戏索引与跨游戏设计规范；每款游戏的规则、数值与踩坑在 `docs/游戏设计/<游戏中文名>/`
+- [docs/测试矩阵.md](docs/测试矩阵.md) —— 单测 / E2E / 发布前自检
 - [docs/接口协议.md](docs/接口协议.md) —— REST/WebSocket 全量契约
 - [docs/使用指南.md](docs/使用指南.md) —— 玩家与管理员使用手册

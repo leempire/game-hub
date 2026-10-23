@@ -47,12 +47,17 @@ def difficulty_blurb(difficulty: str) -> str:
     return f"{width}×{height} / {mines}雷 · 每人 {LIVES[difficulty]} 条命"
 
 
-def create_game(difficulty: str = "intermediate", num_players: int = 1) -> dict:
+def create_game(
+    difficulty: str = "intermediate", num_players: int = 1,
+    seed: int | None = None, daily: bool = False,
+) -> dict:
     """Create a new minesweeper game state. Mines not placed yet.
 
     Args:
         difficulty: one of "beginner", "intermediate", "advanced"
         num_players: number of players (1-4)
+        seed: 固定雷盘种子（每日固定盘用；常规局为 None，走系统随机）
+        daily: 是否「每日固定盘」——只用于客户端标注，不影响裁决
     """
     w, h, m = DIFFICULTIES[difficulty]
     lives = LIVES.get(difficulty, 1)
@@ -63,19 +68,33 @@ def create_game(difficulty: str = "intermediate", num_players: int = 1) -> dict:
             "lives_left": lives,
             "revealed_count": 0,
             "eliminated_at": None,
+            # 计时：由 room_manager 在动作入口写入（引擎不读墙钟）。
+            # `elapsed_ms` 在终局时结算，作为「同标雷数、同翻格数」的排名键。
+            "first_action_ms": None,
+            "last_action_ms": None,
+            "elapsed_ms": None,
         }
     return {
         "width": w,
         "height": h,
         "mines": m,
         "lives": lives,
+        "difficulty": difficulty,
+        # 每日固定盘：种子按 UTC 日期生成，所有玩家同日同档拿到同一份雷盘
+        # （第一下翻开的「safe zone」仍会随格子移动，见 generate_mines 注释）
+        "seed": seed,
+        "daily": bool(daily),
         "mine_positions": None,  # set of (x,y), generated on first reveal
         "revealed": {},          # (x,y) -> value (0-8, or -1 for mine)
-        "flagged": set(),        # set of (x,y)
+        "flagged": set(),        # set of (x,y) —— 只有旗子参与 chord/通关判定
+        "questioned": set(),     # set of (x,y) —— 问号只是笔记，不阻挡翻开
         "flag_owners": {},       # (x,y) -> seat (who placed the flag)
         "started": False,
         "finished": False,
         "reason": None,          # "cleared" or "eliminated" or None
+        # 游戏时钟由外部写入（room_manager 用 time.time()），引擎只做存储与排序。
+        "started_at_ms": None,
+        "finished_at_ms": None,
         "players": players,
     }
 
@@ -94,9 +113,15 @@ def _neighbors(x: int, y: int, w: int, h: int) -> list[tuple[int, int]]:
 
 
 def generate_mines(
-    width: int, height: int, count: int, safe_x: int, safe_y: int
+    width: int, height: int, count: int, safe_x: int, safe_y: int,
+    rng: random.Random | None = None,
 ) -> set[tuple[int, int]]:
-    """Generate mine positions, excluding safe_x/safe_y and its 8 neighbors."""
+    """Generate mine positions, excluding safe_x/safe_y and its 8 neighbors.
+
+    `rng` 给定时用它抽样（每日固定盘：同一天 + 同一第一下翻开 → 同一份雷盘）。
+    注意 safe zone 随第一下点击移动，所以「固定盘」保证的是**同种子**，不是
+    跨玩家逐格完全相同——第一下点在不同位置时安全区不同。
+    """
     safe_zone = {(safe_x, safe_y)}
     safe_zone.update(_neighbors(safe_x, safe_y, width, height))
     candidates = [
@@ -106,7 +131,7 @@ def generate_mines(
         if (x, y) not in safe_zone
     ]
     count = min(count, len(candidates))
-    return set(random.sample(candidates, count))
+    return set((rng or random).sample(candidates, count))
 
 
 def _count_adjacent_mines(
@@ -228,6 +253,10 @@ def compute_ranking(game: dict, players_info: list[dict]) -> list[dict]:
             "wrong_flags": flag_stats.get(seat, {}).get("wrong_flags", 0),
             "revealed_count": player.get("revealed_count", 0),
             "eliminated_at": player.get("eliminated_at"),
+            # 用时（毫秒）：从本局第一次翻开到该玩家最后一次翻开的跨度。
+            # **它是排名键里的第三档** —— 游戏叫「竞速」，同标雷数、同翻格数时
+            # 必须让更快的人赢，否则慢慢插旗也能拿第一。
+            "elapsed_ms": player.get("elapsed_ms"),
         })
 
     # Sort: survivors first, then by correct_flags desc, revealed_count desc
@@ -244,10 +273,16 @@ def compute_ranking(game: dict, players_info: list[dict]) -> list[dict]:
     # For eliminated players, we want eliminated_at desc (later is better).
     # Since we sort ascending by default, we negate the timestamp effect
     # by reversing the string comparison. Use a two-pass approach:
+    # Survivors: correct flags desc, revealed desc, then elapsed asc (faster wins).
+    # Eliminated: revealed desc, then eliminated_at desc (later = better).
+    def elapsed_key(e) -> float:
+        v = e.get("elapsed_ms")
+        return float("inf") if v is None else float(v)
+
     survivors = [e for e in entries if e["alive"]]
     eliminated = [e for e in entries if not e["alive"]]
 
-    survivors.sort(key=lambda e: (-e["correct_flags"], -e["revealed_count"]))
+    survivors.sort(key=lambda e: (-e["correct_flags"], -e["revealed_count"], elapsed_key(e)))
     # Eliminated: revealed_count desc, then eliminated_at desc (later = better)
     eliminated.sort(key=lambda e: (-e["revealed_count"],
                                     -( _iso_to_ordinal(e["eliminated_at"]))))
@@ -271,6 +306,7 @@ def compute_ranking(game: dict, players_info: list[dict]) -> list[dict]:
             "correct_flags": e["correct_flags"],
             "wrong_flags": e["wrong_flags"],
             "revealed_count": e["revealed_count"],
+            "elapsed_ms": e.get("elapsed_ms"),
             "rank": rank,
         }
         result.append(entry)
@@ -295,7 +331,8 @@ def _is_tied(a: dict, b: dict) -> bool:
         return False
     if a["alive"]:
         return (a["correct_flags"] == b["correct_flags"]
-                and a["revealed_count"] == b["revealed_count"])
+                and a["revealed_count"] == b["revealed_count"]
+                and a.get("elapsed_ms") == b.get("elapsed_ms"))
     else:
         return (a["revealed_count"] == b["revealed_count"]
                 and a["eliminated_at"] == b["eliminated_at"])
@@ -310,6 +347,8 @@ def _reveal_cell(game: dict, x: int, y: int, seat: int) -> dict:
     Returns {cells, hit_mine, lost_life, lives_left, eliminated}
     """
     hit_mine = (x, y) in game["mine_positions"]
+    # 问号只是笔记：翻开时自动清掉（旗子会拦住翻开，问号不会）
+    game.setdefault("questioned", set()).discard((x, y))
     cells = _flood_fill(game, x, y)
 
     # Credit revealed cells to the operator
@@ -366,7 +405,8 @@ def reveal(game: dict, x: int, y: int, seat: int) -> dict:
 
     # Lazy mine generation on first reveal
     if game["mine_positions"] is None:
-        game["mine_positions"] = generate_mines(w, h, game["mines"], x, y)
+        rng = random.Random(game["seed"]) if game.get("seed") is not None else None
+        game["mine_positions"] = generate_mines(w, h, game["mines"], x, y, rng)
         game["started"] = True
 
     outcome = _reveal_cell(game, x, y, seat)
@@ -454,9 +494,13 @@ def chord(game: dict, x: int, y: int, seat: int) -> dict:
 
 
 def flag(game: dict, x: int, y: int, seat: int) -> dict:
-    """Toggle flag on cell (x, y) for player at given seat.
+    """Cycle a cell through 空 → 旗 → 问号 → 空.
 
-    Returns: {ok, x, y, flagged: bool, seat: int, error}
+    问号是**纯笔记**：不参与 chord 计数、不阻挡翻开、不计入通关判定；只有旗子
+    才是「这里确定有雷」的断言。三态轮换比「长按插旗 / 切模式点击拔旗」少一次
+    操作，也是桌面扫雷的通行做法。
+
+    Returns: {ok, x, y, flagged: bool, questioned: bool, state: str, seat, error}
     """
     if game["finished"]:
         return {"ok": False, "error": "游戏已结束"}
@@ -470,20 +514,31 @@ def flag(game: dict, x: int, y: int, seat: int) -> dict:
     if (x, y) in game["revealed"]:
         return {"ok": False, "error": "已翻开的格子不能插旗"}
 
-    if (x, y) in game["flagged"]:
-        game["flagged"].discard((x, y))
+    flagged = game["flagged"]
+    questioned = game.setdefault("questioned", set())
+    if (x, y) in flagged:
+        # 旗 → 问号
+        flagged.discard((x, y))
         game["flag_owners"].pop((x, y), None)
-        is_flagged = False
+        questioned.add((x, y))
+        state = "question"
+    elif (x, y) in questioned:
+        # 问号 → 空
+        questioned.discard((x, y))
+        state = "none"
     else:
-        game["flagged"].add((x, y))
+        # 空 → 旗
+        flagged.add((x, y))
         game["flag_owners"][(x, y)] = seat
-        is_flagged = True
+        state = "flag"
 
     return {
         "ok": True,
         "x": x,
         "y": y,
-        "flagged": is_flagged,
+        "flagged": state == "flag",
+        "questioned": state == "question",
+        "state": state,
         "seat": seat,
     }
 
@@ -507,6 +562,11 @@ def get_flagged_list(game: dict) -> list[list[int]]:
     return [[x, y] for x, y in game["flagged"]]
 
 
+def get_questioned_list(game: dict) -> list[list[int]]:
+    """问号格（纯笔记，不影响裁决）。老对局态没有这个键，按空集处理。"""
+    return [[x, y] for x, y in game.get("questioned") or ()]
+
+
 def game_to_sync(game: dict, players_info: list[dict] | None = None) -> dict:
     """Build the game portion of a sync message.
 
@@ -521,16 +581,23 @@ def game_to_sync(game: dict, players_info: list[dict] | None = None) -> dict:
         "height": game["height"],
         "mines": game["mines"],
         "lives": game.get("lives", 1),
+        "difficulty": game.get("difficulty"),
+        "daily": bool(game.get("daily")),
         "revealed": get_revealed_list(game),
         "flagged": get_flagged_list(game),
+        "questioned": get_questioned_list(game),
         "started": game["started"],
         "finished": game["finished"],
         "reason": game["reason"],
+        # 只下发相对量的**起点**没有必要：客户端不自己计时（以服务端结算为准），
+        # 这里仅给结算/回放一个可显示的用时。
+        "started_at_ms": game.get("started_at_ms"),
         "players": {
             str(seat): {
                 "alive": p["alive"],
                 "lives_left": p.get("lives_left", 1),
                 "revealed_count": p["revealed_count"],
+                "elapsed_ms": p.get("elapsed_ms"),
             }
             for seat, p in game["players"].items()
         },

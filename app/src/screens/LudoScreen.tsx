@@ -775,7 +775,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
       </View>
 
       {/* Leave confirmation modal */}
-      <Modal visible={confirmLeave} transparent animationType="fade">
+      <Modal visible={confirmLeave} transparent animationType="fade" onRequestClose={() => setConfirmLeave(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>确认离开？</Text>
@@ -803,7 +803,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* 认输二次确认弹窗 */}
-      <Modal visible={confirmSurrender} transparent animationType="fade">
+      <Modal visible={confirmSurrender} transparent animationType="fade" onRequestClose={() => setConfirmSurrender(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>确认认输？</Text>
@@ -825,7 +825,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade">
+      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>对局结束</Text>

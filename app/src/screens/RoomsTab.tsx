@@ -1,55 +1,73 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  RefreshControl, Modal, TextInput, ActivityIndicator, Platform,
+  RefreshControl, ActivityIndicator, Platform, AppState,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 import { useAuth } from '../auth';
 import { listRooms, createRoom, joinRoom, Room } from '../api';
 import { colors, spacing, radius, fontSize } from '../theme';
 import { notify } from '../utils';
-import { settingValueLabel } from '../roomSettings';
+import { settingValueLabel, settingsSummary } from '../roomSettings';
 import { useModalBackGuard } from '../backGuard';
-import { GAMES, gameShort, gameIonicon, type GameKey } from '../games';
+import { CreateRoomModal, JoinRoomModal } from '../roomForms';
+import { gameShort, gameIonicon, type GameKey } from '../games';
 
 interface Props {
   onNavigateToRoom: (code: string) => void;
 }
 
-// 房间只有等待中/游戏中两种状态——对局结束的房间回到等待中
-const STATUS_LABELS: Record<string, string> = {
-  waiting: '等待中',
-  playing: '对局中',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  waiting: colors.accent,
-  playing: colors.warning,
-};
+/** 轮询间隔。3 秒太频繁：房间列表不是实时对战消息，5 秒足够看出新房间。 */
+const POLL_MS = 5000;
 
 export default function RoomsTab({ onNavigateToRoom }: Props) {
   const { token, user } = useAuth();
+  const isFocused = useIsFocused();
   const [rooms, setRooms] = useState<Room[]>([]);
+  // 首次请求结束前不能显示「暂无房间」——否则用户先看到假空态，几百毫秒后
+  // 列表突然冒出来；断网时更会永远停在空态（以为平台没人）。
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
-  useModalBackGuard(showCreate, () => setShowCreate(false));
-  useModalBackGuard(showJoin, () => setShowJoin(false));
   const [roomName, setRoomName] = useState('');
   const [roomPwd, setRoomPwd] = useState('');
   const [createGame, setCreateGame] = useState<GameKey>('gomoku');
   const [joinCode, setJoinCode] = useState('');
   const [joinPwd, setJoinPwd] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 弹窗内的错误（toast 会被 Modal 盖住，见 toast.tsx 与 CLAUDE.md）
+  const [modalError, setModalError] = useState<string | null>(null);
+  // 提交中点「取消」之后，已经在路上的请求回来时不能再把人带进房
+  const createCancelledRef = useRef(false);
+  const joinCancelledRef = useRef(false);
+  // 请求序号：慢网下后返回的旧响应不能覆盖新列表
+  const seqRef = useRef(0);
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  // 正在加入的房间号：单卡 spinner + 防连点（慢网下连点会发多次 join）
+  const [pendingCode, setPendingCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setAppActive(s === 'active'));
+    return () => sub.remove();
+  }, []);
 
   const fetchRooms = useCallback(async () => {
     if (!token) return;
+    const seq = ++seqRef.current;
     try {
       const result = await listRooms(token);
+      if (seq !== seqRef.current) return;   // 过期响应：丢掉
       setRooms(result.items);
-    } catch {
-      // silently fail on auto-refresh; user can pull to refresh
+      setLoadError(null);
+    } catch (err) {
+      if (seq !== seqRef.current) return;
+      // 有旧数据时保留列表，只提示「连接不稳定」；没有数据才显示错误页
+      setLoadError((err as Error).message);
+    } finally {
+      if (seq === seqRef.current) setLoaded(true);
     }
   }, [token]);
 
@@ -59,27 +77,50 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
     setRefreshing(false);
   }, [fetchRooms]);
 
-  // Initial load + auto refresh every 3s
+  // 只在「页面可见 + App 在前台」时轮询。Tab 页在 Stack 下常驻挂载，
+  // 不做这层守卫的话进对局、切 Tab、切后台都还在每 3 秒请求一次。
   useEffect(() => {
-    fetchRooms();
-    autoRefreshRef.current = setInterval(fetchRooms, 3000);
-    return () => {
-      if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
-    };
-  }, [fetchRooms]);
+    if (!isFocused || !appActive || !token) return;
+    void fetchRooms();
+    const timer = setInterval(() => { void fetchRooms(); }, POLL_MS);
+    return () => clearInterval(timer);
+  }, [isFocused, appActive, token, fetchRooms]);
+
+  const closeCreate = () => {
+    createCancelledRef.current = true;
+    setShowCreate(false);
+    setRoomName('');
+    setRoomPwd('');
+    setCreateGame('gomoku');
+    setModalError(null);
+  };
+
+  const closeJoin = () => {
+    joinCancelledRef.current = true;
+    setShowJoin(false);
+    setJoinCode('');
+    setJoinPwd('');
+    setModalError(null);
+  };
+
+  useModalBackGuard(showCreate, closeCreate);
+  useModalBackGuard(showJoin, closeJoin);
 
   const handleCreate = async () => {
     if (!token) return;
+    createCancelledRef.current = false;
+    setModalError(null);
     setSubmitting(true);
     try {
       const room = await createRoom(token, createGame, roomName || null, roomPwd || null);
+      if (createCancelledRef.current) return;   // 用户已经点了取消
       setShowCreate(false);
       setRoomName('');
       setRoomPwd('');
       setCreateGame('gomoku');
       onNavigateToRoom(room.code);
     } catch (err) {
-      notify('创建失败', (err as Error).message);
+      if (!createCancelledRef.current) setModalError((err as Error).message);
     } finally {
       setSubmitting(false);
     }
@@ -89,16 +130,21 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
   // 或 已开始且本人是原玩家（断线重连）；其余给出明确拒绝。
   // 有密码的等待房弹出加入框输入密码。
   const handleRoomPress = async (room: Room) => {
-    if (!token || !user) return;
+    if (!token || !user || pendingCode) return;
     const isMember = room.players.some((p) => p.id === user.id);
 
     if (isMember) {
       // 已是成员：直接进房（若对局中，join 接口会标记重连）
       try {
-        if (room.status === 'playing') await joinRoom(token, room.code, null);
+        if (room.status === 'playing') {
+          setPendingCode(room.code);
+          await joinRoom(token, room.code, null);
+        }
         onNavigateToRoom(room.code);
       } catch (err) {
         notify('进入失败', (err as Error).message);
+      } finally {
+        setPendingCode(null);
       }
       return;
     }
@@ -118,29 +164,35 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
       return;
     }
     try {
+      setPendingCode(room.code);
       const joined = await joinRoom(token, room.code, null);
       onNavigateToRoom(joined.code);
     } catch (err) {
       notify('加入失败', (err as Error).message);
+    } finally {
+      setPendingCode(null);
     }
   };
 
   const handleJoin = async () => {
     if (!token) return;
     const code = joinCode.trim().toUpperCase();
+    setModalError(null);
     if (!code) {
-      notify('提示', '请输入房间号');
+      setModalError('请输入房间号');
       return;
     }
+    joinCancelledRef.current = false;
     setSubmitting(true);
     try {
       const room = await joinRoom(token, code, joinPwd || null);
+      if (joinCancelledRef.current) return;
       setShowJoin(false);
       setJoinCode('');
       setJoinPwd('');
       onNavigateToRoom(room.code);
     } catch (err) {
-      notify('加入失败', (err as Error).message);
+      if (!joinCancelledRef.current) setModalError((err as Error).message);
     } finally {
       setSubmitting(false);
     }
@@ -161,13 +213,31 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
         </View>
       </View>
 
-      {rooms.length === 0 && refreshing ? (
-        <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
+      {!loaded ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>正在加载房间…</Text>
+        </View>
+      ) : loadError && rooms.length === 0 ? (
+        <View style={styles.center}>
+          <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
+          <Text style={styles.emptyText}>房间列表加载失败</Text>
+          <Text style={styles.emptyHint}>{loadError}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={refresh}>
+            <Text style={styles.retryText}>重试</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.scroll}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
         >
+          {loadError ? (
+            <View style={styles.errorBanner}>
+              <Ionicons name="warning-outline" size={14} color={colors.warning} />
+              <Text style={styles.errorBannerText}>连接不稳定，列表可能不是最新</Text>
+            </View>
+          ) : null}
           {rooms.length === 0 ? (
             <View style={styles.emptyWrap}>
               <Ionicons name="home-outline" size={48} color={colors.textFaint} />
@@ -175,147 +245,106 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
               <Text style={styles.emptyHint}>创建一个房间开始游戏吧</Text>
             </View>
           ) : (
-            rooms.map((room) => (
-              <TouchableOpacity
-                key={room.code}
-                style={styles.roomCard}
-                onPress={() => handleRoomPress(room)}
-                activeOpacity={0.8}
-              >
-                <View style={styles.roomHeader}>
-                  <Text style={styles.roomName}>{room.name}</Text>
-                  <View style={[styles.statusBadge, { backgroundColor: STATUS_COLORS[room.status] || colors.textMuted }]}>
-                    <Text style={styles.statusText}>{STATUS_LABELS[room.status] || room.status}</Text>
+            rooms.map((room) => {
+              const isMember = !!user && room.players.some((p) => p.id === user.id);
+              const full = room.players.length >= room.max_players;
+              const canJoin = isMember || (room.status === 'waiting' && !full);
+              const pending = pendingCode === room.code;
+              const host = room.players.find((p) => p.is_host) ?? room.players[0];
+              const names = room.players
+                .map((p) => p.nickname || p.username)
+                .join(' · ');
+              const summary = settingsSummary(room.settings ?? []);
+              const statusText = room.status === 'playing'
+                ? (isMember ? '对局中 · 可重连' : '对局中 · 仅重连')
+                : full ? '已满' : '等待中';
+              const statusColor = room.status === 'playing'
+                ? colors.warning
+                : full ? colors.textMuted : colors.accent;
+              return (
+                <TouchableOpacity
+                  key={room.code}
+                  style={[styles.roomCard, !canJoin && styles.roomCardDim]}
+                  onPress={() => handleRoomPress(room)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${room.name}，${statusText}`}
+                >
+                  <View style={styles.roomHeader}>
+                    <Text style={styles.roomName}>{room.name}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+                      <Text style={styles.statusText}>{statusText}</Text>
+                    </View>
                   </View>
-                </View>
-                <View style={styles.roomMeta}>
-                  <Text style={styles.roomCode}>#{room.code}</Text>
-                  <View style={styles.gameBadge}>
-                    <Ionicons name={gameIonicon(room.game)} size={12} color={colors.white} />
-                    <Text style={styles.gameBadgeText}>
-                      {room.game === 'minesweeper'
-                        // 难度名由服务端下发（`room.settings`），客户端不抄一份档位表
-                        ? `${gameShort(room.game)}·${settingValueLabel(room, 'difficulty') ?? ''}`
-                        : gameShort(room.game)}
+                  <View style={styles.roomMeta}>
+                    <Text style={styles.roomCode}>#{room.code}</Text>
+                    <View style={styles.gameBadge}>
+                      <Ionicons name={gameIonicon(room.game)} size={12} color={colors.white} />
+                      <Text style={styles.gameBadgeText}>
+                        {room.game === 'minesweeper'
+                          // 难度名由服务端下发（`room.settings`），客户端不抄一份档位表
+                          ? `${gameShort(room.game)}·${settingValueLabel(room, 'difficulty') ?? ''}`
+                          : gameShort(room.game)}
+                      </Text>
+                    </View>
+                    <View style={styles.roomPlayers}>
+                      <Ionicons name="people" size={14} color={colors.textSecondary} />
+                      <Text style={styles.roomPlayersText}> {room.players.length}/{room.max_players}</Text>
+                    </View>
+                    {room.has_password && (
+                      <View style={styles.lockBadge}>
+                        <Ionicons name="lock-closed" size={12} color={colors.textMuted} />
+                        <Text style={styles.lockText}>有密码</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.roomPeople} numberOfLines={1}>
+                    房主 {host ? (host.nickname || host.username) : '—'} · {names}
+                  </Text>
+                  {((room.round ?? 0) > 0 || summary) ? (
+                    <Text style={styles.roomExtra} numberOfLines={1}>
+                      {(room.round ?? 0) > 0 ? `已打 ${room.round} 局 · 可续开` : ''}
+                      {(room.round ?? 0) > 0 && summary ? ' · ' : ''}
+                      {summary}
                     </Text>
-                  </View>
-                  <View style={styles.roomPlayers}>
-                    <Ionicons name="people" size={14} color={colors.textSecondary} />
-                    <Text style={styles.roomPlayersText}> {room.players.length}/{room.max_players}</Text>
-                  </View>
-                  {room.has_password && <Ionicons name="lock-closed" size={14} color={colors.textFaint} />}
-                </View>
-              </TouchableOpacity>
-            ))
+                  ) : null}
+                  {pending && (
+                    <View style={styles.cardPending}>
+                      <ActivityIndicator size="small" color={colors.primary} />
+                      <Text style={styles.cardPendingText}>正在加入…</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })
           )}
         </ScrollView>
       )}
 
-      {/* Create modal */}
-      <Modal visible={showCreate} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>创建房间</Text>
-            {/* Game type selection */}
-            <Text style={styles.modalLabel}>游戏类型</Text>
-            {/* 13 个游戏从目录表里生成（`games.tsx`）—— 以前这里是 13 段逐字相同的
-                JSX（图标名 + 短名各手抄一遍），加一个游戏要改三处。 */}
-            <View style={styles.gameTypeRow}>
-              {GAMES.filter(g => g.key !== 'spider').map((g) => {
-                const active = createGame === g.key;
-                return (
-                  <TouchableOpacity
-                    key={g.key}
-                    testID={`create-game-${g.key}`}
-                    style={[styles.gameTypeBtn, active && styles.gameTypeBtnActive]}
-                    onPress={() => setCreateGame(g.key)}
-                  >
-                    <Ionicons
-                      name={g.ionicon}
-                      size={16}
-                      color={active ? colors.white : colors.textSecondary}
-                    />
-                    <Text style={[styles.gameTypeBtnText, active && styles.gameTypeBtnTextActive]}>
-                      {g.short}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            {/* 游戏级设置（扫雷难度 / 军棋玩法 / 深空休眠地图 / 海战棋尺寸 / UNO 房规）
-                **一律不在建房时选**，房主进房之后在等待大厅里挑 —— v1.15 起统一走
-                `room_setting` 一条消息，选项与当前值在 `room.settings` 里。
-                建房只负责挑游戏类型。 */}
-            <TextInput
-              style={styles.modalInput}
-              value={roomName}
-              onChangeText={setRoomName}
-              placeholder="房间名称（可选）"
-              placeholderTextColor={colors.textFaint}
-            />
-            <TextInput
-              style={styles.modalInput}
-              value={roomPwd}
-              onChangeText={setRoomPwd}
-              placeholder="房间密码（可选）"
-              placeholderTextColor={colors.textFaint}
-              secureTextEntry
-            />
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnPrimary]}
-              onPress={handleCreate}
-              disabled={submitting}
-            >
-              <Text style={styles.modalBtnPrimaryText}>{submitting ? '创建中...' : '创建'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnSecondary]}
-              onPress={() => { setShowCreate(false); setRoomName(''); setRoomPwd(''); setCreateGame('gomoku'); }}
-            >
-              <Text style={styles.modalBtnSecondaryText}>取消</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Join modal */}
-      <Modal visible={showJoin} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>加入房间</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={joinCode}
-              onChangeText={setJoinCode}
-              placeholder="输入6位房间号"
-              placeholderTextColor={colors.textFaint}
-              autoCapitalize="characters"
-              maxLength={6}
-            />
-            <TextInput
-              style={styles.modalInput}
-              value={joinPwd}
-              onChangeText={setJoinPwd}
-              placeholder="密码（如有）"
-              placeholderTextColor={colors.textFaint}
-              secureTextEntry
-            />
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnPrimary]}
-              onPress={handleJoin}
-              disabled={submitting}
-            >
-              <Text style={styles.modalBtnPrimaryText}>{submitting ? '加入中...' : '加入'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnSecondary]}
-              onPress={() => { setShowJoin(false); setJoinCode(''); setJoinPwd(''); }}
-            >
-              <Text style={styles.modalBtnSecondaryText}>取消</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <CreateRoomModal
+        visible={showCreate}
+        game={createGame}
+        name={roomName}
+        password={roomPwd}
+        error={modalError}
+        submitting={submitting}
+        onPickGame={setCreateGame}
+        onChangeName={setRoomName}
+        onChangePassword={setRoomPwd}
+        onSubmit={() => void handleCreate()}
+        onClose={closeCreate}
+      />
+      <JoinRoomModal
+        visible={showJoin}
+        code={joinCode}
+        password={joinPwd}
+        error={modalError}
+        submitting={submitting}
+        onChangeCode={setJoinCode}
+        onChangePassword={setJoinPwd}
+        onSubmit={() => void handleJoin()}
+        onClose={closeJoin}
+      />
     </View>
   );
 }
@@ -335,6 +364,8 @@ const styles = StyleSheet.create({
   title: { fontSize: fontSize.xl, fontWeight: '700', color: colors.text },
   headerBtns: { flexDirection: 'row', gap: spacing.sm },
   headerBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
@@ -345,7 +376,30 @@ const styles = StyleSheet.create({
   headerBtnPrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
   headerBtnPrimaryText: { color: colors.white, fontWeight: '600', fontSize: fontSize.sm },
   scroll: { padding: spacing.md, paddingBottom: spacing.xxl },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.lg },
+  loadingText: { marginTop: spacing.sm, fontSize: fontSize.sm, color: colors.textSecondary },
+  retryBtn: {
+    marginTop: spacing.md,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+  },
+  retryText: { color: colors.white, fontSize: fontSize.md, fontWeight: '700' },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  errorBannerText: { flex: 1, fontSize: fontSize.xs, color: colors.warning },
   emptyWrap: { alignItems: 'center', paddingTop: spacing.xxl },
   emptyIcon: { marginBottom: spacing.md },
   emptyText: { fontSize: fontSize.lg, fontWeight: '600', color: colors.text },
@@ -362,7 +416,21 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   roomHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  roomCardDim: { opacity: 0.62 },
   roomName: { fontSize: fontSize.md, fontWeight: '700', color: colors.text, flex: 1 },
+  roomPeople: {
+    fontSize: fontSize.xs, color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  roomExtra: {
+    fontSize: fontSize.xs, color: colors.textMuted,
+    marginTop: 2,
+  },
+  cardPending: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  cardPendingText: { fontSize: fontSize.xs, color: colors.primary },
   statusBadge: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
@@ -374,6 +442,8 @@ const styles = StyleSheet.create({
   roomCode: { fontSize: fontSize.sm, color: colors.textSecondary, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   roomPlayers: { flexDirection: 'row', alignItems: 'center' },
   roomPlayersText: { fontSize: fontSize.sm, color: colors.textSecondary },
+  lockBadge: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  lockText: { fontSize: fontSize.xs, color: colors.textMuted },
   gameBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -384,51 +454,5 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   gameBadgeText: { color: colors.white, fontSize: fontSize.xs, fontWeight: '600' },
-  // Modal styles
-  modalOverlay: {
-    flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: spacing.md,
-  },
-  modalCard: {
-    width: '100%', maxWidth: 360, backgroundColor: colors.card, borderRadius: radius.xl, padding: spacing.lg,
-  },
-  modalTitle: {
-    fontSize: fontSize.xl, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: spacing.md,
-  },
-  modalInput: {
-    borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radius.md,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2,
-    fontSize: fontSize.md, color: colors.text, backgroundColor: colors.bg, marginBottom: spacing.sm,
-  },
-  modalBtn: { borderRadius: radius.md, paddingVertical: spacing.sm + 4, alignItems: 'center', marginTop: spacing.sm },
-  modalBtnPrimary: { backgroundColor: colors.primary },
-  modalBtnPrimaryText: { color: colors.white, fontSize: fontSize.md, fontWeight: '700' },
-  modalBtnSecondary: { backgroundColor: colors.bg },
-  modalBtnSecondaryText: { color: colors.textSecondary, fontSize: fontSize.md, fontWeight: '600' },
-  modalLabel: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
-  },
-  // 8 个游戏了，单行 flex:1 会把每个按钮挤到 ~38px（「五子棋」三个字放不下），
-  // 改成 4 个一行换行排。
-  gameTypeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm },
-  gameTypeBtn: {
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: '22%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.bg,
-  },
-  gameTypeBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  gameTypeBtnText: { fontSize: fontSize.md, color: colors.textSecondary, fontWeight: '600' },
-  gameTypeBtnTextActive: { color: colors.white },
 });
 

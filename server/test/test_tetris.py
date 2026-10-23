@@ -437,6 +437,70 @@ class TestSpawnAndFinish:
         assert gs["current"][1]["piece"] == preview, "锁定后应发下一个方块"
         assert gs["current"][1]["piece"] != first or True
 
+    def test_three_piece_preview_is_stable_and_consumed_in_order(self):
+        """预览队列 = 接下来三块；消费顺序与逐块抽取一致（同种子公平性靠这条）。"""
+        gs = _game(uids=(1,))
+        preview = list(gs["previews"][1])
+        assert len(preview) == 3
+        assert gs["next_piece"][1] == preview[0]
+        t.apply_action(gs, 1, "hard_drop")
+        # 锁一块：队首先前移一位，补进一块新的
+        assert gs["previews"][1][:2] == preview[1:3]
+        assert len(gs["previews"][1]) == 3
+        # 同种子的另一局**开局预览**完全一致（进度不同则队列本就不同）
+        a = _game({1: 7}, uids=(1,))
+        b = _game({1: 7}, uids=(1,))
+        assert a["previews"][1] == b["previews"][1]
+        assert a["garbage_received"][1] == 0  # sanity：确实各是独立一局
+
+    def test_hold_swaps_current_with_held_and_uses_preview(self):
+        gs = _game(uids=(1,))
+        first = gs["current"][1]["piece"]
+        preview = list(gs["previews"][1])
+        res = t.apply_action(gs, 1, "hold")
+        assert res["ok"] and res["held"] and not res["locked"]
+        assert gs["held"][1] == first, "第一次暂存 = 存下当前块"
+        assert gs["current"][1]["piece"] == preview[0], "换上来的是预览队首"
+        assert gs["hold_used"][1] is True
+        # 同一块再按一次：静默 no-op（客户端按 hold_used 提示，不靠服务端报错）
+        res2 = t.apply_action(gs, 1, "hold")
+        assert res2["ok"] is False
+        assert gs["current"][1]["piece"] == preview[0]
+
+    def test_hold_then_lock_resets_and_swaps_back(self):
+        gs = _game(uids=(1,))
+        first = gs["current"][1]["piece"]
+        t.apply_action(gs, 1, "hold")          # 存下 first，换出队首
+        t.apply_action(gs, 1, "hard_drop")     # 锁定队首 → hold_used 复位
+        assert gs["hold_used"][1] is False
+        current_before = gs["current"][1]["piece"]
+        t.apply_action(gs, 1, "hold")          # 交换：当前块入库、first 回来
+        assert gs["held"][1] == current_before
+        assert gs["current"][1]["piece"] == first
+
+    def test_hold_top_out_when_new_piece_has_no_room(self):
+        gs = _game(uids=(1,))
+        for r in range(4):
+            for c in range(t.COLS):
+                gs["boards"][1][r][c] = 8
+        res = t.apply_action(gs, 1, "hold")
+        assert res["ok"] and res["held"]
+        assert gs["game_over_flags"][1] is True
+        assert gs["finish_reasons"][1] == "top_out"
+
+    def test_start_level_raises_score_multiplier_and_initial_level(self):
+        gs = t.create_game({1: 7}, [1], start_level=5)
+        t.spawn_next(gs, 1)
+        assert gs["level"][1] == 5
+        # 手工造一行差一格满的底行，硬降补齐 → 100 分 × 5 级
+        board = gs["boards"][1]
+        gs["current"][1] = {"piece": "I", "rotation": 0, "x": 0, "y": 0}
+        for c in range(4, t.COLS):     # 只留 I 的落点（0..3）空着
+            board[t.ROWS - 1][c] = 8
+        t.apply_action(gs, 1, "hard_drop")
+        assert gs["lines"][1] == 1
+        assert gs["scores"][1] == 100 * 5
+
     def test_finish_player_is_idempotent(self):
         gs = _game(uids=(1, 2))
         t.finish_player(gs, 1, "surrender")

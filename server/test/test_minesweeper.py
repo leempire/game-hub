@@ -482,6 +482,29 @@ def test_ranking_tie():
     print("  ✓ test_ranking_tie")
 
 
+def test_ranking_elapsed_breaks_tie():
+    """同标雷数、同翻格数时按用时排序（「竞速」必须真的看时间）。"""
+    players_info = [
+        {"seat": 0, "username": "alice", "nickname": "A"},
+        {"seat": 1, "username": "bob", "nickname": "B"},
+    ]
+    g = create_game("beginner", num_players=2)
+    g["players"][0].update(alive=True, revealed_count=10, elapsed_ms=5000)
+    g["players"][1].update(alive=True, revealed_count=10, elapsed_ms=3000)
+    ranking = compute_ranking(g, players_info)
+    assert ranking[0]["seat"] == 1, ranking
+    assert ranking[0]["rank"] == 1
+    assert ranking[1]["seat"] == 0
+    assert ranking[1]["rank"] == 2
+
+    # 用时也相同才是真平局
+    g["players"][0]["elapsed_ms"] = 3000
+    ranking = compute_ranking(g, players_info)
+    assert ranking[0]["rank"] == 1
+    assert ranking[1]["rank"] == 1
+    print("  ✓ test_ranking_elapsed_breaks_tie")
+
+
 def test_no_actions_after_game_over():
     g = create_game("beginner", num_players=2)
     reveal(g, 4, 4, seat=0)
@@ -640,6 +663,56 @@ def test_chord_no_actions_after_game_over():
     print("  ✓ test_chord_no_actions_after_game_over")
 
 
+def test_flag_cycles_through_question_mark():
+    """空 → 旗 → 问号 → 空；问号不参与 chord，也不阻挡翻开。"""
+    g = create_game("beginner", num_players=1)
+    first = flag(g, 3, 3, seat=0)
+    assert first["state"] == "flag" and (3, 3) in g["flagged"]
+    second = flag(g, 3, 3, seat=0)
+    assert second["state"] == "question"
+    assert second["flagged"] is False and second["questioned"] is True
+    assert (3, 3) not in g["flagged"], "问号不算旗子（不参与通关/chord）"
+    assert (3, 3) in g["questioned"]
+    third = flag(g, 3, 3, seat=0)
+    assert third["state"] == "none"
+    assert (3, 3) not in g["questioned"]
+
+
+def test_question_mark_does_not_block_reveal():
+    g = create_game("beginner", num_players=1)
+    flag(g, 4, 4, seat=0)
+    flag(g, 4, 4, seat=0)          # → 问号
+    res = reveal(g, 4, 4, seat=0)
+    assert res["ok"], "问号只是笔记，应该可以直接翻开"
+    assert (4, 4) not in g["questioned"], "翻开后问号自动清掉"
+    sync = game_to_sync(g)
+    assert sync["questioned"] == []
+
+
+def test_daily_seed_makes_the_mine_layout_reproducible():
+    """每日固定盘：同种子 + 同一第一下 → 同一份雷盘。"""
+    def mines_for(seed, first=(4, 4)):
+        g = create_game("beginner", 1, seed=seed, daily=True)
+        reveal(g, first[0], first[1], seat=0)
+        return g["mine_positions"]
+
+    a = mines_for(20261021)
+    b = mines_for(20261021)
+    c = mines_for(20261022)
+    assert a == b, "同一天同难度必须拿到同一份雷盘"
+    assert a != c
+    # 不同第一下点击 → 安全区不同，雷盘也随之不同（同种子，不是逐格固定）
+    assert mines_for(20261021, first=(0, 0)) != a
+
+
+def test_sync_carries_difficulty_and_daily_flag():
+    g = create_game("advanced", 1, seed=123, daily=True)
+    sync = game_to_sync(g)
+    assert sync["difficulty"] == "advanced"
+    assert sync["daily"] is True
+    assert "questioned" in sync
+
+
 if __name__ == "__main__":
     print("Running minesweeper unit tests...")
     test_create_game_defaults()
@@ -662,6 +735,7 @@ if __name__ == "__main__":
     test_flag_cancelled_not_counted()
     test_ranking_order()
     test_ranking_tie()
+    test_ranking_elapsed_breaks_tie()
     test_no_actions_after_game_over()
     test_sync_message_structure()
     test_flagged_list_for_sync()

@@ -8,6 +8,7 @@ import os
 import json
 import tempfile
 import time
+from datetime import datetime, timezone, timedelta
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -498,3 +499,141 @@ def test_stasis_snapshot_carries_layout_and_fates():
     assert [r["username"] for r in snap["ranking"]] == [f"bstasis_{ts}", f"astasis_{ts}"]
     # 全员失压 = 败，两位都记负
     assert [r["result"] for r in results] == ["lose", "lose"]
+
+
+def test_user_stats_aggregates_results(client):
+    """胜率/连胜/常玩游戏/最近游戏都从 game_records 聚合，不把全量行发给客户端。"""
+    now = datetime.now(timezone.utc)
+
+    def insert(seq, game, result, score=None):
+        room_code = f"STAT{seq}"
+        ended = (now - timedelta(hours=10 - seq)).isoformat()
+        mine = {"username": "stats_u", "result": result}
+        if score is not None:
+            mine["score"] = score
+        conn = get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO game_records
+                   (game, room_code, players_json, results_json,
+                    snapshot_json, started_at, ended_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    game, room_code,
+                    json.dumps([{"username": "stats_u", "nickname": None, "seat": 0}]),
+                    json.dumps([mine]),
+                    "{}", ended, ended,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    token, _ = _register(client, "stats_u")
+    # 时间顺序：win, win, lose, end, draw
+    insert(1, "gomoku", "win")
+    insert(2, "uno", "win")
+    insert(3, "gomoku", "lose")
+    insert(4, "2048", "end", score=880)
+    insert(5, "reversi", "draw")
+
+    r = client.get("/api/history/stats",
+                   headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    s = r.json()
+    assert s["total"] == 5
+    assert s["wins"] == 2
+    assert s["losses"] == 1
+    # 2048 的 end 与 draw 都不进胜率分母，但计入「非胜负局」
+    assert s["draws"] == 2
+    assert abs(s["win_rate"] - 2 / 3) < 1e-4
+    assert s["best_streak"] == 2
+    assert s["current_streak"] == 0     # 最后一场是 draw
+    assert s["recent_7d"] == 5
+    assert s["top_games"][0] == {"game": "gomoku", "count": 2, "wins": 1}
+    assert len(s["top_games"]) == 3
+    assert len(s["recent_games"]) == 4
+    assert s["recent_games"][0]["game"] == "reversi"   # 最近一场
+    assert s["best_scores"] == {"2048": 880}
+
+    # 空账号：不炸，返回可渲染的零值
+    token2, _ = _register(client, "stats_empty")
+    r2 = client.get("/api/history/stats",
+                    headers={"Authorization": f"Bearer {token2}"})
+    assert r2.status_code == 200
+    assert r2.json()["total"] == 0
+    assert r2.json()["win_rate"] is None
+    assert r2.json()["best_scores"] == {}
+
+
+def test_user_stats_keeps_personal_best_per_game(client):
+    """多局同游戏取最高分；老记录缺 score 键不影响其它局。"""
+    now = datetime.now(timezone.utc)
+    token, _ = _register(client, "best_u")
+
+    def insert(seq, game, score):
+        ended = (now - timedelta(hours=10 - seq)).isoformat()
+        conn = get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO game_records
+                   (game, room_code, players_json, results_json,
+                    snapshot_json, started_at, ended_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    game, f"BEST{seq}",
+                    json.dumps([{"username": "best_u", "nickname": None, "seat": 0}]),
+                    json.dumps([{"username": "best_u", "result": "end", "score": score}]),
+                    "{}", ended, ended,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    insert(1, "2048", 512)
+    insert(2, "2048", 4096)
+    insert(3, "2048", 1024)
+
+    s = client.get("/api/history/stats",
+                   headers={"Authorization": f"Bearer {token}"}).json()
+    assert s["best_scores"]["2048"] == 4096
+
+
+def test_user_stats_keeps_best_mine_time_per_difficulty(client):
+    """扫雷最佳用时按难度分开；老记录缺 elapsed_ms/difficulty 时跳过。"""
+    now = datetime.now(timezone.utc)
+    token, _ = _register(client, "mtime_u")
+
+    def insert(seq, difficulty, elapsed_ms):
+        ended = (now - timedelta(hours=10 - seq)).isoformat()
+        entry = {"username": "mtime_u", "result": "win"}
+        if difficulty is not None:
+            entry["difficulty"] = difficulty
+        if elapsed_ms is not None:
+            entry["elapsed_ms"] = elapsed_ms
+        conn = get_conn()
+        try:
+            conn.execute(
+                """INSERT INTO game_records
+                   (game, room_code, players_json, results_json,
+                    snapshot_json, started_at, ended_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "minesweeper", f"MT{seq}",
+                    json.dumps([{"username": "mtime_u", "nickname": None, "seat": 0}]),
+                    json.dumps([entry]), "{}", ended, ended,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    insert(1, "beginner", 42000)
+    insert(2, "beginner", 18000)
+    insert(3, "advanced", 300000)
+    insert(4, None, None)              # 老记录：无计时/难度，跳过
+
+    s = client.get("/api/history/stats",
+                   headers={"Authorization": f"Bearer {token}"}).json()
+    assert s["best_times"] == {"beginner": 18000, "advanced": 300000}

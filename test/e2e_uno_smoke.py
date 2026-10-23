@@ -89,9 +89,19 @@ def enabled(page, testid):
 
 def hand_cards(page):
     """自己手牌区渲染出的牌张数（可出的牌 testID 是 u-play-*，其余是 u-card-*）。"""
-    cards = page.locator('[data-testid^="u-card-"], [data-testid^="u-play-"]')
-    cards.first.wait_for(timeout=20000)
-    return cards.count()
+    return page.locator('[data-testid^="u-card-"], [data-testid^="u-play-"]').count()
+
+
+def wait_hand(page, n, timeout=25000):
+    """等自己手牌区渲染出 n 张牌。
+
+    对局屏**挂载即渲染**（`u-draw` 等控件用 `game?.` 取值），手牌却是本局 `sync`
+    到了才有 —— 所以「看到 u-draw 就数牌」会数到 0（实测约 1/3 概率）。
+    """
+    page.wait_for_function(
+        """(n) => document.querySelectorAll(
+            '[data-testid^="u-card-"], [data-testid^="u-play-"]').length === n""",
+        arg=n, timeout=timeout)
 
 
 def hand_count_of(page, seat):
@@ -345,7 +355,8 @@ def phase_rules(pa, pb):
     pa.get_by_text('开始游戏', exact=True).wait_for(timeout=10000)
     pa.get_by_text('开始游戏', exact=True).click()
     for pg in (pa, pb):
-        hand_cards(pg)
+        pg.locator('[data-testid="u-draw"]').wait_for(timeout=20000)
+        wait_hand(pg, 7)   # u-draw 挂载即渲染，手牌要等 sync（见 wait_hand 注释）
     ok('热闹档开局，两方进入对局页')
 
     # 「有牌必出」房规**真的到界面上了**：手里有能出的牌时，摸牌按钮必须置灰。
@@ -441,7 +452,8 @@ def phase_no_mercy(pa, pb):
     pa.get_by_text('开始游戏', exact=True).wait_for(timeout=10000)
     pa.get_by_text('开始游戏', exact=True).click()
     for pg in (pa, pb):
-        hand_cards(pg)
+        pg.locator('[data-testid="u-draw"]').wait_for(timeout=20000)
+        wait_hand(pg, 7)   # 同上：牌堆张数也来自 sync，早读会读到 `剩 0 张`
 
     for pg, who in ((pa, 'A'), (pb, 'B')):
         pile = re.search(r'剩 (\d+) 张', pg.locator('body').inner_text())
@@ -519,11 +531,15 @@ def main():
         pa.get_by_text('开始游戏', exact=True).wait_for(timeout=10000)
         pa.get_by_text('开始游戏', exact=True).click()
         for pg in (pa, pb, pc):
-            hand_cards(pg)
+            pg.locator('[data-testid="u-draw"]').wait_for(timeout=20000)
         ok('三方进入对局页，牌桌与手牌区渲染')
 
-        # 开局：每人 7 张手牌，且各自只渲染自己的那 7 张
+        # 开局：每人 7 张手牌，且各自只渲染自己的那 7 张。
+        # ⚠️ **必须等手牌出现，不能一看到 `u-draw` 就数**：摸牌堆是挂载即渲染的，
+        # 而手牌要等本局的 `sync` 到齐 —— 中间那一帧数到的是 0。实测约 1/3 概率
+        # 命中（A/B/C 都可能中，谁慢谁中），与改动无关的既有竞态。
         for pg, who in ((pa, 'A'), (pb, 'B'), (pc, 'C')):
+            wait_hand(pg, 7)
             n = hand_cards(pg)
             assert n == 7, f'{who} 开局手牌应渲染 7 张，实际 {n}'
         ok('每方开局 7 张手牌（同种子无意义，各自独立发牌）')

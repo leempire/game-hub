@@ -1,11 +1,13 @@
 // 历史战绩页面：列表 + 点击展开棋盘快照详情。
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
+import { replayStepCount, snapshotAtStep } from '../replay';
 import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
@@ -22,7 +24,7 @@ import {
 import {
   XIANGQI_ROWS, XIANGQI_COLS, isRedPiece, pieceGlyph,
 } from '../xiangqiBoard';
-import { NUMBER_COLORS } from '../minesweeper';
+import { NUMBER_COLORS, formatMineElapsed } from '../minesweeper';
 import { ID_TO_PIECE, GARBAGE_ID } from '../tetris';
 import { notify, formatDate } from '../utils';
 // 游戏名的唯一来源（以前这里另有一份 GAME_LABELS，与主页卡片各写一遍）
@@ -192,25 +194,49 @@ export default function HistoryScreen() {
 // Inline board snapshot renderer
 function BoardSnapshot({ rec }: { rec: GameRecord }) {
   const snap = rec.snapshot;
-  if (snap.game === 'gomoku') {
-    return <GomokuBoard board={snap.board} size={snap.board_size} />;
+  // 棋类逐步回放：总手数来自服务端快照里的 moves（老战绩没有 → 0，不显示控制条）
+  const totalSteps = replayStepCount(snap);
+  const [step, setStep] = useState(totalSteps);
+  useEffect(() => { setStep(replayStepCount(snap)); }, [rec.id, snap]);
+  const view = useMemo(() => snapshotAtStep(snap, step), [snap, step]);
+  const atEnd = step >= totalSteps;
+  const controls = totalSteps > 0 ? (
+    <ReplayBar
+      step={step}
+      total={totalSteps}
+      onChange={setStep}
+    />
+  ) : null;
+
+  if (view.game === 'gomoku') {
+    return (
+      <View>
+        {controls}
+        <GomokuBoard board={view.board} size={view.board_size} />
+      </View>
+    );
   }
-  if (snap.game === 'reversi') {
-    return <ReversiBoard board={snap.board} size={snap.board_size} />;
+  if (view.game === 'reversi') {
+    return (
+      <View>
+        {controls}
+        <ReversiBoard board={view.board} size={view.board_size} />
+      </View>
+    );
   }
-  if (snap.game === 'xiangqi') {
-    return <XiangqiBoard snap={snap} />;
+  if (view.game === 'xiangqi') {
+    return <XiangqiBoard snap={view} />;
   }
-  if (snap.game === 'battleship') {
-    return <BattleshipSnapshot snap={snap} players={rec.players} />;
+  if (view.game === 'battleship') {
+    return <BattleshipSnapshot snap={view} players={rec.players} />;
   }
-  if (snap.game === '2048') {
-    return <Snapshot2048 snap={snap} />;
+  if (view.game === '2048') {
+    return <Snapshot2048 snap={view} />;
   }
-  if (snap.game === 'minesweeper') {
+  if (view.game === 'minesweeper') {
     // Detect new format (has ranking) vs old format (has lives/winner)
     // Use 'as any' for forward-compat with new snapshot shape
-    const s = snap as any;
+    const s = view as any;
     const isNewFormat = 'ranking' in s && !('lives' in s);
     return (
       <View>
@@ -218,42 +244,97 @@ function BoardSnapshot({ rec }: { rec: GameRecord }) {
           <MineRanking ranking={s.ranking} reason={s.reason} />
         )}
         <MineBoard
-          width={snap.width}
-          height={snap.height}
-          revealed={snap.revealed}
-          flagged={snap.flagged}
+          width={view.width}
+          height={view.height}
+          revealed={view.revealed}
+          flagged={view.flagged}
         />
       </View>
     );
   }
-  if (snap.game === 'dots') {
-    return <DotsSnapshot snap={snap} />;
+  if (view.game === 'dots') {
+    return (
+      <View>
+        {controls}
+        <DotsSnapshot snap={view} hideResult={!atEnd} />
+      </View>
+    );
   }
-  if (snap.game === 'ludo') {
-    return <LudoSnapshot snap={snap} players={rec.players} />;
+  if (view.game === 'ludo') {
+    return <LudoSnapshot snap={view} players={rec.players} />;
   }
-  if (snap.game === 'connect4') {
-    return <ConnectFourBoard snap={snap} />;
+  if (view.game === 'connect4') {
+    return (
+      <View>
+        {controls}
+        <ConnectFourBoard snap={view} />
+      </View>
+    );
   }
-  if (snap.game === 'luzhanqi') {
-    return <LuzhanqiBoardSnap snap={snap} />;
+  if (view.game === 'luzhanqi') {
+    return <LuzhanqiBoardSnap snap={view as LuzhanqiSnapshot} />;
   }
-  if (snap.game === 'spider') {
+  if (view.game === 'spider') {
     return <View style={{ gap: 12 }}><Text style={{ color: colors.textSecondary }}>
-      已收齐 {snap.completed} / 8 组 · {snap.move_count} 步
-    </Text><SpiderBoard game={snap} /></View>;
+      已收齐 {view.completed} / 8 组 · {view.move_count} 步
+    </Text><SpiderBoard game={view} /></View>;
   }
-  if (snap.game === 'tetris') {
-    return <SnapshotTetris snap={snap as any} />;
+  if (view.game === 'tetris') {
+    return <SnapshotTetris snap={view as any} />;
   }
-  if (snap.game === 'uno') {
-    return <UnoSnapshotView snap={snap as any} />;
+  if (view.game === 'uno') {
+    return <UnoSnapshotView snap={view as any} />;
   }
   // stasis 快照类型尚未进 GameSnapshot 联合（api.ts），故用 as any 比较与传参。
-  if ((snap as any).game === 'stasis') {
-    return <StasisSnapshot snap={snap as any} players={rec.players} />;
+  if ((view as any).game === 'stasis') {
+    return <StasisSnapshot snap={view as any} players={rec.players} />;
   }
   return null;
+}
+
+/** 回放控制条：上一步 / 第 N 手 / 下一步 / 回到最新。 */
+function ReplayBar({ step, total, onChange }: {
+  step: number;
+  total: number;
+  onChange: (step: number) => void;
+}) {
+  return (
+    <View style={replayStyles.bar}>
+      <TouchableOpacity
+        style={[replayStyles.btn, step === 0 && replayStyles.btnOff]}
+        onPress={() => onChange(0)}
+        disabled={step === 0}
+        accessibilityLabel="回到开局"
+      >
+        <Ionicons name="play-skip-back" size={16} color={colors.text} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[replayStyles.btn, step === 0 && replayStyles.btnOff]}
+        onPress={() => onChange(Math.max(0, step - 1))}
+        disabled={step === 0}
+        accessibilityLabel="上一步"
+      >
+        <Ionicons name="chevron-back" size={18} color={colors.text} />
+      </TouchableOpacity>
+      <Text style={replayStyles.label}>第 {step} / {total} 手</Text>
+      <TouchableOpacity
+        style={[replayStyles.btn, step === total && replayStyles.btnOff]}
+        onPress={() => onChange(Math.min(total, step + 1))}
+        disabled={step === total}
+        accessibilityLabel="下一步"
+      >
+        <Ionicons name="chevron-forward" size={18} color={colors.text} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[replayStyles.btn, step === total && replayStyles.btnOff]}
+        onPress={() => onChange(total)}
+        disabled={step === total}
+        accessibilityLabel="回到最新"
+      >
+        <Ionicons name="play-skip-forward" size={16} color={colors.text} />
+      </TouchableOpacity>
+    </View>
+  );
 }
 
 /**
@@ -487,7 +568,7 @@ function MineRanking({ ranking, reason }: {
   ranking: Array<{
     seat: number; username: string; nickname: string | null;
     alive: boolean; correct_flags: number; wrong_flags: number;
-    revealed_count: number; rank: number;
+    revealed_count: number; elapsed_ms?: number | null; rank: number;
   }>;
   reason: string | null;
 }) {
@@ -508,6 +589,7 @@ function MineRanking({ ranking, reason }: {
           </Text>
           <Text style={mineRankStyles.stat}>
             标雷{entry.correct_flags} 翻开{entry.revealed_count}
+            {formatMineElapsed(entry.elapsed_ms) ? ` · 用时${formatMineElapsed(entry.elapsed_ms)}` : ''}
           </Text>
         </View>
       ))}
@@ -824,6 +906,35 @@ const REASON_LABELS: Record<string, string> = {
   all_sunk: '全部击沉', surrender: '认输', disconnect: '断线判负',
 };
 
+const replayStyles = StyleSheet.create({
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  btn: {
+    minWidth: 40,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.card,
+  },
+  btnOff: { opacity: 0.35 },
+  label: {
+    minWidth: 88,
+    textAlign: 'center',
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+});
+
 const bsStyles = StyleSheet.create({
   title: { fontSize: fontSize.sm, fontWeight: '700', color: colors.text, marginBottom: 4 },
   boards: { flexDirection: 'row', gap: spacing.md },
@@ -833,7 +944,7 @@ const bsStyles = StyleSheet.create({
   cell: { position: 'absolute', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.1)' },
 });
 
-function DotsSnapshot({ snap }: { snap: any }) {
+function DotsSnapshot({ snap, hideResult = false }: { snap: any; hideResult?: boolean }) {
   const dCell = 18;
   const dDot = 3;
   const dots = snap.dots || 5;
@@ -853,7 +964,7 @@ function DotsSnapshot({ snap }: { snap: any }) {
   return (
     <View>
       <Text style={bsStyles.title}>
-        {winnerLabel} ({scoreP1}:{scoreP2})
+        {hideResult ? `蓝 ${scoreP1} : ${scoreP2} 红` : `${winnerLabel} (${scoreP1}:${scoreP2})`}
       </Text>
       <ScrollView horizontal style={styles.boardScroll}>
         <View style={[dotsStyles.board, { width: bw, height: bh }]}>

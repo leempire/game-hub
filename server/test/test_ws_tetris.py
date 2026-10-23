@@ -127,6 +127,29 @@ class TestStart:
         finally:
             _close(wss)
 
+    def test_start_level_room_setting_reaches_the_game(self, client):
+        """房间设置注册表 → 引擎：起始速度档不是客户端自嗨。"""
+        ts = int(time.time() * 1000) % 100000
+        token, _ = _register(client, f"tt_lvl{ts}")
+        code = _create_room(client, token)["code"]
+        ws = client.websocket_connect(f"/ws/room/{code}?token={token}")
+        ws.__enter__()
+        try:
+            _recv_type(ws, "sync")
+            ws.send_json({"type": "room_setting", "key": "start_level", "value": 5})
+            lobby = _recv_type(ws, "lobby")
+            item = next(s for s in lobby["room"]["settings"] if s["key"] == "start_level")
+            assert item["value"] == 5
+            ws.send_json({"type": "start"})
+            start = _recv_type(ws, "game_start")
+            assert start["game"]["level"] == 5
+            assert start["game"]["start_level"] == 5
+            assert len(start["game"]["next_pieces"]) == 3
+            assert start["game"]["hold_used"] is False
+            assert start["game"]["held"] is None
+        finally:
+            ws.__exit__(None, None, None)
+
     def test_sync_carries_tetris_state(self, client):
         wss, code, tokens, uids, starts = _setup_game(client, players=2)
         try:
@@ -158,6 +181,23 @@ class TestActions:
             filled = sum(1 for row in msg["board"] for c in row if c)
             assert filled == 4, f"硬降应落下一块（4 格），实际 {filled}"
             # 对手只收到排行榜更新，**看不到我的盘**
+            _recv_type(wss[1], "tetris_leaderboard")
+            # 暂存：即时换块，服务端要立刻回权威状态（不能等锁定）
+            before_piece = msg["next_pieces"][0]
+            held_piece = msg["current"]["piece"]
+            wss[0].send_json({"type": "tetris_actions", "actions": ["hold"]})
+            hm = _recv_type(wss[0], "tetris_state")
+            assert hm["last_action"] == "hold"
+            assert hm["held"] == held_piece
+            assert hm["current"]["piece"] == before_piece
+            assert hm["hold_used"] is True
+            assert len(hm["next_pieces"]) == 3
+            assert hm["user_id"] == uids[0]
+            # 同一块再暂存一次：静默 no-op，回兜底状态（不会误报错、也不会卡住）
+            wss[0].send_json({"type": "tetris_actions", "actions": ["hold"]})
+            hm2 = _recv_type(wss[0], "tetris_state")
+            assert hm2["last_action"] == "resync"
+            assert hm2["held"] == held_piece
             other = _recv_type(wss[1], "tetris_leaderboard")
             assert "board" not in other
             assert len(other["leaderboard"]) == 2

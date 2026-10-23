@@ -76,6 +76,7 @@ import ShotLayer from '../StasisShots';
 import {
   BED_RATE, BUILDINGS, PATCH_SELF, PATCH_REMOTE,
   PLAYER_SPEED, RECONCILE_SNAP, RECONCILE_LERP, SEND_MIN_MS, PAN_MARGIN,
+  TICK_MS, REMOTE_SNAP,
   CAM_LERP, CAM_LEAD, ALERT_DOOR_RATIO, OVERLOAD_DOOR_RATIO, PULSE_CYCLES,
   ON_SPACE, ON_SPACE_SOFT, WEB_TOUCH_NONE, WEB_GPU,
   canStand, clampRatio, fmtClock, AI_PROFILE_NAMES,
@@ -112,6 +113,20 @@ type Panel =
   /** **共用闸门**（v9）：`mine` = 我住在这扇闸门后面，能升级它。 */
   | { kind: 'gate'; gate: string; mine: boolean }
   | { kind: 'pod' };
+
+/** 两份「id → 血量」表的逐字段浅比较（门血 / 闸门血，值都是一层扁平对象）。 */
+function sameHp(a: Record<string, object>, b: Record<string, object>): boolean {
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  for (const k of ka) {
+    const x = a[k] as Record<string, unknown>, y = b[k] as Record<string, unknown> | undefined;
+    if (!y) return false;
+    const fx = Object.keys(x);
+    if (fx.length !== Object.keys(y).length) return false;
+    for (const f of fx) if (x[f] !== y[f]) return false;
+  }
+  return true;
+}
 
 export default function StasisScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
@@ -194,7 +209,45 @@ export default function StasisScreen({ code, onLeave }: Props) {
    */
   const posAnims = useRef<Map<number, Animated.ValueXY>>(new Map());
   const entAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  /**
+   * **队友与静默体的插值**（设计文档 §「静默体移动：5 Hz 快照 + 客户端插值」）。
+   *
+   * 原来收到 tick 就直接 `setValue` —— 画面上它们只有 **5 帧/秒**，队友每次硬跳
+   * ~0.7 格（实测 4.8 次/秒、每次 32px），就是玩家说的「别人一顿一顿地走」。
+   * 现在是**缓冲一帧插值**：每个 tick 把「当前显示位置 → 新权威位置」排成一段，
+   * 主循环在一个 tick 间隔内匀速走完。代价是远端单位在画面上晚约一个 tick
+   * （200ms），规则判定全在服务端，不受影响。位移超过 `REMOTE_SNAP` 格（开局
+   * 传送进舱室、重连）直接吸附，不画一段穿墙的滑行。
+   * 键：玩家 uid 的字符串，静默体用 `'entity'`。
+   */
+  const remoteRef = useRef<Map<string, {
+    anim: Animated.ValueXY; from: [number, number]; to: [number, number];
+    cur: [number, number]; t0: number; dur: number;
+  }>>(new Map());
+  const lastTickAtRef = useRef(0);
   const tickSeqRef = useRef(0);
+  /** 直接吸附（全量同步 / 第一次见到 / 位移过大）。坐标单位是**格**。 */
+  const snapRemote = (key: string, anim: Animated.ValueXY, pos: [number, number]) => {
+    remoteRef.current.set(key, { anim, from: [pos[0], pos[1]], to: [pos[0], pos[1]],
+      cur: [pos[0], pos[1]], t0: 0, dur: 1 });
+    anim.setValue({ x: pos[0] * TILE, y: pos[1] * TILE });
+    if (key === 'entity') shotTargetRef.current = [pos[0] * TILE, pos[1] * TILE];
+  };
+  /** 排一段插值：从当前显示位置走到 `pos`，用时 `dur` 毫秒。 */
+  const pushRemote = (key: string, anim: Animated.ValueXY, pos: [number, number],
+                      now: number, dur: number) => {
+    const r = remoteRef.current.get(key);
+    if (!r || r.anim !== anim
+        || Math.hypot(pos[0] - r.cur[0], pos[1] - r.cur[1]) > REMOTE_SNAP) {
+      snapRemote(key, anim, pos);
+      return;
+    }
+    if (pos[0] === r.to[0] && pos[1] === r.to[1]) return;   // 没动：别重排
+    r.from = [r.cur[0], r.cur[1]];
+    r.to = [pos[0], pos[1]];
+    r.t0 = now;
+    r.dur = dur;
+  };
   /**
    * 正在开火的炮台格键（**排序去重后的稳定数组**，只在集合变化时换引用）。
    * 位置与它分开：位置每 tick 都变、走 ref；集合很少变、走 state。
@@ -285,9 +338,9 @@ export default function StasisScreen({ code, onLeave }: Props) {
         if (!pos || uid === myUidRef.current) return;
         let a = posAnims.current.get(uid);
         if (!a) { a = new Animated.ValueXY({ x: 0, y: 0 }); posAnims.current.set(uid, a); }
-        a.setValue({ x: pos[0] * TILE, y: pos[1] * TILE });
+        snapRemote(uidStr, a, [pos[0], pos[1]]);
       });
-      if (g.entity?.pos) entAnim.setValue({ x: g.entity.pos[0] * TILE, y: g.entity.pos[1] * TILE });
+      if (g.entity?.pos) snapRemote('entity', entAnim, [g.entity.pos[0], g.entity.pos[1]]);
       const mine = g.players[String(myUidRef.current)];
       if (mine?.pos) {
         predRef.current = [mine.pos[0], mine.pos[1]];
@@ -332,7 +385,13 @@ export default function StasisScreen({ code, onLeave }: Props) {
     const handleTick = (msg: SocketMessage) => {
       const tick = msg as unknown as StasisTick;
 
-      // ① 位置：直接写 Animated，**不触发任何 React 重渲染**
+      // ① 位置：排进插值队列（主循环逐帧写 Animated），**不触发任何 React 重渲染**。
+      //    一段的时长取**实测的 tick 间隔**（服务端名义 200ms，网络抖动时会长短不一；
+      //    用实测值才不会「走完一段停一下、再走下一段」）。
+      const now = Date.now();
+      const gap = lastTickAtRef.current ? now - lastTickAtRef.current : TICK_MS;
+      lastTickAtRef.current = now;
+      const segMs = Math.max(TICK_MS * 0.6, Math.min(TICK_MS * 2, gap));
       const dynAll = tick.players || {};
       Object.keys(dynAll).forEach((uidStr) => {
         const pos = dynAll[uidStr]?.pos;
@@ -341,12 +400,12 @@ export default function StasisScreen({ code, onLeave }: Props) {
         if (uid === myUidRef.current) return;              // 自己由本地预演驱动
         let a = posAnims.current.get(uid);
         if (!a) { a = new Animated.ValueXY({ x: 0, y: 0 }); posAnims.current.set(uid, a); }
-        a.setValue({ x: pos[0] * TILE, y: pos[1] * TILE });
+        pushRemote(uidStr, a, [pos[0], pos[1]], now, segMs);
       });
       if (tick.entity?.pos) {
-        entAnim.setValue({ x: tick.entity.pos[0] * TILE, y: tick.entity.pos[1] * TILE });
-        // 弹丸的落点每 tick 都变，**走 ref 不进 state**（同位置那一类）
-        shotTargetRef.current = [tick.entity.pos[0] * TILE, tick.entity.pos[1] * TILE];
+        pushRemote('entity', entAnim, [tick.entity.pos[0], tick.entity.pos[1]], now, segMs);
+        // 弹丸的落点**走 ref 不进 state**（同位置那一类）；它跟着插值后的位置走，
+        // 由主循环逐帧写、吸附时由 `snapRemote` 写（见 `remoteRef`）。
       }
       // 正在被砸的那扇门（门抖动的驱动源，见主循环）
       // 目标可能是房间，也可能是**共用闸门**（`"gate:G1"`）—— 两者都要抖。
@@ -398,8 +457,10 @@ export default function StasisScreen({ code, onLeave }: Props) {
           players: nextPlayers,
         };
       });
-      if (tick.doors) setDoorHp(tick.doors);
-      if (tick.gates) setGateHp(tick.gates);
+      // **数值没变就别换引用**：tick 每次都是新对象，直接 set 会让整层门（12~18 张
+      // SVG 贴图，`DoorLayer` 是 memo 的）每次都重画，而没被砸的时候门血根本不动。
+      if (tick.doors) setDoorHp((prev) => (sameHp(prev, tick.doors!) ? prev : tick.doors!));
+      if (tick.gates) setGateHp((prev) => (sameHp(prev, tick.gates!) ? prev : tick.gates!));
 
       // 用权威位置校正本地预演
       const mine = tick.players?.[String(myUidRef.current)];
@@ -771,6 +832,17 @@ export default function StasisScreen({ code, onLeave }: Props) {
         lastHeroRef.current = [p[0], p[1]];
         heroXY.setValue({ x: p[0] * TILE, y: p[1] * TILE });
       }
+
+      // 队友与静默体：推进插值（见 `remoteRef`）。走完的段不再写，站着不动零开销。
+      remoteRef.current.forEach((r, key) => {
+        if (r.cur[0] === r.to[0] && r.cur[1] === r.to[1]) return;
+        const k = Math.min(1, (now - r.t0) / r.dur);
+        r.cur = k >= 1 ? [r.to[0], r.to[1]]
+          : [r.from[0] + (r.to[0] - r.from[0]) * k, r.from[1] + (r.to[1] - r.from[1]) * k];
+        r.anim.setValue({ x: r.cur[0] * TILE, y: r.cur[1] * TILE });
+        // 弹丸瞄**画面上**的静默体，不瞄权威位置 —— 否则子弹打在它前面一截
+        if (key === 'entity') shotTargetRef.current = [r.cur[0] * TILE, r.cur[1] * TILE];
+      });
 
       // 「躺下」按钮的显隐**不在这里算**（v6）—— 它是服务端随 tick 下发的
       // `players[uid].lie`，见 `handleTick` 的快路径。本地预演的位置只用来画

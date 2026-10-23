@@ -6,6 +6,11 @@
 #   scripts/start.sh backend      # 只启动后端（50541）
 #   scripts/start.sh web          # 只启动前端 web dev server（50540）
 #   scripts/start.sh web --clear  # expo 带 --clear（Metro 缓存异常/漏更时用）
+#   scripts/start.sh web --dev    # 开发模式 bundle（React 开发版 + 不压缩，调试用）
+#
+# web 默认跑**生产模式** bundle（--no-dev --minify）：手机浏览器玩家连的就是这个
+# 端口，开发版 React 每次渲染都多做一轮校验，深空休眠在中端机上实测每 8 秒被
+# 卡住 2.8 秒（生产版为 0），bundle 也从 5.2MB 降到 2.0MB。
 #
 # 日志：tmp/log/{backend,web}.log      pid：tmp/run/{backend,web}.pid
 # 要重启已在运行的服务用 scripts/restart.sh，本脚本只负责「拉起没跑的」。
@@ -18,9 +23,11 @@ usage() {
 }
 
 CLEAR=0
+DEV=0
 for a in "$@"; do
     case "$a" in
         --clear|-c) CLEAR=1 ;;
+        --dev)      DEV=1 ;;
     esac
 done
 parse_targets "$@"
@@ -54,7 +61,7 @@ start_backend() {
         return 0
     fi
     assert_port_free backend
-    [[ -x "$UVICORN_BIN" ]] || die "找不到 uvicorn：$UVICORN_BIN（可用 UVICORN_BIN=... 覆盖）"
+    [[ -x "$UVICORN_BIN" ]] || die "找不到 uvicorn：${UVICORN_BIN:-（server/.venv 与 PATH 都没有）}（可用 UVICORN_BIN=... 覆盖）"
 
     info "启动 backend：uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT"
     launch backend "$SERVER_DIR" "$LOG_DIR/backend.log" \
@@ -80,6 +87,7 @@ start_web() {
     fi
     assert_port_free web
     (( CLEAR )) && args+=(--clear)
+    (( DEV )) || args+=(--no-dev --minify)
 
     # expo 打包时内联 EXPO_PUBLIC_*，没设的话 bundle 会指向 localhost
     if export_client_env; then
