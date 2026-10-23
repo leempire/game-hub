@@ -35,7 +35,7 @@ function closeTopModal(): void {
 // 玩家看到的就是闪一下。深空休眠（`Stasis`）就这么漏了一整轮。
 // `test/visual_audit.py` 的 `audit_back_wiring` 拿 navigation.tsx 的路由表逐个对账，
 // **新增对局屏时那条静态检查会直接报红**，别再靠人肉记。
-const PROTECTED_SCREENS = new Set(['Gomoku', 'Minesweeper', 'Reversi', 'Battleship', 'Dots', 'Ludo', 'Game2048', 'Xiangqi', 'ConnectFour', 'Tetris', 'Uno', 'Luzhanqi', 'Stasis']);
+const PROTECTED_SCREENS = new Set(['Gomoku', 'Minesweeper', 'Reversi', 'Battleship', 'Dots', 'Ludo', 'Game2048', 'Xiangqi', 'ConnectFour', 'Tetris', 'Uno', 'Luzhanqi', 'Stasis', 'Spider']);
 let suppressPop = false;
 let suppressTimer: ReturnType<typeof setTimeout> | null = null;
 let webListenerInstalled = false;

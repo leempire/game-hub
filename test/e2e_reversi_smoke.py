@@ -58,7 +58,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
         pa = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
         pb = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
@@ -94,6 +93,7 @@ def main():
         ok('双方进入翻转棋对局页，8x8 棋盘渲染')
 
         # 回合提示：A(黑) 先手
+        pb.get_by_text('等待对方...', exact=True).wait_for(timeout=10000)
         assert '轮到你落子' in pa.locator('body').inner_text(), 'A 未看到自己回合'
         assert '等待对方' in pb.locator('body').inner_text(), 'B 未看到等待提示'
         ok('回合提示正确：黑方(A)先手')

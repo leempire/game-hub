@@ -1,4 +1,5 @@
 import { API_BASE } from './config';
+import type { SpiderSnapshot } from './spider';
 import { parseError } from './utils';
 
 // Callback invoked on 401 - set by AuthProvider to trigger logout
@@ -248,7 +249,7 @@ export interface HistoryPlayer {
 
 export interface HistoryResult {
   username: string;
-  result: 'win' | 'lose' | 'draw';
+  result: 'win' | 'lose' | 'draw' | 'end';
 }
 
 export interface GomokuSnapshot {
@@ -404,7 +405,7 @@ export interface LuzhanqiSnapshot {
   reason: string | null;
 }
 
-export type GameSnapshot = GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot;
+export type GameSnapshot = GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot;
 
 export interface GameRecord {
   id: number;

@@ -13,9 +13,10 @@ import { GAMES, GAME_CATEGORIES, type GameEntry } from '../games';
 interface Props {
   onNavigateToRooms: () => void;
   onNavigateToRoom: (code: string) => void;
+  onNavigateToSpider: (code: string) => void;
 }
 
-export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props) {
+export default function GamesTab({ onNavigateToRooms, onNavigateToRoom, onNavigateToSpider }: Props) {
   const { token } = useAuth();
   // 当前打开的是哪个游戏的「创建 / 加入」弹窗（null = 关着）。
   // 13 个布尔 state + 13 个弹窗收成一个 —— 它们本来就逐字相同。
@@ -37,7 +38,8 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
       // `room_setting` 一条消息）。建房只负责挑游戏类型。
       const room = await createRoom(token, picked.key);
       setPicked(null);
-      onNavigateToRoom(room.code);
+      if (picked.key === 'spider') onNavigateToSpider(room.code);
+      else onNavigateToRoom(room.code);
     } catch (err) {
       notify('创建失败', (err as Error).message);
     } finally {
@@ -132,10 +134,10 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
               disabled={creating}
             >
               <Text style={styles.modalBtnPrimaryText}>
-                {creating ? '创建中...' : '创建房间'}
+                {creating ? '打开中...' : picked?.key === 'spider' ? '开始 / 继续牌局' : '创建房间'}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
+            {picked?.key !== 'spider' && <TouchableOpacity
               style={styles.modalBtn}
               onPress={() => {
                 setPicked(null);
@@ -143,7 +145,7 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
               }}
             >
               <Text style={styles.modalBtnText}>加入房间</Text>
-            </TouchableOpacity>
+            </TouchableOpacity>}
             <TouchableOpacity
               style={[styles.modalBtn, styles.modalBtnSecondary]}
               onPress={() => setPicked(null)}

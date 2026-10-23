@@ -221,6 +221,10 @@ def _build_players_record(room: dict) -> list[dict]:
 
 def _build_results_record(room: dict) -> list[dict]:
     """Build the per-player result list."""
+    if room["game"] == "spider":
+        won = room["game_state"].get("reason") == "completed"
+        return [{"username": p["username"], "result": "win" if won else "end"}
+                for p in room["players"]]
     gs = room.get("game_state") or {}
     winner = gs.get("winner")
     reason = gs.get("reason")
@@ -305,6 +309,9 @@ def _build_snapshot(room: dict) -> dict:
     """Build the final-position snapshot stored with each record."""
     gs = room.get("game_state") or {}
     game = room["game"]
+    if game == "spider":
+        from app.game.spider import snapshot
+        return snapshot(gs)
     if game == "gomoku":
         return {
             "game": "gomoku",

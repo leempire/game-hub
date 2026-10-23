@@ -89,7 +89,9 @@ def enabled(page, testid):
 
 def hand_cards(page):
     """自己手牌区渲染出的牌张数（可出的牌 testID 是 u-play-*，其余是 u-card-*）。"""
-    return page.locator('[data-testid^="u-card-"], [data-testid^="u-play-"]').count()
+    cards = page.locator('[data-testid^="u-card-"], [data-testid^="u-play-"]')
+    cards.first.wait_for(timeout=20000)
+    return cards.count()
 
 
 def hand_count_of(page, seat):
@@ -343,7 +345,7 @@ def phase_rules(pa, pb):
     pa.get_by_text('开始游戏', exact=True).wait_for(timeout=10000)
     pa.get_by_text('开始游戏', exact=True).click()
     for pg in (pa, pb):
-        pg.locator('[data-testid="u-draw"]').wait_for(timeout=20000)
+        hand_cards(pg)
     ok('热闹档开局，两方进入对局页')
 
     # 「有牌必出」房规**真的到界面上了**：手里有能出的牌时，摸牌按钮必须置灰。
@@ -439,7 +441,7 @@ def phase_no_mercy(pa, pb):
     pa.get_by_text('开始游戏', exact=True).wait_for(timeout=10000)
     pa.get_by_text('开始游戏', exact=True).click()
     for pg in (pa, pb):
-        pg.locator('[data-testid="u-draw"]').wait_for(timeout=20000)
+        hand_cards(pg)
 
     for pg, who in ((pa, 'A'), (pb, 'B')):
         pile = re.search(r'剩 (\d+) 张', pg.locator('body').inner_text())
@@ -488,7 +490,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
         ctx_args = {'viewport': {'width': 390, 'height': 844}}
         pa = browser.new_context(**ctx_args).new_page()
@@ -518,7 +519,7 @@ def main():
         pa.get_by_text('开始游戏', exact=True).wait_for(timeout=10000)
         pa.get_by_text('开始游戏', exact=True).click()
         for pg in (pa, pb, pc):
-            pg.locator('[data-testid="u-draw"]').wait_for(timeout=20000)
+            hand_cards(pg)
         ok('三方进入对局页，牌桌与手牌区渲染')
 
         # 开局：每人 7 张手牌，且各自只渲染自己的那 7 张

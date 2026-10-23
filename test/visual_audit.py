@@ -15,7 +15,7 @@ import time
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:50540'
-REPO = pathlib.Path('/home/dory/code/sandbox/game_hub')
+REPO = pathlib.Path(__file__).resolve().parent.parent
 APP_SRC = REPO / 'app/src'
 APP_ENTRY = REPO / 'app/App.tsx'
 SERVER_CONFIG = REPO / 'server/config/config.json'
@@ -41,7 +41,6 @@ WEB_ONLY_API = re.compile(r'window\.(confirm|alert|prompt)|(?<![\w.$])(alert|con
 # 历史 bug：对局屏裸调 window.addEventListener('gh:confirm-leave') → 原生挂载即 TypeError 白屏
 DOM_API = re.compile(r'window\.(addEventListener|removeEventListener|dispatchEvent)|(?<![\w.$])document\.|new\s+CustomEvent')
 DOM_API_ALLOWED_FILES = {'backGuard.tsx'}
-CHROME = '/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome'
 EMOJI = re.compile(r'[\U0001F000-\U0001FAFF' + chr(0x2600) + '-' + chr(0x27BF) + chr(0xFE0F) + chr(0x2B00) + '-' + chr(0x2BFF) + ']')
 RESULTS = []
 
@@ -139,7 +138,7 @@ def main():
     audit_back_wiring()
     ts = int(time.time())
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, executable_path=CHROME)
+        browser = p.chromium.launch(headless=True)
         ctx = browser.new_context(
             viewport={'width': 390, 'height': 844}, device_scale_factor=2,
             user_agent='Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148')

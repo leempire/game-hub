@@ -113,9 +113,16 @@ def _setup(client, players=2, ready=True):
     for ws in wss[1:]:
         ws.send_json({"type": "ready"})
     for ws in wss:
-        _recv_type(ws, "lobby")
+        while True:
+            lobby = _recv_type(ws, "lobby")["room"]
+            if all(p["id"] == lobby["host_id"] or p["ready"] for p in lobby["players"]):
+                break
     if ready:
         wss[0].send_json({"type": "start"})
+        deadline = time.monotonic() + 3
+        while code not in rm._tick_tasks and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert code in rm._tick_tasks, "服务端尚未完成开局"
     return wss, code, tokens, uids
 
 

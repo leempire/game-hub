@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
-import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon } from '../icons';
+import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
@@ -27,6 +27,7 @@ import { ID_TO_PIECE, GARBAGE_ID } from '../tetris';
 import { notify, formatDate } from '../utils';
 // 游戏名的唯一来源（以前这里另有一份 GAME_LABELS，与主页卡片各写一遍）
 import { gameTitle } from '../games';
+import SpiderBoard from '../SpiderBoard';
 
 const PAGE_SIZE = 20;
 
@@ -91,6 +92,7 @@ export default function HistoryScreen() {
   };
 
   const renderGameIcon = (game: string) => {
+    if (game === 'spider') return <SpiderIcon size={36} />;
     if (game === 'gomoku') return <GomokuIcon size={36} />;
     if (game === 'reversi') return <ReversiIcon size={36} />;
     if (game === 'minesweeper') return <MineIcon size={36} />;
@@ -130,6 +132,7 @@ export default function HistoryScreen() {
         return (
           <TouchableOpacity
             key={rec.id}
+            testID={`history-record-${rec.id}`}
             style={styles.card}
             onPress={() => handleToggle(rec.id)}
             activeOpacity={0.8}
@@ -234,6 +237,11 @@ function BoardSnapshot({ rec }: { rec: GameRecord }) {
   }
   if (snap.game === 'luzhanqi') {
     return <LuzhanqiBoardSnap snap={snap} />;
+  }
+  if (snap.game === 'spider') {
+    return <View style={{ gap: 12 }}><Text style={{ color: colors.textSecondary }}>
+      已收齐 {snap.completed} / 8 组 · {snap.move_count} 步
+    </Text><SpiderBoard game={snap} /></View>;
   }
   if (snap.game === 'tetris') {
     return <SnapshotTetris snap={snap as any} />;

@@ -2,7 +2,7 @@
 
 移动优先的小游戏对战平台：Expo（React Native + react-native-web）客户端，一套代码产出 Android APK 与手机/PC 浏览器网页；FastAPI + SQLite 后端，房间制联网对战。
 
-- 仓库根：`/home/dory/code/sandbox/game_hub`
+- 仓库根：以当前克隆目录为准；以下命令默认从仓库根执行。
 - 后端：`0.0.0.0:50541`（公网基址见 `server/config/config.json` 的 `public_base`，
   可用环境变量 `PUBLIC_BASE` / `IP` 覆盖 —— 仓库里不存具体地址，见「配置与密钥」）
 - Web dev server：`50540`（Metro 热更新，常驻运行，勿随意重启）
@@ -139,6 +139,15 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
 官方说明书 + 官方手游 + 4 个数字版实现；**含三批排期与「不采纳清单及理由」**）。
 
 ## 关键机制（改动前必读）
+
+### 蜘蛛纸牌（单人）
+
+`game/spider.py` 为纯规则引擎，`spider` 每账号一个私有牌局；首页直接开始/续玩。
+**离线不判负，也不执行多人房间闲置清理或恢复后的 waiting 清退**。
+`spider_action` 经 revision 校验后完成动作、落盘、再回权威视图；暗牌和余牌顺序不下发。
+撤销保留最近 200 步；新局与自然终局经 `_set_game_over` 记录战绩，单人返回只保存。
+接入说明、协议与验证见 `docs/游戏设计/蜘蛛纸牌/设计.md`，调研见同目录 `增强调研.md`。
+回归：`server/test/test_spider.py`、`server/test/test_ws_spider.py`、`test/e2e_spider_smoke.py`。
 
 ### 返回操作（backGuard.tsx）
 优先级：弹窗 > 对局页确认 > 主 Tab 双击退出（2s 窗口）。
@@ -685,10 +694,10 @@ scripts/stop.sh                      # 停全部
 tail -f tmp/log/backend.log          # 服务日志；pid 在 tmp/run/*.pid
 
 # 类型检查（在 app/ 目录下执行，勿在仓库根）
-cd /home/dory/code/sandbox/game_hub/app && npx tsc --noEmit
+(cd app && npx tsc --noEmit)
 
 # 后端单测（conftest 已忽略脚本式 test_ws_game.py）
-cd /home/dory/code/sandbox/game_hub/server && /home/dory/miniconda3/envs/quant/bin/python -m pytest test/ -q
+(cd server && .venv/bin/python -m pytest test/ -q)
 
 # 发布 APK（版本号双写 + 构建 + 部署 + 验证一条龙）
 bash bin/release-apk.sh <版本号>
@@ -730,7 +739,7 @@ curl -s http://127.0.0.1:50541/api/app/version
 | `test/e2e_hot_restart.py` | 热重启 6 步（**真重启后端进程**→客户端自动重连→继续走子）。重启走 `scripts/restart.sh backend`（不再手写 `ps aux \| grep \| xargs kill`）。注意：重启后重连完成前发出的走子会被丢弃（对局内动作不排队），故脚本用重试式点击 |
 | `test/e2e_stasis_smoke.py` | 深空休眠 **33 步**（**房主选地图**：切成 suite 后房间页跟着换名字与说明、非房主看不到芯片、再切回 dorm（v9）→跑动抢舱室 30 秒倒计时→**摇杆真的驱动角色**→**舱室跟着人走**（走出去让出、走回来重新占下 —— v11，旧代码上这一步必红）→**拖动屏幕平移相机**（空地起步 + **从气门上起手**两条，后者锁住「TouchableOpacity 抢走 responder」那个坑）→**倒计时结束前就走进去躺下、躺着已在产资源**（v4 规则 1，真走位：比例控制器推摇杆）→自动分配舱室→**没躺下时点空格打不开建造面板**（v4 的躺下闸门）→**整层楼平面图渲染**（12 扇门/12 张床/自己舱室的空格数落在房型区间）→**站着不产资源 → 点「躺下」开始产 → 躺着推摇杆纹丝不动 → 并且没有「起身」这条路**（v4 规则 2）→**点休眠舱开升级弹窗且门槛「需铁门 2」写在弹窗里**→**静默体已离开气闸且状态行由服务端下发**→击杀倒计时在走→**建造菜单有四个独立的矿条目**（铜/银/金/钻石，没有旧的「培养槽」）→**建造菜单也有控场四件**（应急力场/束缚弹射器/低温阱/粒子加速器 —— v13，锁的是「服务端 kind 名与客户端菜单对不上」这类静默失败，效果本身在 `TestControls` 的 6 条单测里）→建哨戒炮→**点炮台画出攻击范围圈**（关掉面板圈就消失）→升气密门（铁门 2）→全站浮层 12 间→弃守只结束本人→全员失压结算→返回房间不被弹回→战绩快照可渲染→**打完回大厅换成 suite 真的再开一局**，断言地图盒尺寸是 31×24 格（`buildMap` 抛异常时它是 **0×0**）、12 门 / 6 外闸 / 12 床；v12 之前这条轴没人测，于是「双人套间打开全是黑的」躲过了前 30 步）。**位移断言必须减掉地图盒**（相机跟着自己走，比屏幕坐标量到的是「相机有没有被夹住」）；**走位脚本的判据必须是「按钮出现了」，不能是坐标**（`walk_to` 收敛的是屏幕盒心，而按钮的显隐由服务端判据决定 —— 两者不是一回事，所以终点走 `walk_until_lie`）；相机拖动只认 `elementFromPoint` 落在 `stasis-map` 上的起点，且失败重拖一次（**拖动是幂等的**，但个位数 px 不是「拖得少」而是「手势没授给地图」）；**采样窗口有时序陷阱**，见脚本注释 |
 
-E2E 前置：后端 50541 + web 50540 都在跑。Playwright chromium 固定路径：`/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome`。
+E2E 前置：后端 50541 + web 50540 都在跑。先用后端虚拟环境安装 `server/requirements-dev.txt`，再执行 `python -m playwright install chromium`；脚本使用 Playwright 管理的浏览器，项目路径从脚本位置推导。
 
 ## 项目级规范与已知坑
 
