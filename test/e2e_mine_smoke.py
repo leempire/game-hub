@@ -114,7 +114,11 @@ def wait_mine_board(page, timeout=20000, min_cells=81):
 
 
 def get_unrevealed_cells(page):
-    """Get unrevealed cells by checking background color via evaluate."""
+    """Get unrevealed cells by checking background color via evaluate.
+
+    同时带回 testID：点击一律走 testID（自动滚进视口），别再拿视口坐标点 ——
+    棋盘双向滑动后，靠右/靠下的格子在视口外，mouse.click 会静默落到别处。
+    """
     return page.evaluate("""() => {
         const btns = document.querySelectorAll('div[tabindex]');
         const cells = [];
@@ -124,7 +128,10 @@ def get_unrevealed_cells(page):
             const bg = getComputedStyle(btn).backgroundColor;
             // Unrevealed: #CBD5E1 = rgb(203,213,225)
             if (bg && bg.includes('203') && bg.includes('213')) {
-                cells.push({x: r.x + r.width/2, y: r.y + r.height/2, w: r.width});
+                cells.push({
+                    x: r.x + r.width/2, y: r.y + r.height/2, w: r.width,
+                    tid: btn.getAttribute('data-testid'),
+                });
             }
         }
         cells.sort((a, b) => Math.round(a.y - b.y) || (a.x - b.x));
@@ -160,13 +167,22 @@ def seat_eliminated(page, seat):
     return page.locator(f'[data-testid="mine-lives-{seat}"]').count() == 0
 
 
-def click_unrevealed(page, idx=0):
-    """Click an unrevealed cell by index. Returns True if cell was found."""
+def click_unrevealed(page, idx=0, force=False):
+    """按 testID 点一个未翻开的格子（会自动滚进视口）。Returns True if clicked.
+
+    `force=True` 用于**已淘汰**的页面：那里的格子 `aria-disabled="true"`（RNW 下
+    pointer-events:none，棋盘容器还会拦截指针事件），正常点击必然超时 ——
+    这里要验的本来就是「点了没反应」，所以绕过可点击性检查直接发 click。
+    """
     cells = get_unrevealed_cells(page)
     if not cells or idx >= len(cells):
         return False
     c = cells[idx]
-    click_cell_xy(page, c['x'], c['y'])
+    if c.get('tid'):
+        page.locator(f'[data-testid="{c["tid"]}"]').click(force=force)
+        page.wait_for_timeout(500)
+    else:
+        click_cell_xy(page, c['x'], c['y'])
     return True
 
 
@@ -330,10 +346,8 @@ def main():
         assert '放弃本局' not in elim_body, '淘汰方不应看到放弃本局按钮'
 
         # Try clicking a cell on eliminated player's page - should not send reveal
-        unrevealed_elim = get_unrevealed_cells(eliminated_page)
-        if unrevealed_elim:
-            click_cell_xy(eliminated_page, unrevealed_elim[0]['x'], unrevealed_elim[0]['y'])
-            eliminated_page.wait_for_timeout(500)
+        click_unrevealed(eliminated_page, force=True)
+        eliminated_page.wait_for_timeout(500)
         ok('被淘汰方无法再操作（按钮隐藏 + 点格无效）')
 
         # 10. Survivor continues clicking until game_over
@@ -342,10 +356,8 @@ def main():
         # - Survivor also hits a mine (all eliminated)
         game_over_shown = False
         for extra in range(40):
-            unrevealed = get_unrevealed_cells(survivor_page)
-            if not unrevealed:
+            if not click_unrevealed(survivor_page):
                 break
-            click_cell_xy(survivor_page, unrevealed[0]['x'], unrevealed[0]['y'])
             survivor_page.wait_for_timeout(500)
             eliminated_page.wait_for_timeout(300)
             # Check for game over modal

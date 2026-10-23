@@ -455,6 +455,15 @@ curl -s http://127.0.0.1:50541/api/app/version
   重启清空）。昵称 ≤16、房名 ≤20、房间密码 ≤32、新密码 6-32 都在**服务端**校验
   （客户端的 `maxLength` 只是体验）。客户端只把「带着 token 的请求」的 401 当成
   会话失效 —— 登录接口密码错也回 401。回归 `test_auth_security.py`。
+- **SQLite 连接按线程复用，禁止每次请求 open/close（v1.19.0 假死复盘，勿回退）**：
+  `database.get_conn()` 返回线程本地连接，`close()` 只回滚不真关。
+  旧写法每次开/关连接，事件循环线程（WS 鉴权、房间落盘）与 AnyIO 线程池
+  （HTTP 的 `_verify`）会同时 open/close，卡在 CPython sqlite3 的 GIL/全局锁上：
+  主线程停在 `sqlite3.connect`、线程池停在 `close()`，事件循环冻结，
+  浏览器全线 `Failed to fetch`、进程 CPU 近 0、内核 backlog 堆积。
+  `PRAGMA journal_mode=WAL` 是数据库级持久属性，只在 `init_db()` 设一次；
+  别放回 `get_conn()`（它要排它锁）。WS 鉴权的查库已挪到 `asyncio.to_thread`。
+  回归：`server/test/test_persistence.py::test_get_conn_close_reuses_thread_local_connection`。
 - **任何点击都必须有反馈**：不能靠 `disabled`（RNW 下等于 `pointer-events:none`，点了连
   提示都没有）、不能只置灰；服务端拒绝要回一句中文错误，别让玩家看到「点了没反应」。
 - **必须被看见的状态用 `position:absolute` 盖屏**：不要挂在固定高度内容的底部，
