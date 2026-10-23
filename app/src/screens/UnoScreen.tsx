@@ -185,7 +185,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
    * 服务端也要求带 `target`，不带会把整手拒掉（而且拒之前状态不能动，见引擎的
    * `_can_swap_with` 校验顺序）。
    */
-  const [pickTargetFor, setPickTargetFor] = useState<string | null>(null);
+  const [pickTargetFor, setPickTargetFor] = useState<{ card: string; jump: boolean } | null>(null);
   const [dcTimeout, setDcTimeout] = useState<number | null>(null);
   /** 按下中的手牌下标（按下即抬高一档，HIG 要求「按下时」就给反馈）。 */
   const [pressed, setPressed] = useState<number | null>(null);
@@ -307,6 +307,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
       gameOverShownRef.current = false;
       setShowGameOver(false);
       setPickColorFor(null);
+      setPickTargetFor(null);
       adopt(g);
     };
     /** 权威状态：手牌、可出牌、回合、罚牌全在这里。 */
@@ -449,11 +450,8 @@ export default function UnoScreen({ code, onLeave }: Props) {
     // 抢出：不轮到我时打出一张与牌堆顶完全相同的牌。服务端在动作落地那一刻还会
     // 再校验一次（抢出是竞态的，同一张牌可能好几个人都有），**抢输会回一句明确的
     // 错**，由 toast 显示 —— 不能静默。
-    if (!isMyTurn) {
-      if (jumpableSet.has(card)) socketRef.current?.unoPlay(card, undefined, true);
-      return;
-    }
-    if (!playableSet.has(card)) return;
+    const jump = !isMyTurn;
+    if (jump ? !jumpableSet.has(card) : !playableSet.has(card)) return;
     if (colorKinds.has(cardKind(card))) {
       // 黑牌要先选色（服务端也要求带 color，否则整手拒收）。**哪些牌算黑牌由服务端
       // 下发**（`color_kinds`）—— 自己抄一份的话，漏掉的那张就是「点了没反应」。
@@ -462,10 +460,10 @@ export default function UnoScreen({ code, onLeave }: Props) {
     }
     if (cardKind(card) === '7' && swapTargets.length > 0) {
       // 7 换手要选人，同样先问清楚再出牌
-      setPickTargetFor(card);
+      setPickTargetFor({ card, jump });
       return;
     }
-    socketRef.current?.unoPlay(card);
+    socketRef.current?.unoPlay(card, undefined, jump);
   };
 
   const onPickColor = (key: string) => {
@@ -482,9 +480,9 @@ export default function UnoScreen({ code, onLeave }: Props) {
   };
 
   const onPickTarget = (seat: number) => {
-    const card = pickTargetFor;
+    const play = pickTargetFor;
     setPickTargetFor(null);
-    if (card) socketRef.current?.unoPlay(card, undefined, false, seat);
+    if (play) socketRef.current?.unoPlay(play.card, undefined, play.jump, seat);
   };
 
   const doSurrender = () => {
