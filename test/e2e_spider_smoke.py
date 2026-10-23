@@ -1,11 +1,12 @@
-"""蜘蛛纸牌真实浏览器回归；独立临时后端/数据库，不修改开发环境存档。
+"""蜘蛛纸牌双浏览器合作回归；独立临时后端/数据库，前端须已启动。
 
-从仓库根运行 server/.venv/bin/python test/e2e_spider_smoke.py；前端须已启动。
-第二局使用测试进程内的确定性残局，真实走子通关，生产代码无测试入口。
+从根目录用安装了 requirements-dev.txt 的 Python 运行本文件。
+第二局由测试后端构造确定性残局，生产代码没有测试入口。
 """
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -27,16 +28,16 @@ def serve(port, db_path):
     from app.game import spider
     import uvicorn
     config.update(db_path=db_path, admin={}, jwt_secret="isolated-spider-browser-test-secret")
-    original = spider.create_game
-    count = 0
+    original, count = spider.create_game, 0
 
-    def create_game():
+    def create_game(*, num_players=1):
         nonlocal count
         count += 1
-        game = original(7)
+        game = original(5, num_players=num_players)
         if count == 2:
-            game.update(columns=[list(range(13, 1, -1)), [1]] + [[] for _ in range(8)],
-                        face_up=[0] * 10, stock=[], completed=7)
+            width = len(game["columns"])
+            game.update(columns=[list(range(13, 1, -1)), [1]] + [[] for _ in range(width - 2)],
+                        face_up=[0] * width, stock=[], completed=game["total_runs"] - 1)
         return game
 
     spider.create_game = create_game
@@ -77,150 +78,152 @@ def run():
 def browser_checks(api):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 390, "height": 844})
-        # 只替换测试浏览器的后端地址，网页与所有业务代码使用真实实现。
-        context.route("**/api/**", lambda route: route.continue_(url=api + urlsplit(route.request.url).path +
-                      ("?" + urlsplit(route.request.url).query if urlsplit(route.request.url).query else "")))
-        ws_base = api.replace("http://", "ws://")
-        context.add_init_script("""
-            const OriginalWebSocket = window.WebSocket;
-            window.WebSocket = class extends OriginalWebSocket {
-              constructor(url, protocols) {
-                const parsed = new URL(url);
-                super(parsed.pathname.startsWith('/ws/room/') ? %s + parsed.pathname + parsed.search : url, protocols);
-              }
-            };
-        """ % json.dumps(ws_base))
-        page = context.new_page()
-        page.set_default_timeout(15000)
-        errors = []
-        page.on("pageerror", lambda error: errors.append(str(error)))
-        page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
-        latest = {}
+        pages, latest, errors = [], [{}, {}], []
+        for seat in range(2):
+            context = browser.new_context(viewport={"width": 390, "height": 844})
+            context.route("**/api/**", lambda route: route.continue_(url=api + urlsplit(route.request.url).path +
+                          ("?" + urlsplit(route.request.url).query if urlsplit(route.request.url).query else "")))
+            context.add_init_script("""
+                const OriginalWebSocket = window.WebSocket;
+                window.WebSocket = class extends OriginalWebSocket {
+                  constructor(url, protocols) {
+                    const parsed = new URL(url);
+                    super(parsed.pathname.startsWith('/ws/room/') ? %s + parsed.pathname + parsed.search : url, protocols);
+                  }
+                };
+            """ % json.dumps(api.replace("http://", "ws://")))
+            page = context.new_page()
+            page.set_default_timeout(20000)
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
 
-        def received(payload):
-            data = json.loads(payload)
-            if data.get("type") in ("sync", "game_start", "spider_state") and data.get("game"):
-                latest.clear()
-                latest.update(data["game"])
+            def received(payload, index=seat):
+                data = json.loads(payload)
+                if data.get("type") in ("sync", "game_start", "spider_state") and data.get("game"):
+                    latest[index] = data["game"]
 
-        page.on("websocket", lambda ws: ws.on("framereceived", received))
-
-        def state(predicate):
-            for _ in range(200):
-                if latest and predicate(latest):
-                    return dict(latest)
-                page.wait_for_timeout(50)
-            raise AssertionError("蜘蛛纸牌状态没有按预期更新")
-
-        def button(testid):
-            return page.get_by_test_id("spider-" + testid)
-
-        def open_game():
-            page.get_by_test_id("game-card-spider").click()
-            # 单人游戏没有房间概念：入口弹窗里不能出现「加入房间」（v1.18.1 主页的
-            # 快捷入口叫「输入房间号」，所以这里断言 0 而不是数页面上有几处）。
-            assert page.get_by_text("加入房间", exact=True).count() == 0
-            page.get_by_text("开始 / 继续牌局", exact=True).click()
-            page.get_by_test_id("spider-board").wait_for()
-
-        page.goto(BASE, timeout=60000)
-        page.get_by_text("注册", exact=True).first.click()
-        page.get_by_placeholder("3-20位字母数字下划线").fill("spider_browser")
-        page.get_by_placeholder("6-32位").fill("test123456")
-        page.get_by_placeholder("再次输入密码").fill("test123456")
-        page.get_by_text("注 册", exact=True).click()
-        try:
+            page.on("websocket", lambda ws, handler=received: ws.on("framereceived", handler))
+            pages.append(page)
+            page.goto(BASE, timeout=90000)
+            page.get_by_text("注册", exact=True).first.click()
+            page.get_by_placeholder("3-20位字母数字下划线").fill(f"spider_browser_{seat}")
+            page.get_by_placeholder("6-32位").fill("test123456")
+            page.get_by_placeholder("再次输入密码").fill("test123456")
+            page.get_by_text("注 册", exact=True).click()
             page.get_by_test_id("game-card-spider").wait_for(timeout=30000)
-        except Exception:
-            page.screenshot(path=str(OUT / "spider-failure.png"))
-            print(page.locator("body").inner_text()[:1800], errors, flush=True)
-            raise
-        open_game()
-        initial = state(lambda g: g["revision"] == 0)
-        assert sum(v is None for c in initial["columns"] for v in c) == 44
-        assert len(page.locator('[data-testid^="spider-card-"]').all()) == 10
-        page.wait_for_timeout(400)  # 等待入口弹窗的淡出动画结束再截图。
-        page.screenshot(path=str(OUT / "spider-mobile.png"))
-        print("PASS 1: 单人入口、标准发牌与手机布局", flush=True)
+        host, peer = pages
 
-        move = initial["legal_moves"][0]
-        page.get_by_test_id(f"spider-card-{move['source']}-{move['index']}").click()
-        assert "可放" in page.get_by_test_id(f"spider-column-{move['target']}").inner_text()
-        page.get_by_test_id(f"spider-column-{move['target']}").click()
-        state(lambda g: g["move_count"] == 1)
-        button("undo").click()
-        reverted = state(lambda g: g["revision"] == 2)
-        assert reverted["columns"] == initial["columns"]
-        button("hint").click()
-        expect(button("message")).to_contain_text("可以把")
-        print("PASS 2: 点击牌组与目标列、撤销、提示", flush=True)
+        def state(index, predicate):
+            for _ in range(300):
+                if latest[index] and predicate(latest[index]):
+                    return latest[index]
+                pages[index].wait_for_timeout(50)
+            raise AssertionError(f"玩家 {index} 状态没有更新：{latest[index]}")
 
-        button("deal").click()
-        dealt = state(lambda g: g["stock_count"] == 40)
-        page.reload()
-        button("deal").wait_for()
-        state(lambda g: g["revision"] == dealt["revision"])
-        assert latest["columns"] == dealt["columns"]
-        button("undo").click()
-        state(lambda g: g["stock_count"] == 50)
-        assert latest["columns"] == initial["columns"]
-        print("PASS 3: 发牌、刷新续玩、刷新后仍可撤销", flush=True)
+        def both(predicate):
+            first, second = [state(i, predicate) for i in range(2)]
+            assert first == second
+            return first
 
-        page.get_by_test_id("help-btn-spider").click()
-        page.get_by_text("蜘蛛纸牌规则", exact=True).wait_for()
-        page.get_by_test_id("help-close-btn").click()
-        button("save").click()
-        page.get_by_text("继续游戏", exact=True).click()
-        button("save").click()
-        page.get_by_text("确认返回", exact=True).click()
-        page.get_by_test_id("game-card-spider").wait_for()
-        previous_revision = latest["revision"]
-        open_game()
-        state(lambda g: g["revision"] == previous_revision)
-        assert latest["columns"] == initial["columns"]
-        print("PASS 4: 帮助、取消返回、保存离开与再次进入", flush=True)
+        def move(index, action):
+            page = pages[index]
+            page.get_by_test_id(f"spider-card-{action['source']}-{action['index']}").click()
+            expect(page.get_by_test_id(f"spider-column-{action['target']}")).to_contain_text("可放")
+            page.get_by_test_id(f"spider-column-{action['target']}").click()
 
-        # 浏览器返回必须弹确认；确认后不被房间页拉回对局。
-        page.go_back(wait_until="commit")
-        page.get_by_text("保存并返回？", exact=True).wait_for()
-        page.get_by_text("继续游戏", exact=True).click()
-        button("new").click()
-        page.get_by_text("继续游戏", exact=True).click()
-        assert latest["revision"] == previous_revision
-        button("new").click()
-        page.get_by_text("确认新牌局", exact=True).click()
-        state(lambda g: g["completed"] == 7)
-        page.get_by_test_id("spider-card-1-0").click()
-        page.get_by_test_id("spider-column-0").click()
-        state(lambda g: g["finished"])
-        page.get_by_test_id("spider-win").wait_for()
-        page.get_by_test_id("spider-win").scroll_into_view_if_needed()
-        page.screenshot(path=str(OUT / "spider-win.png"))
-        print("PASS 5: 浏览器返回保护、新局确认、真实走子收齐八组", flush=True)
+        host.get_by_test_id("game-card-spider").click()
+        host.get_by_text("加入房间", exact=True).wait_for()
+        host.get_by_text("创建房间", exact=True).click()
+        host.get_by_text("房间号", exact=True).wait_for()
+        assert host.get_by_test_id("spider-board").count() == 0
+        code = re.search(r"房间号\s*([A-Z0-9]{6})", host.locator("body").inner_text()).group(1)
+        peer.get_by_test_id("game-card-spider").click()
+        peer.get_by_text("加入房间", exact=True).click()
+        peer.get_by_placeholder("输入6位房间号").fill(code)
+        peer.get_by_text("加入", exact=True).click()
+        peer.get_by_text("准 备", exact=True).click()
+        host.get_by_text("开始游戏", exact=True).click()
+        for page in pages:
+            page.get_by_test_id("spider-board").wait_for()
+        initial = both(lambda game: game["revision"] == 0)
+        assert len(initial["columns"]) == 15 and initial["total_runs"] == 12 and initial["stock_count"] == 75
+        host.screenshot(path=str(OUT / "spider-mobile.png"))
+        print("PASS 1: 统一创建/加入房间、准备、双端同时进入 15 列合作牌桌", flush=True)
 
-        for width, height, name in [(320, 568, "small"), (1280, 800, "desktop")]:
-            page.set_viewport_size({"width": width, "height": height})
-            page.wait_for_timeout(150)
-            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
-            box = button("save").bounding_box()
-            assert box and box["height"] >= 44 and box["y"] + box["height"] <= height
-            page.screenshot(path=str(OUT / f"spider-{name}.png"))
-        page.set_viewport_size({"width": 390, "height": 844})
-        button("save").click()
-        page.get_by_text("确认返回", exact=True).click()
-        page.get_by_text("我的", exact=True).last.click()
-        page.get_by_text("历史战绩", exact=True).click()
+        move(0, initial["legal_moves"][0])
+        after_host = both(lambda game: game["revision"] == 1)
+        move(1, after_host["legal_moves"][0])
+        both(lambda game: game["revision"] == 2)
+        peer.get_by_test_id("spider-undo").click()
+        peer.get_by_text("确认撤销", exact=True).click()
+        undone = both(lambda game: game["revision"] == 3)
+        assert undone["columns"] == after_host["columns"]
+        print("PASS 2: 两人均可移动任意牌组，撤销全队最近一步并同步", flush=True)
+
+        disjoint = next((a, b) for a in undone["legal_moves"] for b in undone["legal_moves"]
+                        if not {a["source"], a["target"]} & {b["source"], b["target"]})
+        a, b = disjoint
+        host.get_by_test_id(f"spider-card-{a['source']}-{a['index']}").click()
+        move(1, b)
+        both(lambda game: game["revision"] == 4)
+        expect(host.get_by_test_id(f"spider-column-{a['target']}")).to_contain_text("可放")
+        host.get_by_test_id(f"spider-column-{a['target']}").click()
+        both(lambda game: game["revision"] == 5)
+        peer.get_by_test_id("spider-deal").click()
+        dealt = both(lambda game: game["revision"] == 6)
+        assert dealt["stock_count"] == 60
+        host.reload()
+        state(0, lambda game: game["revision"] == 6)
+        host.get_by_test_id("spider-undo").click()
+        host.get_by_text("确认撤销", exact=True).click()
+        both(lambda game: game["revision"] == 7 and game["stock_count"] == 75)
+        print("PASS 3: 队友无关操作保留选牌、共享发牌、刷新续玩和撤销", flush=True)
+
+        host.get_by_test_id("help-btn-spider").click()
+        host.get_by_text("蜘蛛纸牌规则", exact=True).wait_for()
+        host.get_by_test_id("help-close-btn").click()
+        host.get_by_test_id("spider-back").click()
+        host.get_by_text("继续游戏", exact=True).click()
+        host.get_by_test_id("spider-back").click()
+        host.get_by_text("确认离开", exact=True).click()
         try:
-            page.locator('[data-testid^="history-record-"]').first.click()
+            host.get_by_text("房间号", exact=True).wait_for()
         except Exception:
-            page.screenshot(path=str(OUT / "spider-history-failure.png"))
-            print(page.locator("body").inner_text()[-2200:], errors, flush=True)
+            host.screenshot(path=str(OUT / "spider-leave-failure.png"))
+            print('leave failure', host.url, host.locator('body').inner_text()[-2500:], errors, flush=True)
             raise
-        page.get_by_text("已收齐 8 / 8 组 · 1 步", exact=False).wait_for()
+        host.wait_for_timeout(500)
+        assert host.get_by_test_id("spider-board").count() == 0
+        state(1, lambda game: len(game["departed"]) == 1)
+        move(1, latest[1]["legal_moves"][0])
+        peer.get_by_test_id("spider-end").click()
+        peer.get_by_text("确认结束", exact=True).click()
+        state(1, lambda game: game["finished"])
+        peer.get_by_test_id("spider-back").click()
+        peer.get_by_text("房间号", exact=True).wait_for()
+        print("PASS 4: 退出只结束本人，房主转移、队友继续，结束后返回房间", flush=True)
+
+        host.get_by_text("准 备", exact=True).click()
+        peer.get_by_text("开始游戏", exact=True).click()
+        both(lambda game: game["completed"] == 11 and not game["finished"])
+        move(1, {"source": 1, "index": 0, "target": 0})
+        both(lambda game: game["completed"] == 12 and game["finished"])
+        for page in pages:
+            page.get_by_test_id("spider-win").wait_for()
+        for width, height, name in [(320, 568, "small"), (1280, 800, "desktop")]:
+            peer.set_viewport_size({"width": width, "height": height})
+            assert peer.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+            box = peer.get_by_test_id("spider-back").bounding_box()
+            assert box and box["height"] >= 44 and box["y"] + box["height"] <= height
+            peer.screenshot(path=str(OUT / f"spider-{name}.png"))
+        peer.get_by_test_id("spider-back").click()
+        peer.get_by_text("退出房间", exact=True).click()
+        peer.get_by_text("我的", exact=True).last.click()
+        peer.get_by_text("历史战绩", exact=True).click()
+        peer.locator('[data-testid^="history-record-"]').first.click()
+        peer.get_by_text("已收齐 12 / 12 组 · 1 步", exact=False).wait_for()
         assert not errors, errors
-        page.screenshot(path=str(OUT / "spider-history.png"))
-        print("PASS 6: 小屏/桌面无页面横溢，战绩与牌面快照，无浏览器异常", flush=True)
+        print("PASS 5: 回房重新准备、全队通关、动态目标战绩、小屏与桌面布局", flush=True)
         browser.close()
 
 

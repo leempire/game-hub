@@ -4,6 +4,8 @@ export interface SpiderState {
   columns: (number | null)[][];
   stock_count: number;
   completed: number;
+  total_runs: number;
+  departed: number[];
   move_count: number;
   revision: number;
   can_undo: boolean;

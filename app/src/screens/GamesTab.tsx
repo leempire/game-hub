@@ -20,10 +20,9 @@ import { GAMES, GAME_CATEGORIES, type GameEntry, type GameKey } from '../games';
 interface Props {
   onNavigateToRooms: () => void;
   onNavigateToRoom: (code: string) => void;
-  onNavigateToSpider: (code: string) => void;
 }
 
-export default function GamesTab({ onNavigateToRooms, onNavigateToRoom, onNavigateToSpider }: Props) {
+export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props) {
   const { token } = useAuth();
   const isFocused = useIsFocused();
   // 当前打开的是哪个游戏的「创建 / 加入」弹窗（null = 关着）。
@@ -118,8 +117,7 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom, onNaviga
       const room = await createRoom(token, picked.key);
       if (createCancelledRef.current) return;
       setPicked(null);
-      if (picked.key === 'spider') onNavigateToSpider(room.code);
-      else onNavigateToRoom(room.code);
+      onNavigateToRoom(room.code);
     } catch (err) {
       if (!createCancelledRef.current) setModalError((err as Error).message);
     } finally {
@@ -275,12 +273,9 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom, onNaviga
                 disabled={creating}
               >
                 <Text style={styles.modalBtnPrimaryText}>
-                  {creating
-                    ? '打开中...'
-                    : picked?.key === 'spider' ? '开始 / 继续牌局' : '创建房间'}
+                  {creating ? '创建中...' : '创建房间'}
                 </Text>
               </TouchableOpacity>
-              {picked?.key !== 'spider' && (
                 <TouchableOpacity
                   style={styles.modalBtn}
                   onPress={() => {
@@ -291,7 +286,6 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom, onNaviga
                 >
                   <Text style={styles.modalBtnText}>加入房间</Text>
                 </TouchableOpacity>
-              )}
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnSecondary]}
                 onPress={closePicked}

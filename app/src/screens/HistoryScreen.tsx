@@ -276,7 +276,7 @@ function BoardSnapshot({ rec }: { rec: GameRecord }) {
   }
   if (view.game === 'spider') {
     return <View style={{ gap: 12 }}><Text style={{ color: colors.textSecondary }}>
-      已收齐 {view.completed} / 8 组 · {view.move_count} 步
+      已收齐 {view.completed} / {view.total_runs ?? 8} 组 · {view.move_count} 步
     </Text><SpiderBoard game={view} /></View>;
   }
   if (view.game === 'tetris') {

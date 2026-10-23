@@ -1,6 +1,6 @@
 """Room REST routes: create, list, get, join, leave."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app.database import get_conn, row_to_user
 from app.security import get_current_user_id
@@ -57,8 +57,6 @@ def get_room(code: str, user_id: int = Depends(get_current_user_id)):
     room = rm.get_room(code)
     if not room:
         raise HTTPException(404, "房间不存在")
-    if room["game"] == "spider" and room["host_id"] != user_id:
-        raise HTTPException(403, "这是其他玩家的单人牌局")
     # in_game：请求者还算不算这局的在局玩家。房间页拿它做**自愈**——万一漏收了
     # game_start 广播（僵尸连接），主动查一次就能自己进对局页，不会永远卡在房间页。
     return {**rm.room_to_dict(room), "in_game": rm.user_in_game(room, user_id)}
@@ -86,11 +84,19 @@ def join_room(
 
 
 @router.post("/{code}/leave")
-def leave_room(code: str, user_id: int = Depends(get_current_user_id)):
+async def leave_room(code: str, background_tasks: BackgroundTasks, user_id: int = Depends(get_current_user_id)):
     room = rm.get_room(code)
     if not room:
         return {"ok": True}
-    if room["game"] == "spider" and room["host_id"] != user_id:
-        raise HTTPException(403, "这是其他玩家的单人牌局")
-    action, _ = rm.leave_room(code, user_id)
+    if room["game"] == "spider" and not any(p["id"] == user_id for p in room["players"]):
+        raise HTTPException(403, "你不在房间中")
+    action, updated = rm.leave_room(code, user_id)
+    if updated and updated["game"] == "spider":
+        from app.ws import _broadcast
+        if updated.get("game_state"):
+            background_tasks.add_task(_broadcast, code, {"type": "spider_state",
+                "game": rm.spider.game_to_sync(updated["game_state"])})
+        background_tasks.add_task(_broadcast, code, {"type": "lobby", "room": rm.room_to_dict(updated)})
+        if action == "game_over":
+            background_tasks.add_task(_broadcast, code, {"type": "game_over", "winner": "end", "reason": "abandoned"})
     return {"ok": True}
