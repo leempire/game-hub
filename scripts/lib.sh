@@ -20,7 +20,16 @@ APP_DIR="$REPO_ROOT/app"
 RUN_DIR="$REPO_ROOT/tmp/run"   # pid 文件（tmp/ 已 gitignore）
 LOG_DIR="$REPO_ROOT/tmp/log"   # 服务日志
 
-UVICORN_BIN="${UVICORN_BIN:-$SERVER_DIR/.venv/bin/uvicorn}"
+# uvicorn 的来源：显式 UVICORN_BIN > 项目内 server/.venv > PATH 上的 uvicorn。
+# 有的开发机用 conda 环境（本机是 quant）或系统 Python，没有 server/.venv，
+# 这时回落到 PATH，避免「restart 先停掉后端、再报找不到 uvicorn」（见 CLAUDE.md「环境」）。
+if [[ -z "${UVICORN_BIN:-}" ]]; then
+    if [[ -x "$SERVER_DIR/.venv/bin/uvicorn" ]]; then
+        UVICORN_BIN="$SERVER_DIR/.venv/bin/uvicorn"
+    else
+        UVICORN_BIN="$(command -v uvicorn || true)"
+    fi
+fi
 
 WEB_PORT="${WEB_PORT:-50540}"
 BACKEND_PORT="${BACKEND_PORT:-$(grep -oP '"port"\s*:\s*\K[0-9]+' \

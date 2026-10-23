@@ -358,6 +358,8 @@ team_tools 50031/50035/50040…），手写 `ps aux | grep uvicorn | xargs kill`
 - 公共逻辑全在 `scripts/lib.sh`（被 source，不单独执行）；`restart.sh` 只做编排。
 - 可覆盖的环境变量：`WEB_PORT` / `BACKEND_PORT` / `UVICORN_BIN` / `STOP_GRACE` /
   `BACKEND_TIMEOUT` / `WEB_TIMEOUT`。
+- **`UVICORN_BIN` 不用手设**：优先级是 显式 `UVICORN_BIN` > `server/.venv/bin/uvicorn`
+  > `PATH` 上的 `uvicorn`。没有 `.venv` 的机器（见下文「Python 环境」）会走 PATH。
 - 日志 `tmp/log/{backend,web}.log`（超 8MB 自动轮转 `.1`），pid 在 `tmp/run/*.pid`。
 - `start.sh` 会等 HTTP 探活通过才返回（backend 40s / web 120s 上限），失败时自动
   tail 日志再退出。
@@ -380,12 +382,23 @@ tail -f tmp/log/backend.log          # 服务日志；pid 在 tmp/run/*.pid
 
 # 后端单测（conftest 已忽略脚本式 test_ws_game.py）
 (cd server && .venv/bin/python -m pytest test/ -q)
+# 没有 server/.venv 的机器改用当前 Python 环境（本机是 conda quant）：
+# (cd server && python3 -m pytest test/ -q)
 
 # 发布 APK（版本号双写 + 构建 + 部署 + 验证一条龙）
 bash bin/release-apk.sh <版本号>
 scripts/restart.sh backend           # 发布后必须重启后端（版本号在 import 时读进内存）
 curl -s http://127.0.0.1:50541/api/app/version
 ```
+
+**Python 环境差异**：文档与 README 默认「项目内 `server/.venv`」。**有的开发机没有
+`server/.venv`，直接用 conda 环境**（本机是 `quant`）——这时：
+- `scripts/{start,restart}.sh` 会自动回落到 `PATH` 上的 `uvicorn`，**不需要手设
+  `UVICORN_BIN`**（别再用 `UVICORN_BIN=... scripts/start.sh` 这种一次性写法）；
+- 单测/脚本改用 `python3` / `python3 -m pytest`，**不要手写 `.venv/bin/...`**
+  （路径不存在，会直接报 `No such file or directory`）；
+- 之前踩过：`restart.sh backend` 先停掉旧进程、再报找不到 `.venv/bin/uvicorn`，
+  结果后端停着（现已由 lib.sh 的 PATH 回落修掉）。
 
 ## 测试
 

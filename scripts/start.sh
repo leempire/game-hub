@@ -61,7 +61,7 @@ start_backend() {
         return 0
     fi
     assert_port_free backend
-    [[ -x "$UVICORN_BIN" ]] || die "找不到 uvicorn：$UVICORN_BIN（可用 UVICORN_BIN=... 覆盖）"
+    [[ -x "$UVICORN_BIN" ]] || die "找不到 uvicorn：${UVICORN_BIN:-（server/.venv 与 PATH 都没有）}（可用 UVICORN_BIN=... 覆盖）"
 
     info "启动 backend：uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT"
     launch backend "$SERVER_DIR" "$LOG_DIR/backend.log" \
