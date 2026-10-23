@@ -76,7 +76,8 @@ def _register_dc_timeout_callback():
 @router.websocket("/ws/room/{code}")
 async def ws_room(websocket: WebSocket, code: str):
     token = websocket.query_params.get("token", "")
-    user_id = decode_token_ws(token)
+    # 鉴权要查库：放线程池，别在事件循环上做同步 SQLite 读（v1.19.0 假死复盘）
+    user_id = await asyncio.to_thread(decode_token_ws, token)
     if not user_id:
         await websocket.close(code=4001, reason="未授权")
         return

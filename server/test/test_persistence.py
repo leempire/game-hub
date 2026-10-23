@@ -29,6 +29,21 @@ U1 = {"id": 1, "username": "u1", "nickname": "U1"}
 U2 = {"id": 2, "username": "u2", "nickname": "U2"}
 
 
+def test_get_conn_close_reuses_thread_local_connection(tmp_db):
+    """`get_conn().close()` 是归还不是真关闭：同线程下次拿到同一条连接。
+
+    锁住 v1.19.0 的假死修复 —— 每次请求 open/close 时，事件循环线程与
+    AnyIO 线程池线程会卡在 sqlite3 的全局锁上，事件循环整个冻结。
+    """
+    first = database.get_conn()
+    assert first.execute("SELECT 1").fetchone()[0] == 1
+    first.close()
+    second = database.get_conn()
+    assert second.execute("SELECT 1").fetchone()[0] == 1
+    assert second._conn is first._conn
+    second.close()
+
+
 def test_roundtrip_int_keys():
     """int 键（玩家 id/座位号）必须原样恢复，不能被 JSON 转成 str。"""
     data = {"boards": {5: [[0, 2], [4, 0]], -3: [[0]]}, "scores": {5: 100, -3: 7}}

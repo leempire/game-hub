@@ -78,8 +78,11 @@ def main():
         pa.get_by_text('开始游戏', exact=True).wait_for(timeout=10000)
         pa.get_by_text('开始游戏', exact=True).click()
         pa.get_by_text('掷骰子', exact=True).wait_for(timeout=20000)
+        # 先确认 B 真的进了对局页：房间列表里也有隐藏的「等待中」，直接 .first
+        # 会命中背后不可见的旧节点，误判成「没等到」。
+        pb.locator('[data-testid="ludo-roll"]').wait_for(timeout=20000)
         # B 可能先显示「玩家已重连」等瞬时消息（2-3s 自动消失），轮询等待回合提示
-        pb.get_by_text('等待', exact=False).first.wait_for(timeout=10000)
+        pb.get_by_text('等待', exact=False).filter(visible=True).first.wait_for(timeout=10000)
         ok('双方进入飞行棋对局页，A(房主)先手掷骰')
 
         # 标准棋盘：赛道 52 格按红→黄→蓝→绿四色循环（每色 13 格），
