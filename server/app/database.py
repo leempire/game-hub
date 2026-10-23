@@ -3,10 +3,15 @@
 import json
 import sqlite3
 import os
+import threading
 from datetime import datetime, timezone, timedelta
 
 
 _db_path: str = "data/gamehub.db"
+
+# 线程本地连接（见 get_conn 注释）。每个线程复用自己的一条连接，
+# 热路径上不再频繁 open/close —— 这是后端假死的根因。
+_local = threading.local()
 
 
 def init_db(db_path: str):
@@ -16,19 +21,76 @@ def init_db(db_path: str):
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     conn = get_conn()
     try:
+        # WAL 是数据库级持久属性：建库时设一次即可，之后每条连接自动沿用。
+        # 不要在 get_conn() 里每条连接都执行 —— 它会拿排它锁，是旧死锁的一环。
+        conn.execute("PRAGMA journal_mode=WAL")
         _create_tables(conn)
         conn.commit()
     finally:
         conn.close()
 
 
+class _ThreadLocalConn:
+    """get_conn() 返回的连接代理：`close()` 只回滚未提交事务，不真正关闭。
+
+    踩过的坑（v1.19.0 发布前）：每次请求都 `sqlite3.connect()` / `close()`，
+    而连接可能分别在事件循环线程（WS 鉴权、房间落盘）和 AnyIO 线程池线程
+    （HTTP 的 `_verify`）里创建/关闭。两个线程同时 open/close 时，
+    CPython sqlite3 + SQLite 会卡在 GIL/全局锁上互等：主线程停在
+    `sqlite3.connect`、线程池线程停在 `conn.close()`，事件循环从此冻结——
+    HTTP 全部超时，浏览器只看到 `Failed to fetch`，进程 CPU 却接近 0。
+    改成线程本地复用连接后，没有跨线程的 open/close，问题消失，
+    顺带省掉每次连接都要执行一遍的 `PRAGMA journal_mode=WAL`。
+    """
+
+    __slots__ = ("_conn", "_closed")
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self._closed = False
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self._conn.in_transaction:
+                self._conn.rollback()
+        except Exception:
+            # 连接已坏：丢掉线程本地缓存，下次重建
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            _local.conn = None
+
+
 def get_conn() -> sqlite3.Connection:
-    """Get a new SQLite connection with row_factory set."""
-    conn = sqlite3.connect(_db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    """Get this thread's reused SQLite connection (row_factory set).
+
+    返回的是代理：`close()` 只回滚并归还，不真正关闭连接。
+    `journal_mode=WAL` 是**数据库级持久属性**，只在 init_db() 建库时设置一次；
+    `foreign_keys` 是连接级设置，每条新连接仍需打开。
+    """
+    conn = getattr(_local, "conn", None)
+    if conn is None or getattr(_local, "path", None) != _db_path:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        conn = sqlite3.connect(_db_path, timeout=15)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        _local.conn = conn
+        _local.path = _db_path
+    elif conn.in_transaction:
+        # 上一次调用异常退出可能留下未提交事务，复用前先回滚
+        conn.rollback()
+    return _ThreadLocalConn(conn)
 
 
 def _create_tables(conn: sqlite3.Connection):
