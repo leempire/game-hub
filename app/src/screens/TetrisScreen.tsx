@@ -21,7 +21,7 @@ import { GameHelpButton } from '../help';
 import {
   TetrisPiece, TetrisRules, TetrisLeaderRow, gravityMs, GARBAGE_LABEL,
   ID_TO_PIECE, GARBAGE_ID, cellsOf, stepDown, movePiece, rotatePiece,
-  dropDistance, stamp,
+  dropDistance, stamp, replayPending,
 } from '../tetris';
 
 /** 服务端逐人下发的对局状态（`game_start` / `sync` / `tetris_state` 同构）。 */
@@ -356,14 +356,21 @@ export default function TetrisScreen({ code, onLeave }: Props) {
         rulesRef.current = r;
         setRules(r);
       }
-      // 被攻击时**丢掉本地还没上报的动作**：服务端刚把盘面整体上移，本地那份已经
-      // 不是同一个基准了，留着就是把旧基准上的位移重放到新盘面上。丢掉的只是
-      // 一帧内的一两次移动，而对不上盘才是真麻烦（回包本身就是权威盘面）。
-      pendingRef.current = [];
-      setAwaitRef(false);
+      // 攻击通知不是本人动作的回执，不能解冻仍在等待落定/暂存结果的方块。
+      if (!(attacked && awaitingRef.current && !g.finished)) {
+        if (attacked && !g.finished && g.current && rulesRef.current) {
+          const replay = replayPending(g.board, rulesRef.current, g.current, pendingRef.current);
+          pendingRef.current = replay.actions;
+          setLocal(g.board, replay.current);
+          if (replay.locked) flush();
+        } else {
+          pendingRef.current = [];
+          setAwaitRef(false);
+          setLocal(g.board || [], g.current || null);
+        }
+      }
       setFinishedRef(!!g.finished);
       holdUsedRef.current = !!g.hold_used;
-      setLocal(g.board || [], g.current || null);
       if (attacked) {
         flash(`被 ${nameOfRef.current(g.garbage_from ?? -1)} 顶了 ${g.garbage_count || 0} 行`);
       } else if ((g.garbage_killed?.length ?? 0) > 0) {
@@ -408,7 +415,7 @@ export default function TetrisScreen({ code, onLeave }: Props) {
     ws.connect();
 
     return () => { ws.close(); };
-  }, [token, code, user?.id, onLeave, setLocal, flash]);
+  }, [token, code, user?.id, onLeave, setLocal, flash, flush]);
 
   // 原生系统/顶栏返回
   useEffect(() => navigation.addListener('beforeRemove', (e: any) => {
