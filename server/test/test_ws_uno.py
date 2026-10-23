@@ -842,6 +842,30 @@ class TestJumpInWire:
 
 
 class TestSevenZeroWire:
+    def test_jump_seven_swaps_hands_and_keeps_them_private(self, client):
+        wss, code, tokens, uids, starts = _setup_game(
+            client, players=3, settings={"jump_in": True, "seven_zero": "swap"})
+        try:
+            room = rm.get_room(code)
+            gs = _force(room, turn=0, discard="R7")
+            gs["hands"] = {0: ["B9", "G4"], 1: ["R7", "G3"], 2: ["Y8", "Y9"]}
+            view = uno.game_to_sync(gs, uids[1])
+            assert view["swap_targets"] == [0, 2]
+            wss[1].send_json({"type": "uno_play", "card": "R7", "jump": True,
+                              "target": view["swap_targets"][0]})
+            event = _recv_type(wss[1], "uno_event")
+            assert event["jump"] is True and event["effect"] == "swap"
+            assert event["target"] == 0
+            for seat, ws in enumerate(wss):
+                state = _recv_type(ws, "uno_state")
+                assert state["hand"] == gs["hands"][seat]
+                assert "hands" not in state
+            assert gs["hands"][0] == ["G3"]
+            assert gs["hands"][1] == ["B9", "G4"]
+            assert gs["hands"][2] == ["Y8", "Y9"]
+        finally:
+            _close(wss)
+
     def test_swap_moves_hands_and_keeps_them_private(self, client):
         wss, code, tokens, uids, starts = _setup_game(
             client, players=2, settings={"seven_zero": "swap"})

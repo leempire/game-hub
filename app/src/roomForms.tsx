@@ -43,11 +43,9 @@ export function CreateRoomModal({
           <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Text style={styles.modalTitle}>创建房间</Text>
             <Text style={styles.modalLabel}>游戏类型</Text>
-            {/* 游戏从目录表里生成（`games.tsx`）—— 以前这里是 13 段逐字相同的
-                JSX（图标名 + 短名各手抄一遍），加一个游戏要改三处。
-                单人游戏（蜘蛛纸牌）没有房间概念，不进建房芯片，走主页卡片直接开局。 */}
+            {/* 全部游戏共用目录表与建房流程。 */}
             <View style={styles.gameTypeRow}>
-              {GAMES.filter((g) => g.key !== 'spider').map((g) => {
+              {GAMES.map((g) => {
                 const active = game === g.key;
                 return (
                   <TouchableOpacity

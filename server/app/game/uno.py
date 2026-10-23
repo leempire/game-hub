@@ -1100,15 +1100,16 @@ def _action_flags(game: dict, seat: int | None) -> dict:
 def _swap_targets(game: dict, seat: int | None) -> list[int]:
     """该座位此刻若打出 7，可以换给哪些座位。
 
-    只在「轮到我 + 7 换手开着 + 我手里有能出的 7」时非空。**空表就是「现在不用
-    选人」** —— 客户端据此决定出 7 时弹不弹选人框，不必自己复刻这三条判据
-    （同象棋的 `legal`、UNO 自己的 `playable`）。
+    只在「7 换手开着 + 手里有能正常打出或抢出的 7」时非空。**空表就是「现在不用
+    选人」** —— 抢出也要选人，否则客户端只能发出缺少 target 的非法动作。
+    客户端直接照表弹框，不自己复刻判据（同 `playable` / `jumpable`）。
     """
     if seat is None or game["finished"] or seat in game["out"]:
         return []
     if game["rules"]["seven_zero"] not in ("swap", "both"):
         return []
-    if not any(card_kind(c) == "7" for c in playable_cards(game, seat)):
+    cards = playable_cards(game, seat) + jumpable_cards(game, seat)
+    if not any(card_kind(c) == "7" for c in cards):
         return []
     return [s for s in active_seats(game) if s != seat]
 

@@ -216,7 +216,6 @@ function GamesTabWrapper() {
     <GamesTab
       onNavigateToRooms={() => nav.navigate('Rooms')}
       onNavigateToRoom={(code: string) => nav.navigate('Room', { code })}
-      onNavigateToSpider={(code: string) => nav.navigate('Spider', { code })}
     />
   );
 }
@@ -392,7 +391,7 @@ function DotsScreenWrapper({ route, navigation }: { route: any; navigation: any 
 
 function SpiderScreenWrapper({ route, navigation }: { route: any; navigation: any }) {
   return <SpiderScreen code={route.params.code}
-    onLeave={() => navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] })} />;
+    onLeave={() => navigation.popTo('Room', { code: route.params.code })} />;
 }
 
 // Game2048 screen wrapper
@@ -440,7 +439,7 @@ export default function AppNavigation() {
   }
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, orientation: 'portrait' }}>
       {!token ? (
         <Stack.Screen name="Auth" component={AuthScreen} />
       ) : (

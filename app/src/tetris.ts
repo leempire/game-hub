@@ -142,6 +142,31 @@ export function stepDown(
     : null;
 }
 
+/** 攻击行改变盘面后，按原顺序重放尚未上报的输入；首次落定即截断，防止误动下一块。 */
+export function replayPending(
+  board: number[][],
+  rules: TetrisRules,
+  current: TetrisPiece,
+  pending: string[],
+): { current: TetrisPiece; actions: string[]; locked: boolean } {
+  let cur = current;
+  for (let i = 0; i < pending.length; i += 1) {
+    const action = pending[i];
+    if (action === 'left' || action === 'right') {
+      cur = movePiece(board, rules, cur, action === 'left' ? -1 : 1);
+    } else if (action === 'rotate_cw' || action === 'rotate_ccw') {
+      cur = rotatePiece(board, rules, cur, action === 'rotate_cw' ? 1 : -1);
+    } else if (action === 'down') {
+      const next = stepDown(board, rules, cur);
+      if (!next) {
+        return { current: cur, actions: pending.slice(0, i + 1), locked: true };
+      }
+      cur = next;
+    }
+  }
+  return { current: cur, actions: pending, locked: false };
+}
+
 /** 把当前方块写进盘面（本地预演用；权威结果仍以服务端回包为准）。 */
 export function stamp(
   board: number[][],

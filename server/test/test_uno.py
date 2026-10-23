@@ -901,6 +901,17 @@ class TestSevenZero:
                     rules={"seven_zero": "swap"})
         assert u.game_to_sync(gs, 101)["swap_targets"] == [1, 2]
 
+    @pytest.mark.parametrize("mode", ["swap", "both"])
+    def test_jump_seven_also_publishes_swap_targets(self, mode):
+        gs = _setup({0: ["B9", "G4"], 1: ["R7", "G3"], 2: ["Y8", "Y9"]},
+                    discard="R7", rules={"jump_in": True, "seven_zero": mode})
+        view = u.game_to_sync(gs, 102)
+        assert view["playable"] == []
+        assert view["jumpable"] == ["R7"]
+        assert view["swap_targets"] == [0, 2]
+        result = u.play(gs, 1, "R7", jump=True, target=view["swap_targets"][0])
+        assert result["ok"] and result["effect"] == "swap"
+
     def test_swap_targets_are_empty_without_a_playable_seven(self):
         gs = _setup({0: ["R7", "G3"], 1: ["B9"]}, discard="R5",
                     rules={"seven_zero": "swap"})

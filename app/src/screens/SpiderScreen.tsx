@@ -1,65 +1,108 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Platform, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../auth';
 import { RoomSocket } from '../socket';
-import { Room } from '../api';
-import { onConfirmLeave, useModalBackGuard } from '../backGuard';
+import { Room, leaveRoom } from '../api';
+import { onConfirmLeave, useWebKeys, useModalBackGuard } from '../backGuard';
 import { GameHelpButton } from '../help';
 import { colors, spacing, radius, spiderTable } from '../theme';
 import SpiderBoard, { Spade } from '../SpiderBoard';
 import { SpiderState } from '../spider';
+import { requestSpiderFullscreen } from '../spiderFullscreen';
 
 export default function SpiderScreen({ code, onLeave }: { code: string; onLeave: () => void }) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const navigation = useNavigation();
+  const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [fullscreen, setFullscreen] = useState(false);
+  const stopFullscreen = useRef<(() => void) | null>(null);
+  const exitFullscreen = useCallback(() => {
+    stopFullscreen.current?.(); stopFullscreen.current = null; setFullscreen(false);
+  }, []);
   const socket = useRef<RoomSocket | null>(null);
   const [game, setGame] = useState<SpiderState | null>(null);
+  const [room, setRoom] = useState<Room | null>(null);
+  const gameRef = useRef<SpiderState | null>(null);
+  const pendingRevision = useRef<number | null>(null);
   const [connected, setConnected] = useState(false);
   const [pending, setPending] = useState(false);
   const [selected, setSelected] = useState<{ source: number; index: number } | null>(null);
-  const [message, setMessage] = useState('点选明牌，再点目标列；左右滑动查看十列');
-  const [confirm, setConfirm] = useState<'leave' | 'new' | null>(null);
+  const [message, setMessage] = useState('全员共享牌桌，点选明牌后再点目标列');
+  const [confirm, setConfirm] = useState<'leave' | 'end' | 'undo' | null>(null);
   const leaving = useRef(false);
+  useModalBackGuard(fullscreen, exitFullscreen);
   useModalBackGuard(confirm !== null, () => setConfirm(null));
+  useWebKeys(key => {
+    if (key !== 'Escape') return false;
+    exitFullscreen(); return true;
+  }, fullscreen && confirm === null);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: !fullscreen, orientation: fullscreen ? 'landscape' : 'portrait',
+      navigationBarHidden: fullscreen, autoHideHomeIndicator: fullscreen });
+  }, [navigation, fullscreen]);
+  useEffect(() => () => stopFullscreen.current?.(), []);
 
   useEffect(() => {
     if (!token) return;
     const ws = new RoomSocket(code, token);
     socket.current = ws;
-    const receive = (next: SpiderState) => {
-      setGame(next); setPending(false); setSelected(null);
-      if (next.finished) setMessage('八组牌已全部收齐，恭喜通关！');
+    const receive = (next: SpiderState, actor?: number, acknowledge = false) => {
+      const previous = gameRef.current;
+      if (acknowledge || (actor === user?.id && pendingRevision.current !== null &&
+          next.revision === pendingRevision.current + 1)) {
+        pendingRevision.current = null; setPending(false);
+      }
+      if (previous && next.revision < previous.revision) return;
+      gameRef.current = next;
+      setGame(next);
+      setSelected(selection => selection && previous &&
+        JSON.stringify(previous.columns[selection.source]) === JSON.stringify(next.columns[selection.source]) &&
+        next.legal_moves.some(move => move.source === selection.source && move.index === selection.index)
+        ? selection : null);
+      if (next.finished) setMessage(next.reason === 'completed' ? '所有顺牌已收齐，合作通关！' : '本局已结束，请返回房间');
+      else if (actor !== undefined && actor !== user?.id) setMessage('队友已更新牌桌，可以继续操作');
     };
     ws.on('sync', msg => {
-      if (msg.game) receive(msg.game as unknown as SpiderState);
-      else if ((msg.room as unknown as Room)?.game === 'spider') ws.start();
+      setRoom(msg.room as unknown as Room);
+      if (msg.game) receive(msg.game as unknown as SpiderState, undefined, true);
+      else setMessage('请返回房间，由房主开始游戏');
     });
-    ws.on('game_start', msg => receive(msg.game as unknown as SpiderState));
-    ws.on('spider_state', msg => receive(msg.game as unknown as SpiderState));
-    ws.on('error', msg => { setMessage(String(msg.message)); setPending(false); });
-    ws.connect(() => setConnected(true), () => { setConnected(false); setPending(false); });
+    ws.on('game_start', msg => receive(msg.game as unknown as SpiderState, undefined, true));
+    ws.on('spider_state', msg => receive(msg.game as unknown as SpiderState, msg.actor_id as number | undefined));
+    ws.on('lobby', msg => setRoom(msg.room as unknown as Room));
+    ws.on('error', msg => { setMessage(String(msg.message)); pendingRevision.current = null; setPending(false); });
+    ws.on('room_closed', () => { setMessage('房间已解散，请返回'); setGame(null); gameRef.current = null; });
+    ws.connect(() => setConnected(true), () => { setConnected(false); pendingRevision.current = null; setPending(false); });
     return () => { ws.close(); socket.current = null; };
-  }, [code, token]);
+  }, [code, token, user?.id]);
 
   useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', event => {
       if (Platform.OS !== 'web' && !leaving.current) {
-        event.preventDefault(); setConfirm('leave');
+        event.preventDefault();
+        if (fullscreen) exitFullscreen(); else setConfirm('leave');
       }
     });
-    const off = onConfirmLeave(() => setConfirm('leave'));
+    const off = onConfirmLeave(() => fullscreen ? exitFullscreen() : setConfirm('leave'));
     return () => { unsub(); off(); };
-  }, [navigation]);
+  }, [navigation, fullscreen, exitFullscreen]);
 
   const act = (action: string, fields: Record<string, number> = {}) => {
-    if (!connected || !game || pending) { setMessage('正在同步牌局，请稍候'); return; }
-    setMessage('点选明牌，再点目标列；左右滑动查看十列');
-    setPending(true);
-    socket.current?.send({ type: 'spider_action', action, revision: game.revision, ...fields });
+    const current = gameRef.current;
+    if (!connected || !current || pendingRevision.current !== null) { setMessage('正在同步牌局，请稍候'); return; }
+    if (current.departed.includes(user?.id ?? -1)) { setMessage('你已离开本局，请返回房间'); return; }
+    setMessage('全员共享牌桌，点选明牌后再点目标列');
+    pendingRevision.current = current.revision; setPending(true);
+    socket.current?.send({ type: 'spider_action', action, revision: current.revision, ...fields });
   };
   const pick = (source: number, index: number) => {
-    if (!game || game.finished || pending || !connected) return;
+    if (!game || game.finished || pending || !connected || game.departed.includes(user?.id ?? -1)) return;
     if (selected) {
       const move = game.legal_moves.find(m => m.source === selected.source &&
         m.index === selected.index && m.target === source);
@@ -78,58 +121,86 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
     if (move) {
       setSelected({ source: move.source, index: move.index });
       setMessage(`可以把第 ${move.source + 1} 列的牌组移到第 ${move.target + 1} 列`);
-    } else setMessage(game.can_deal ? '当前没有可移动牌组，可以发下一轮牌' : '暂无合法移动，可尝试撤销或新牌局');
+    } else setMessage(game.can_deal ? '当前没有可移动牌组，可以发下一轮牌' : '暂无合法移动，可尝试撤销或由房主结束本局');
   };
-  const saveAndLeave = () => {
-    if (pending) { setMessage('正在保存本次操作，请稍候再返回'); return; }
+  const backToRoom = () => {
     leaving.current = true; setConfirm(null); socket.current?.close(); onLeave();
   };
+  const exitGame = async () => {
+    if (pendingRevision.current !== null) { setMessage('正在保存本次操作，请稍候再离开'); return; }
+    if (!token) return;
+    try {
+      await leaveRoom(token, code);
+      backToRoom();
+    } catch (error) { setMessage((error as Error).message); setConfirm(null); }
+  };
+  const inactive = !game || game.finished || game.departed.includes(user?.id ?? -1);
+  const isHost = room?.host_id === user?.id;
+  const rotated = fullscreen && width < height;
+  const landscapeStyle = rotated ? { position: 'absolute' as const, width: height, height: width,
+    left: (width - height) / 2, top: (height - width) / 2, transform: [{ rotate: '90deg' }] } : undefined;
 
-  return <View style={styles.page}>
-    <View style={styles.header}>
-      <View><Text style={styles.eyebrow}>单人 · 单花色</Text><Text style={styles.title}>把每一组理成顺序</Text></View>
+  return <View style={styles.page} testID="spider-screen">
+    <StatusBar hidden={fullscreen} style="auto" />
+    <View testID="spider-stage" style={[styles.stage, landscapeStyle, fullscreen && !rotated && {
+      paddingLeft: insets.left, paddingRight: insets.right, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+    {!fullscreen && <View style={styles.header}>
+      <View><Text style={styles.eyebrow}>合作接龙 · 房间 {code}</Text><Text style={styles.title}>一起把顺牌收齐</Text></View>
       <GameHelpButton game="spider" />
-    </View>
-    <View style={styles.stats}>
-      <Text style={styles.stat} testID="spider-progress">已收齐 {game?.completed ?? 0} / 8 组</Text>
+    </View>}
+    <View style={[styles.stats, fullscreen && styles.fullscreenStats]}>
+      <Text style={styles.stat} testID="spider-progress">已收齐 {game?.completed ?? 0} / {game?.total_runs ?? 8} 组</Text>
       <Text style={styles.stat} testID="spider-moves">{game?.move_count ?? 0} 步</Text>
       <Text style={styles.stat}>{connected ? pending ? '保存中…' : '已自动保存' : '正在连接…'}</Text>
     </View>
-    <Text accessibilityLiveRegion="polite" style={styles.message} testID="spider-message">{message}</Text>
+    <Text accessibilityLiveRegion="polite" style={[styles.message, fullscreen && styles.fullscreenMessage]} testID="spider-message">{message}</Text>
+    <View style={styles.playFrame} testID="spider-play-area">
     <ScrollView style={styles.playArea} contentContainerStyle={styles.playContent} nestedScrollEnabled>
-      {!game ? <View style={styles.loading}><ActivityIndicator color={colors.white} /><Text style={styles.light}>正在打开牌局…</Text></View> : <>
+      {!game ? <View style={styles.loading}>{!connected && <ActivityIndicator color={colors.white} />}<Text style={styles.light}>等待房间中的牌局</Text></View> : <>
         {game.finished && <View style={styles.win} testID="spider-win">
-          <Text style={styles.winTitle}>恭喜通关</Text><Text style={styles.light}>八组牌已全部收齐，共 {game.move_count} 步</Text>
-          <Text style={styles.light}>这局已记入历史战绩，可以开始新牌局。</Text>
+          <Text style={styles.winTitle}>{game.reason === 'completed' ? '合作通关' : '本局已结束'}</Text><Text style={styles.light}>已收齐 {game.completed} / {game.total_runs} 组，共 {game.move_count} 步</Text>
+          <Text style={styles.light}>这局已记入历史战绩，返回房间后可开始下一局。</Text>
         </View>}
-        <View style={styles.foundations}>{Array.from({ length: 8 }, (_, i) =>
+        {!fullscreen && <View style={styles.foundations}>{Array.from({ length: game.total_runs }, (_, i) =>
           <View key={i} style={[styles.foundation, i < game.completed && styles.complete]}>
             <Spade size={17} color={i < game.completed ? colors.text : colors.white} />
             <Text style={{ color: i < game.completed ? colors.text : colors.white, fontSize: 11 }}>{i < game.completed ? 'K—A' : `${i + 1}`}</Text>
-          </View>)}</View>
+          </View>)}</View>}
         <SpiderBoard game={game} selected={selected} onPick={pick} />
       </>}
     </ScrollView>
-    <View style={styles.controls}>
+      <TouchableOpacity style={styles.fullscreenButton} testID="spider-fullscreen" accessibilityRole="button"
+        accessibilityLabel={fullscreen ? '退出横屏全屏' : '横屏全屏'}
+        onPress={() => {
+          if (fullscreen) exitFullscreen();
+          else { setFullscreen(true); stopFullscreen.current = requestSpiderFullscreen(exitFullscreen); }
+        }}>
+        <Ionicons name={fullscreen ? 'contract-outline' : 'expand-outline'} size={20} color={colors.text} />
+        <Text style={styles.buttonText}>{fullscreen ? '退出全屏' : '全屏'}</Text>
+      </TouchableOpacity>
+    </View>
+    {!inactive && <View style={styles.controls}>
       <TouchableOpacity style={styles.primary} testID="spider-deal" onPress={() => {
         if (!game?.can_deal) { setMessage(game?.stock_count ? '请先填满所有空列，再发牌' : '余牌已经发完'); return; }
         setMessage('每列发一张新牌'); act('deal');
-      }}><Text style={styles.primaryText}>发牌 · 剩 {Math.floor((game?.stock_count ?? 0) / 10)} 轮</Text></TouchableOpacity>
+      }}><Text style={styles.primaryText}>发牌 · 剩 {Math.floor((game?.stock_count ?? 0) / (game?.columns.length ?? 10))} 轮</Text></TouchableOpacity>
       <TouchableOpacity style={styles.button} testID="spider-undo" onPress={() => {
-        if (!game?.can_undo) { setMessage('还没有可以撤销的操作'); return; } act('undo');
+        if (!game?.can_undo) { setMessage('还没有可以撤销的操作'); return; } setConfirm('undo');
       }}><Text style={styles.buttonText}>撤销</Text></TouchableOpacity>
       <TouchableOpacity style={styles.button} testID="spider-hint" onPress={hint}><Text style={styles.buttonText}>提示</Text></TouchableOpacity>
+    </View>}
+    {!fullscreen && <View style={styles.footer}>
+      {isHost && !inactive && <TouchableOpacity style={styles.button} testID="spider-end" onPress={() => setConfirm('end')}><Text style={styles.buttonText}>结束本局</Text></TouchableOpacity>}
+      <TouchableOpacity style={styles.button} testID="spider-back" onPress={() => inactive ? backToRoom() : setConfirm('leave')}><Text style={styles.buttonText}>{inactive ? '返回房间' : '离开本局'}</Text></TouchableOpacity>
+    </View>}
     </View>
-    <View style={styles.footer}>
-      <TouchableOpacity style={styles.button} testID="spider-new" onPress={() => setConfirm('new')}><Text style={styles.buttonText}>新牌局</Text></TouchableOpacity>
-      <TouchableOpacity style={styles.button} testID="spider-save" onPress={() => setConfirm('leave')}><Text style={styles.buttonText}>保存并返回</Text></TouchableOpacity>
-    </View>
-    <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
-      <View style={styles.overlay}><View style={styles.dialog}>
-        <Text style={styles.dialogTitle}>{confirm === 'new' ? '开始新牌局？' : '保存并返回？'}</Text>
-        <Text style={styles.dialogBody}>{confirm === 'new' ? '当前牌局会结束并记录到战绩，重新随机发牌。' : '当前进度已自动保存，下次点蜘蛛纸牌即可继续。'}</Text>
-        <TouchableOpacity style={styles.primary} onPress={() => { if (confirm === 'leave') saveAndLeave(); else { setConfirm(null); act('new'); } }}>
-          <Text style={styles.primaryText}>{confirm === 'new' ? '确认新牌局' : '确认返回'}</Text></TouchableOpacity>
+    <Modal visible={confirm !== null} transparent animationType="fade" supportedOrientations={['portrait', 'landscape']}
+      onRequestClose={() => setConfirm(null)}>
+      <View style={[styles.overlay, landscapeStyle]}><View style={styles.dialog}>
+        <Text style={styles.dialogTitle}>{confirm === 'end' ? '结束全队牌局？' : confirm === 'undo' ? '撤销全队最近一步？' : '离开本局？'}</Text>
+        <Text style={styles.dialogBody}>{confirm === 'end' ? '当前牌局会结束并记录到战绩。全员返回房间后可重新准备开局。' : confirm === 'undo' ? '会回退共享牌桌的最近一步，包括队友的操作。' : '你将退出本局并返回房间，队友可以继续。最后一人离开时本局结束。'}</Text>
+        <TouchableOpacity style={styles.primary} onPress={() => { if (confirm === 'leave') { if (inactive) backToRoom(); else void exitGame(); } else { const action = confirm; setConfirm(null); if (action) act(action); } }}>
+          <Text style={styles.primaryText}>{confirm === 'end' ? '确认结束' : confirm === 'undo' ? '确认撤销' : '确认离开'}</Text></TouchableOpacity>
         <TouchableOpacity style={styles.button} onPress={() => setConfirm(null)}><Text style={styles.buttonText}>继续游戏</Text></TouchableOpacity>
       </View></View>
     </Modal>
@@ -138,13 +209,20 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.bg },
+  stage: { flex: 1, backgroundColor: colors.bg },
+  playFrame: { flex: 1, backgroundColor: spiderTable },
   header: { padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   eyebrow: { fontSize: 12, color: colors.textSecondary, marginBottom: 4 },
   title: { fontSize: 20, fontWeight: '800', color: colors.text },
   stats: { paddingHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  fullscreenStats: { paddingTop: 6, paddingHorizontal: 12 },
   stat: { fontSize: 12, color: colors.textSecondary },
   message: { color: colors.textSecondary, fontSize: 12, minHeight: 44, padding: 12 },
-  playArea: { flex: 1, backgroundColor: spiderTable }, playContent: { paddingBottom: 24 },
+  fullscreenMessage: { minHeight: 28, padding: 6 },
+  playArea: { flex: 1, backgroundColor: spiderTable }, playContent: { paddingBottom: 72 },
+  fullscreenButton: { position: 'absolute', right: 12, bottom: 12, minHeight: 44, paddingHorizontal: 12,
+    flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: colors.borderStrong, borderRadius: radius.md, backgroundColor: colors.card },
   loading: { padding: 40, alignItems: 'center', gap: 16 }, light: { color: colors.white, fontSize: 13, lineHeight: 22 },
   foundations: { padding: 12, flexDirection: 'row', justifyContent: 'center', gap: 6, flexWrap: 'wrap' },
   foundation: { width: 34, height: 48, borderRadius: 5, borderWidth: 1, borderColor: colors.borderStrong,

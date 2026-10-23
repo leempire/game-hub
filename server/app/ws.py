@@ -54,6 +54,12 @@ def _register_dc_timeout_callback():
 
     async def _on_timeout(code: str, winner: str):
         room = rm.get_room(code)
+        if room and room["game"] == "spider":
+            await _broadcast(code, {"type": "spider_state", "game": rm.spider.game_to_sync(room["game_state"])})
+            await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(room)})
+            if room["game_state"]["finished"]:
+                await _broadcast(code, {"type": "game_over", "winner": "end", "reason": "abandoned"})
+            return
         if room and room["game"] == "uno":
             # UNO 是回合制多人：一个人掉线判负之后**牌局常常还在跑**，不能发一条
             # 空洞的 game_over 了事——先同步权威状态（出局名单、当前回合），
@@ -185,11 +191,14 @@ async def _handle_message(code: str, user_id: int, data: dict):
         result = rm.spider_action(code, user_id, data)
         if result.get("error"):
             await _send_error(code, user_id, result["error"])
-            if room["game"] == "spider" and room["host_id"] == user_id and room.get("game_state"):
+            if room["game"] == "spider" and room.get("game_state"):
                 await _send_to(code, user_id, {"type": "spider_state",
-                    "game": rm.spider.game_to_sync(room["game_state"])})
+                    "actor_id": user_id, "game": rm.spider.game_to_sync(room["game_state"])})
         else:
-            await _send_to(code, user_id, {"type": "spider_state", **result})
+            await _broadcast(code, {"type": "spider_state", "actor_id": user_id, **result})
+            if result["game"]["finished"]:
+                await _broadcast(code, {"type": "game_over", "winner": result["game"]["winner"],
+                                        "reason": result["game"]["reason"]})
     elif msg_type == "move":
         await _handle_move(code, user_id, data)
     elif msg_type == "xiangqi_move":
@@ -293,7 +302,17 @@ async def _handle_start(code: str, user_id: int):
     if not room:
         return
     try:
-        gs = rm.start_game(code, user_id)
+        prepared = None
+        if (room["game"] == "spider" and room["status"] == "waiting"
+                and room["host_id"] == user_id
+                and all(p["ready"] for p in room["players"] if p["id"] != user_id)):
+            players = [p["id"] for p in room["players"]]
+            prepared = await asyncio.to_thread(rm.spider.create_game, num_players=len(players))
+            if rm.get_room(code) is not room or players != [p["id"] for p in room["players"]]:
+                await _send_error(code, user_id, "房间人数已变化，请重新开始")
+                return
+        gs = (rm.start_game(code, user_id, prepared_spider=prepared) if prepared is not None
+              else rm.start_game(code, user_id))
     except ValueError as e:
         # 引擎级的前置校验（如 UNO 组队档「需要恰好 4 名玩家」）。**必须把原话发出去**：
         # 只说「无法开始游戏」等于让房主自己猜哪儿不对，而这条恰恰是「人数不够」
@@ -307,7 +326,7 @@ async def _handle_start(code: str, user_id: int):
             await _send_ws(ws, {"type": "error", "message": "无法开始游戏"})
         return
     if room["game"] == "spider":
-        await _send_to(code, user_id, {"type": "game_start", "game": rm.spider.game_to_sync(gs)})
+        await _broadcast(code, {"type": "game_start", "game": rm.spider.game_to_sync(gs)})
         return
     if room["game"] == "minesweeper":
         players_info = rm._get_players_info(room)
@@ -840,6 +859,8 @@ async def _handle_leave(code: str, user_id: int):
     if not room:
         return
     action, updated_room = rm.leave_room(code, user_id)
+    if updated_room and updated_room["game"] == "spider" and updated_room.get("game_state"):
+        await _broadcast(code, {"type": "spider_state", "game": rm.spider.game_to_sync(updated_room["game_state"])})
     if action == "closed":
         # Room was destroyed (waiting room with no humans left)
         await _broadcast(code, {"type": "room_closed"})
@@ -2585,7 +2606,7 @@ async def reschedule_after_restore():
             pass
     await asyncio.sleep(60)
     for room in rm.all_rooms():
-        if room["status"] != "waiting" or room["game"] == "spider":
+        if room["status"] != "waiting":
             continue
         code = room["code"]
         stale = [

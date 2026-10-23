@@ -3,7 +3,7 @@
     "name": "GameHub",
     "slug": "gamehub",
     "version": "1.19.1",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {

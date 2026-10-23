@@ -396,7 +396,8 @@ def _build_results_record(room: dict) -> list[dict]:
     """Build the per-player result list."""
     if room["game"] == "spider":
         won = room["game_state"].get("reason") == "completed"
-        return [{"username": p["username"], "result": "win" if won else "end"}
+        departed = room["game_state"].get("departed", [])
+        return [{"username": p["username"], "result": "win" if won and p["id"] not in departed else "end"}
                 for p in room["players"]]
     gs = room.get("game_state") or {}
     winner = gs.get("winner")
