@@ -57,6 +57,8 @@ def get_room(code: str, user_id: int = Depends(get_current_user_id)):
     room = rm.get_room(code)
     if not room:
         raise HTTPException(404, "房间不存在")
+    if room["game"] == "spider" and room["host_id"] != user_id:
+        raise HTTPException(403, "这是其他玩家的单人牌局")
     # in_game：请求者还算不算这局的在局玩家。房间页拿它做**自愈**——万一漏收了
     # game_start 广播（僵尸连接），主动查一次就能自己进对局页，不会永远卡在房间页。
     return {**rm.room_to_dict(room), "in_game": rm.user_in_game(room, user_id)}
@@ -88,5 +90,7 @@ def leave_room(code: str, user_id: int = Depends(get_current_user_id)):
     room = rm.get_room(code)
     if not room:
         return {"ok": True}
+    if room["game"] == "spider" and room["host_id"] != user_id:
+        raise HTTPException(403, "这是其他玩家的单人牌局")
     action, _ = rm.leave_room(code, user_id)
     return {"ok": True}

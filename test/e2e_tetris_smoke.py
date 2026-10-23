@@ -55,6 +55,7 @@ _READ_JS = """() => Array.from(document.querySelectorAll('[data-testid^="t-c-"]'
 
 def read_board(page):
     """读当前盘面：20×10 的标签矩阵（`empty` / `I`..`L` / `garbage`）。"""
+    page.locator('[data-testid^="t-c-"]').first.wait_for(timeout=20000)
     cells = page.evaluate(_READ_JS)
     n = len(cells)
     assert n == ROWS * COLS, f'棋盘格子数应为 {ROWS * COLS}，实际 {n}'
@@ -93,7 +94,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
         ctx_args = {'viewport': {'width': 390, 'height': 844}}
         pa = browser.new_context(**ctx_args).new_page()

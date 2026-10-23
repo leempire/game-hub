@@ -502,7 +502,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
         ctx_args = {'viewport': {'width': 390, 'height': 844}}
         pa = browser.new_context(**ctx_args).new_page()

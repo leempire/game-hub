@@ -1,7 +1,7 @@
 # GameHub 小游戏平台
 
 手机小游戏平台：注册登录与管理员后台、房间制多人联机（断线重连）、人机对战、历史战绩、游戏规则帮助。
-游戏（13 个）：**五子棋**、**中国象棋**、**重力四子棋**、**翻转棋**、**海战棋**、**点格棋**、**军棋（明棋/暗棋）**（以上 2 人对战）、**扫雷（1-4 人同盘竞速）**、**飞行棋（2-4 人派对）**、**2048 竞速（1-4 人各自独立盘）**、**俄罗斯方块对战（1-4 人各自独立盘）**、**UNO 卡牌（2-4 人回合制）**、**深空休眠（2-6 人实时合作塔防）**。
+游戏（14 个）：**五子棋**、**中国象棋**、**重力四子棋**、**翻转棋**、**海战棋**、**点格棋**、**军棋（明棋/暗棋）**（以上 2 人对战）、**扫雷（1-4 人同盘竞速）**、**飞行棋（2-4 人派对）**、**2048 竞速（1-4 人各自独立盘）**、**俄罗斯方块对战（1-4 人各自独立盘）**、**UNO 卡牌（2-4 人回合制）**、**深空休眠（2-6 人实时合作塔防）**、**蜘蛛纸牌（单人单花色接龙，可保存续玩）**。
 人机对战支持五子棋/翻转棋/海战棋/点格棋/飞行棋/中国象棋/重力四子棋/UNO/军棋/深空休眠（扫雷、2048、俄罗斯方块不支持——后两者是「各玩各的」，人机在语义上不成立）。服务端 AI：棋型评分+minimax / 位置权重+α-β / 猎杀奇偶追踪 / 封格链启发式 / 迭代加深 / 概率热力图 / 信念集推理 / 规则型贪心。
 客户端一套代码三端运行：**安卓 APP / 手机浏览器 / PC 浏览器**（Expo React Native + react-native-web）。
 
@@ -60,16 +60,21 @@ game_hub/
 ## 快速启动
 
 ```bash
-# 后端
-cd server && pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 50541
+# 在仓库根准备后端虚拟环境
+python3 -m venv server/.venv
+server/.venv/bin/python -m pip install -r server/requirements.txt
 
-# 前端 Web（手机浏览器/PC）
-cd app && npm install
-npm run web            # expo start --web --port 50540（开发模式；对外服务请用 scripts/start.sh，默认生产模式 bundle）
+# 安装前端依赖（用 lockfile 里的确切版本）
+(cd app && npm ci)
+
+# 启动前后端（对外服务；web 默认生产模式 bundle，手机浏览器玩家连的就是它）
+bash scripts/start.sh
+
+# 只调试前端热更新时才单独起 Metro（开发模式）
+(cd app && npm run web)    # expo start --web --port 50540
 
 # 前端原生开发（Expo Go 扫码）
-cd app && npm start
+(cd app && npm start)
 ```
 
 改地址只改一处：`server/config/config.json` 的 `public_base`（或环境变量 `PUBLIC_BASE` / `IP`）。
@@ -89,14 +94,33 @@ bash bin/release-apk.sh <版本号>   # 如 1.3.0，versionCode 自动 +1
 
 ## 测试
 
+首次准备测试环境（从仓库根执行；后续测试使用这里激活的虚拟环境）：
+
+```bash
+server/.venv/bin/python -m pip install -r server/requirements-dev.txt
+server/.venv/bin/python -m playwright install chromium
+source server/.venv/bin/activate
+```
+
 ```bash
 # 后端单测（引擎/AI/战绩/WS 协议）
-cd server && python -m pytest test/ -q
-cd server && python test/test_ws_game.py        # 脚本式：真实后端对局/断线重连（需后端已启动）
+(cd server && python -m pytest test/ -q)
+(cd server && python test/test_ws_game.py)      # 脚本式：真实后端对局/断线重连（需后端已启动）
 
 # 浏览器 E2E（需前后端都已启动）
-python test/e2e_web_game.py                     # 示例：五子棋双浏览器对战
-python test/visual_audit.py                     # 视觉审计 + 浏览器专属 API 静态扫描
+python test/e2e_web_game.py           # 双人五子棋 11 步（含断线重连）
+python test/e2e_mine_smoke.py         # 扫雷竞技淘汰+排名 12 步
+python test/e2e_reversi_smoke.py      # 翻转棋 8 步（翻转/非法着/认输终局）
+python test/e2e_battleship_smoke.py   # 海战棋 9 步（布阵→开战→开炮→认输）
+python test/e2e_bot_smoke.py          # 人机 8 步（加人机→自动准备→开始→bot 应招）
+python test/e2e_back_behavior.py      # 返回行为 7 步（双击退出/关弹窗/对局确认）
+python test/e2e_history_smoke.py      # 历史战绩 7 步（认输落库→我的→历史列表）
+python test/e2e_dots_smoke.py         # 点格棋 8 步（画边/回合移交/认输终局）
+python test/e2e_ludo_smoke.py         # 飞行棋 6 步（掷骰广播/认输弃权/排名结算）
+python test/e2e_2048_smoke.py         # 2048 竞速 12 步（同种子/各自走子/认输只结束自己/单人开局）
+python test/e2e_luzhanqi_smoke.py     # 军棋 20 步（明棋/暗棋选择→布阵→走子→认输；暗棋下对手只画牌背）
+python test/e2e_spider_smoke.py       # 单人蜘蛛纸牌：独立测试库，移动/撤销/续玩/通关/战绩
+python test/visual_audit.py           # 视觉审计 + 浏览器专属 API 静态扫描
 ```
 
 完整的脚本清单、每一步断言与发布前自检顺序见

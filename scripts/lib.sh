@@ -20,7 +20,7 @@ APP_DIR="$REPO_ROOT/app"
 RUN_DIR="$REPO_ROOT/tmp/run"   # pid 文件（tmp/ 已 gitignore）
 LOG_DIR="$REPO_ROOT/tmp/log"   # 服务日志
 
-UVICORN_BIN="${UVICORN_BIN:-/home/dory/miniconda3/envs/quant/bin/uvicorn}"
+UVICORN_BIN="${UVICORN_BIN:-$SERVER_DIR/.venv/bin/uvicorn}"
 
 WEB_PORT="${WEB_PORT:-50540}"
 BACKEND_PORT="${BACKEND_PORT:-$(grep -oP '"port"\s*:\s*\K[0-9]+' \

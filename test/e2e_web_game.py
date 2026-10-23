@@ -88,7 +88,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
         ctx_a = browser.new_context(viewport={'width': 390, 'height': 844})
         ctx_b = browser.new_context(viewport={'width': 390, 'height': 844})
@@ -166,10 +165,7 @@ def main():
         pb.get_by_text('返回房间', exact=True).click()
         pa.get_by_text('房间号', exact=True).wait_for(timeout=15000)
         pb.get_by_text('房间号', exact=True).wait_for(timeout=15000)
-        body_b = pb.locator('body').inner_text()
-        if '准 备' in body_b and '取消准备' not in body_b:
-            pb.get_by_text('准 备', exact=True).click()
-            pb.wait_for_timeout(500)
+        pb.get_by_text('准 备', exact=True).click(timeout=10000)
         pa.get_by_text('开始游戏', exact=True).wait_for(timeout=10000)
         pa.get_by_text('开始游戏', exact=True).click()
         cells_a = wait_board(pa)
@@ -229,13 +225,8 @@ def main():
         assert code in body_a, f'A 返回后未显示房间号 {code}'
         ok('双方点击结算「返回」，回到房间页，房间保留（未删除）')
 
-        # 10. 房主可再次开始游戏：验证房间状态为 finished，可继续开局
-        # finished 房间保留 ready 状态，B 已准备，房主可直接开始
-        # 如果 B 看到"准 备"按钮（未准备状态），则点击准备；否则已准备
-        body_b = pb.locator('body').inner_text()
-        if '准 备' in body_b and '取消准备' not in body_b:
-            pb.get_by_text('准 备', exact=True).click()
-            pb.wait_for_timeout(500)
+        # 10. 终局回到 waiting，非房主重新准备后再续开。
+        pb.get_by_text('准 备', exact=True).click(timeout=10000)
         # 等待并点击开始游戏
         start_btn = pa.get_by_text('开始游戏', exact=True)
         start_btn.wait_for(timeout=10000)

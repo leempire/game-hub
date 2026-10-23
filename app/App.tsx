@@ -18,6 +18,7 @@ const LINKING = {
       Auth: 'auth',
       MainTabs: { screens: { Games: '', Rooms: 'rooms', Social: 'social', Profile: 'profile' } },
       Room: 'room/:code',
+      Spider: 'spider/:code',
       Gomoku: 'gomoku/:code',
       Minesweeper: 'minesweeper/:code',
       Reversi: 'reversi/:code',

@@ -26,7 +26,6 @@ PWD = 'test123456'
 TS = int(time.time())
 UA, UB = f'bsW_a_{TS}', f'bsW_b_{TS}'
 STEP = 0
-CHROME = '/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome'
 
 
 def ok(msg):
@@ -87,7 +86,7 @@ def unfired_cell(page, nth=0):
 def main():
     print('=== Web E2E: 海战棋玩法增强（v1.10）===')
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, executable_path=CHROME)
+        browser = p.chromium.launch(headless=True)
         pa = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
         pb = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
         pa.set_default_timeout(15000)

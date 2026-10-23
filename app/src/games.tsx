@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon,
   Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon,
-  LuzhanqiIcon,
+  LuzhanqiIcon, SpiderIcon,
 } from './icons';
 
 /**
@@ -23,9 +23,9 @@ import {
 /** 服务端的 `game` 值。帮助系统 `GAME_HELP` 也拿它当键（少一个游戏会编译不过）。 */
 export type GameKey =
   | 'gomoku' | 'minesweeper' | 'reversi' | 'battleship' | 'dots' | 'ludo'
-  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi';
+  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider';
 
-export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop';
+export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop' | 'single';
 
 export interface GameEntry {
   key: GameKey;
@@ -50,6 +50,7 @@ export interface GameEntry {
 /** 分类顺序与说明（v1.16）。按**玩法形态**分，不按题材分 —— 找游戏时想的是
  *  「我要一局棋」/「想拉几个人围一桌」，而不是「我想玩个海上的」。 */
 export const GAME_CATEGORIES: Array<{ key: GameCategoryKey; name: string; blurb: string }> = [
+  { key: 'single', name: '单人休闲', blurb: '独自开一局，随时保存续玩' },
   { key: 'board', name: '棋类对战', blurb: '两人轮流落子，一局定胜负' },
   { key: 'table', name: '多人桌游', blurb: '2-4 人围一桌，轮流出牌 / 掷骰' },
   { key: 'solo', name: '各玩各的', blurb: '同盘同时开打，各自算分' },
@@ -57,6 +58,8 @@ export const GAME_CATEGORIES: Array<{ key: GameCategoryKey; name: string; blurb:
 ];
 
 export const GAMES: GameEntry[] = [
+  { key: 'spider', title: '蜘蛛纸牌', short: '蜘蛛纸牌', desc: '整理黑桃顺牌，收齐八组 K 到 A',
+    badge: '1人接龙', category: 'single', ionicon: 'layers', Icon: SpiderIcon },
   { key: 'gomoku', title: '五子棋', short: '五子棋', desc: '经典对战，先连五子者胜',
     badge: '2人对战', category: 'board', ionicon: 'ellipse', Icon: GomokuIcon },
   { key: 'xiangqi', title: '中国象棋', short: '中国象棋', desc: '车马炮相仕帅，将死对方主帅',

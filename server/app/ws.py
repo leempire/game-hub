@@ -180,6 +180,15 @@ async def _handle_message(code: str, user_id: int, data: dict):
         await _handle_unready(code, user_id)
     elif msg_type == "start":
         await _handle_start(code, user_id)
+    elif msg_type == "spider_action":
+        result = rm.spider_action(code, user_id, data)
+        if result.get("error"):
+            await _send_error(code, user_id, result["error"])
+            if room["game"] == "spider" and room["host_id"] == user_id and room.get("game_state"):
+                await _send_to(code, user_id, {"type": "spider_state",
+                    "game": rm.spider.game_to_sync(room["game_state"])})
+        else:
+            await _send_to(code, user_id, {"type": "spider_state", **result})
     elif msg_type == "move":
         await _handle_move(code, user_id, data)
     elif msg_type == "xiangqi_move":
@@ -295,6 +304,9 @@ async def _handle_start(code: str, user_id: int):
         ws = conns.get(user_id)
         if ws:
             await _send_ws(ws, {"type": "error", "message": "无法开始游戏"})
+        return
+    if room["game"] == "spider":
+        await _send_to(code, user_id, {"type": "game_start", "game": rm.spider.game_to_sync(gs)})
         return
     if room["game"] == "minesweeper":
         players_info = rm._get_players_info(room)
@@ -933,7 +945,9 @@ def _build_sync(room: dict, user_id: int) -> dict:
     # 只有游戏中才下发对局数据：房间回到等待态后若继续下发 game，
     # 玩家点「返回房间」会被 sync 立刻弹回对局页（v1.5.0 点格棋踩过）。
     if room["status"] == "playing" and room.get("game_state"):
-        if room["game"] == "minesweeper":
+        if room["game"] == "spider":
+            game_info = rm.spider.game_to_sync(room["game_state"])
+        elif room["game"] == "minesweeper":
             players_info = rm._get_players_info(room)
             game_info = mine_game_to_sync(room["game_state"], players_info)
         elif room["game"] == "ludo":
@@ -2570,7 +2584,7 @@ async def reschedule_after_restore():
             pass
     await asyncio.sleep(60)
     for room in rm.all_rooms():
-        if room["status"] != "waiting":
+        if room["status"] != "waiting" or room["game"] == "spider":
             continue
         code = room["code"]
         stale = [

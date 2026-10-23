@@ -70,6 +70,8 @@ export const ludoColors: Record<string, string> = {
 
 /** 翻转棋棋盘绿（对局屏与战绩回放共用——两处曾各写一个绿：#2E7D32 / #157A46）。 */
 export const reversiBoard = '#2E7D32';
+/** 蜘蛛纸牌桌面；白字对比度 12.18:1（牌面沿用 colors.card / text）。 */
+export const spiderTable = '#123C35';
 
 /**
  * UNO 四色牌面。**与飞行棋同款 hex**（跨游戏同色系不该再写第二组值，

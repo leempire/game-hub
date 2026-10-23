@@ -151,7 +151,12 @@ async def test_full_game():
         assert go2["winner"] == "black"
         print("  Black wins with five in a row! ✓")
 
-        # 续开新局：房间已回到 waiting，房主直接 start（rematch 协议已删除）
+        # 续开新局：非房主重新准备后，房主才能 start。
+        await ws2.send(json.dumps({"type": "ready"}))
+        while True:
+            lobby = (await recv_until(ws1, "lobby"))["room"]
+            if all(p["id"] == lobby["host_id"] or p["ready"] for p in lobby["players"]):
+                break
         await ws1.send(json.dumps({"type": "start"}))
         rs1 = await recv_until(ws1, "game_start")
         rs2 = await recv_until(ws2, "game_start")

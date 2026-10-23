@@ -2,7 +2,7 @@
 
 移动优先的小游戏对战平台：Expo（React Native + react-native-web）客户端，一套代码产出 Android APK 与手机/PC 浏览器网页；FastAPI + SQLite 后端，房间制联网对战。
 
-- 仓库根：`/home/dory/code/sandbox/game_hub`
+- 仓库根：以当前克隆目录为准；以下命令默认从仓库根执行。
 - 后端：`0.0.0.0:50541`（公网基址见 `server/config/config.json` 的 `public_base`，
   可用环境变量 `PUBLIC_BASE` / `IP` 覆盖 —— 仓库里不存具体地址，见「配置与密钥」）
 - Web dev server：`50540`（Metro 热更新，常驻运行，勿随意重启）
@@ -38,6 +38,7 @@
 | 桌游 | UNO / 飞行棋 |
 | 各玩各的（竞速/跑分） | 2048 / 俄罗斯方块 / 扫雷 |
 | 合作 | 深空休眠 |
+| 单人 | 蜘蛛纸牌 |
 
 > 新增游戏时：先按「先联网调研」一节把结论归档到
 > `docs/游戏设计/<游戏中文名>/增强调研.md`，再写 `设计.md`，然后接引擎与客户端
@@ -70,7 +71,8 @@ app/                    # Expo 客户端（RN + Web）
     │                   # 每款游戏的文件职责与实现约定见其 docs/游戏设计/<游戏>/设计.md
     └── screens/        # AuthScreen/GamesTab/RoomsTab/SocialTab/ProfileTab/RoomScreen/
                         # 各对局屏（Gomoku/Mine/Reversi/Battleship/Dots/Ludo/Game2048/
-                        # Xiangqi/ConnectFour/Tetris/Uno/Stasis/Luzhanqi）+ HistoryScreen/AdminScreen
+                        # Xiangqi/ConnectFour/Tetris/Uno/Stasis/Luzhanqi/Spider）
+                        # + HistoryScreen/AdminScreen
 server/
 ├── config/config.json  # 端口、jwt_secret、admin 种子、public_base、app.version_code/name
 │                       # **不进版本库**（本机真值），模板 config.example.json
@@ -86,7 +88,7 @@ server/
     ├── ws.py           # WS 路由与消息分发（各游戏 move/胜负广播/认输/断线判负）
     ├── game/           # **各游戏的纯引擎与人机 AI**（无 IO、不碰 asyncio）
     │   ├── <游戏>.py   # 引擎：五子棋/扫雷/翻转棋/海战棋/点格棋/飞行棋/2048/象棋/
-    │   │               # 重力四子棋/俄罗斯方块/UNO/深空休眠/军棋
+    │   │               # 重力四子棋/俄罗斯方块/UNO/深空休眠/军棋/蜘蛛纸牌
     │   ├── <游戏>_ai.py# 人机 AI（扫雷/2048/俄罗斯方块无 AI）
     │   └── __init__.py # 这层的约定（引擎不认识时间/不发消息；AI 只看下发过的信息）
     └── routers/        # auth / admin / rooms / app_update / history
@@ -170,6 +172,15 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   方块/扫雷的个人盘面。回归要写在 **WS 层**（浏览器层看不见线路上的字节）。
 - **逐人下发的消息要带够字段**：多人/双视角游戏的 `game_start` 与 `sync` 必须逐人下发
   （飞行棋附 `your_seat`、2048 附 `your_color` 且只给自己的盘面），不能全员同一份广播。
+
+### 蜘蛛纸牌（单人）
+
+`game/spider.py` 为纯规则引擎，`spider` 每账号一个私有牌局；首页直接开始/续玩。
+**离线不判负，也不执行多人房间闲置清理或恢复后的 waiting 清退**。
+`spider_action` 经 revision 校验后完成动作、落盘、再回权威视图；暗牌和余牌顺序不下发。
+撤销保留最近 200 步；新局与自然终局经 `_set_game_over` 记录战绩，单人返回只保存。
+接入说明、协议与验证见 `docs/游戏设计/蜘蛛纸牌/设计.md`，调研见同目录 `增强调研.md`。
+回归：`server/test/test_spider.py`、`server/test/test_ws_spider.py`、`test/e2e_spider_smoke.py`。
 
 ### 房间与对局流转
 
@@ -365,10 +376,10 @@ scripts/stop.sh                      # 停全部
 tail -f tmp/log/backend.log          # 服务日志；pid 在 tmp/run/*.pid
 
 # 类型检查（在 app/ 目录下执行，勿在仓库根）
-cd /home/dory/code/sandbox/game_hub/app && npx tsc --noEmit
+(cd app && npx tsc --noEmit)
 
 # 后端单测（conftest 已忽略脚本式 test_ws_game.py）
-cd /home/dory/code/sandbox/game_hub/server && /home/dory/miniconda3/envs/quant/bin/python -m pytest test/ -q
+(cd server && .venv/bin/python -m pytest test/ -q)
 
 # 发布 APK（版本号双写 + 构建 + 部署 + 验证一条龙）
 bash bin/release-apk.sh <版本号>
@@ -386,6 +397,9 @@ curl -s http://127.0.0.1:50541/api/app/version
 - 新增/修改对局屏后，`test/visual_audit.py` 的 `audit_back_wiring` 会逐个对账
   `PROTECTED_SCREENS` 与 `onConfirmLeave`。
 - `server` pytest 连跑两遍会撞用户名（409 假失败），两次之间隔 100 秒。
+- **E2E 前置**：先用后端虚拟环境安装 `server/requirements-dev.txt`，再执行
+  `python -m playwright install chromium`；脚本使用 Playwright 管理的浏览器，
+  项目路径从脚本位置推导。
 
 ## 项目级规范与已知坑
 
@@ -504,8 +518,9 @@ curl -s http://127.0.0.1:50541/api/app/version
 `docs/游戏设计/<游戏中文名>/{设计.md,增强调研.md}`。**本文件不记录每个版本的流水账**
 ——只保留「改动前必须知道的跨游戏约定」与路线图。
 
-- **13 款游戏**：棋类（五子棋 / 中国象棋 / 军棋 / 翻转棋 / 重力四子棋 / 点格棋 /
-  海战棋）、桌游（UNO / 飞行棋）、各玩各的（2048 / 俄罗斯方块 / 扫雷）、合作（深空休眠）。
+- **14 款游戏**：棋类（五子棋 / 中国象棋 / 军棋 / 翻转棋 / 重力四子棋 / 点格棋 /
+  海战棋）、桌游（UNO / 飞行棋）、各玩各的（2048 / 俄罗斯方块 / 扫雷）、合作（深空休眠）、
+  单人（蜘蛛纸牌）。
 - **平台能力**：账号与 JWT、房间制 + 人机、战绩落库与终局快照回放、应用内更新、
   热重启恢复、房间级设置注册表、Web 深链。
 - **近期版本**（细节见更新计划）：v1.16 统一房间设置 + 座位互换 + 主页分类；

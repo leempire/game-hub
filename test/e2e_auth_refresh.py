@@ -9,12 +9,13 @@ Web E2E: 身份刷新 + 改密码重登。
 用法：先启动后端(50541)和前端web(50540)，然后 python test/e2e_auth_refresh.py
 """
 import sqlite3
+from pathlib import Path
 import time
 
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:50540'
-DB = '/home/dory/code/sandbox/game_hub/server/data/gamehub.db'
+DB = Path(__file__).resolve().parent.parent / 'server/data/gamehub.db'
 PWD = 'test123456'
 NEW_PWD = 'test654321'
 TS = int(time.time())
@@ -58,7 +59,6 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            executable_path='/home/dory/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome',
         )
         page = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
         page.set_default_timeout(15000)
