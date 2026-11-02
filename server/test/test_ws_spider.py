@@ -152,6 +152,51 @@ def test_leaving_host_transfers_room_and_partner_continues(coop_client):
         assert not coop_client.get(f"/api/rooms/{room['code']}", headers=host[1]).json()["in_game"]
 
 
+@pytest.mark.parametrize("count", [1, 2])
+def test_inactive_spider_survives_disconnect_and_resumes(coop_client, count):
+    """思考或切后台不能退出合作牌局；无人在线的旧房仍按公共 TTL 回收。"""
+    import time
+
+    players = [register(coop_client, f"spider_idle_{i}") for i in range(count)]
+    room = coop_client.post("/api/rooms", json={"game": "spider"}, headers=players[0][1]).json()
+    code = room["code"]
+    for player in players[1:]:
+        coop_client.post(f"/api/rooms/{code}/join", json={}, headers=player[1])
+    with ExitStack() as stack:
+        sockets = [stack.enter_context(coop_client.websocket_connect(f"/ws/room/{code}?token={p[0]}"))
+                   for p in players]
+        for ws in sockets:
+            recv(ws, "sync")
+        for ws in sockets[1:]:
+            ws.send_json({"type": "ready"})
+        sockets[0].send_json({"type": "start"})
+        for ws in sockets:
+            recv(ws, "game_start")
+        sockets[0].send_json({"type": "spider_action", "action": "deal", "revision": 0})
+        for ws in sockets:
+            recv(ws, "spider_state")
+        saved = deepcopy(rm.get_room(code)["game_state"])
+        rm.get_room(code)["last_activity"] = time.time() - rm.ROOM_IDLE_TTL - 10
+        assert code not in rm.sweep_idle_rooms()
+
+    current = rm.get_room(code)
+    for player in players:
+        # 模拟旧计时任务到期，也不能把暂时离线的成员记为退出。
+        rm._on_dc_timeout(code, player[2])
+    assert current["status"] == "playing"
+    assert current["game_state"] == saved
+    assert current["empty_since"] is not None
+    assert not any((code, player[2]) in rm._dc_tasks for player in players)
+    assert all(p["reconnect_left"] is None for p in rm.room_to_dict(current)["players"])
+    with coop_client.websocket_connect(f"/ws/room/{code}?token={players[0][0]}") as ws:
+        assert recv(ws, "sync")["game"] == spider.game_to_sync(saved)
+        assert current["empty_since"] is None
+        ws.send_json({"type": "spider_action", "action": "undo", "revision": saved["revision"]})
+        assert recv(ws, "spider_state")["game"]["move_count"] == 0
+    current["empty_since"] = time.time() - rm.ROOM_IDLE_TTL - 10
+    assert code in rm.sweep_idle_rooms()
+
+
 @pytest.mark.parametrize("count,total,columns", [(1, 8, 10), (3, 16, 20), (4, 16, 20)])
 def test_start_broadcast_scales_with_actual_members(coop_client, count, total, columns):
     with ExitStack() as stack:

@@ -246,7 +246,9 @@ def test_save_survives_disconnect_sweep_and_restart(solo_room, monkeypatch):
     timers = []
     monkeypatch.setattr(rm, "_start_dc_timer", lambda *args: timers.append(args))
     rm.handle_player_disconnect(room["code"], 41, None)
-    assert timers == [(room["code"], 41, None)]
+    assert timers == []
+    assert room["empty_since"] is not None
+    assert room["code"] not in rm.sweep_idle_rooms()
     room["max_players"] = 1  # 老存档转为普通房间，不重发牌。
     encoded = persistence.dumps_state(room)
     rm._rooms.clear()
@@ -301,6 +303,6 @@ def test_cooperative_members_ready_move_leave_and_host_transfer(solo_room):
 def test_disconnect_timeout_and_normal_room_cleanup(solo_room):
     room = solo_room
     rm._on_dc_timeout(room["code"], 41)
-    assert not rm.user_in_game(room, 41) and room["status"] == "waiting"
+    assert rm.user_in_game(room, 41) and room["status"] == "playing"
     room["empty_since"] = room["last_activity"] = 0
     assert room["code"] in rm.sweep_idle_rooms()

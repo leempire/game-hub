@@ -1936,7 +1936,7 @@ def reconnect_seconds_left(room: dict, player: dict) -> int | None:
     客户端拿它做「等待重连（N 秒）」的倒计时起点——重连后 sync 给的是**剩余**
     秒数而不是总时长，所以刷新页面/换设备回来看到的倒计时也是准的。
     """
-    if room.get("status") != "playing" or player.get("connected", True):
+    if room.get("status") != "playing" or room.get("game") == "spider" or player.get("connected", True):
         return None
     started = player.get("disconnected_at")
     if not started:
@@ -3086,6 +3086,9 @@ def handle_player_disconnect(code: str, user_id: int, loop: asyncio.AbstractEven
     # 玩家重连即取消。界面上等待房不显示「断线」（等待房没有掉线状态）。
     if room["status"] == "waiting":
         _maybe_destroy_or_mark(room)
+    elif room["status"] == "playing" and room["game"] == "spider":
+        # 合作接龙允许思考、切后台后续玩；只回收全员离线超过公共 TTL 的空房。
+        _maybe_destroy_or_mark(room)
     elif room["status"] == "playing":
         _start_dc_timer(code, user_id, loop)
 
@@ -3140,16 +3143,7 @@ def _on_dc_timeout(code: str, user_id: int):
     """Called when 120s disconnect timer expires."""
     _dc_tasks.pop((code, user_id), None)
     room = _rooms.get(code)
-    if not room or room["status"] != "playing":
-        return
-    if room["game"] == "spider":
-        _leave_spider(room, user_id)
-        if _dc_timeout_callback:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(_dc_timeout_callback(code, "end"))
-            except RuntimeError:
-                pass
+    if not room or room["status"] != "playing" or room["game"] == "spider":
         return
     if room["game"] == "minesweeper":
         # Competitive: disconnect timeout = player eliminated

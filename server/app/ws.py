@@ -159,7 +159,7 @@ async def ws_room(websocket: WebSocket, code: str):
                 await _broadcast(code, {
                     "type": "player_disconnected", "user_id": user_id,
                     # 重连倒计时的起点（测试会把超时调小，客户端别写死 120）
-                    "timeout": rm.get_disconnect_timeout(),
+                    "timeout": None if room["game"] == "spider" else rm.get_disconnect_timeout(),
                 })
             else:
                 # 等待中：玩家可能已被移出房间，广播最新大厅
