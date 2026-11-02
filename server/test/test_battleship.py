@@ -345,6 +345,13 @@ def test_normalize_weapon_assignment_falls_back():
     print("  OK test_normalize_weapon_assignment_falls_back")
 
 
+def test_normalize_weapon_assignment_uses_current_fleet():
+    from app.game.battleship import normalize_weapon_assignment
+    for size, expected in ((6, {"radar": 4, "salvo": 3, "strike": 2}),
+                           (12, {"radar": 6, "salvo": 5, "strike": 4})):
+        assert normalize_weapon_assignment(None, size) == expected
+
+
 def test_ship_afloat_tracks_sunk():
     from app.game.battleship import ship_afloat
     board = create_board()

@@ -1048,7 +1048,7 @@ def _connect4_state_for_sync(gs: dict, user_id: int) -> dict:
 async def _handle_placement(code: str, user_id: int, data: dict):
     """Handle battleship ship placement."""
     ships = data.get("ships", [])
-    if not isinstance(ships, list) or len(ships) != 5:
+    if not isinstance(ships, list):
         await _send_error(code, user_id, "布阵格式错误")
         return
     # weapons 可选：旧客户端不发，服务端用默认分配兜底

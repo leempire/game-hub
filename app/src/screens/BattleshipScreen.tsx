@@ -360,8 +360,7 @@ function useShipDrag(params: {
   // ② 舰船卡片：卡片不在棋盘上，用 pageX/pageY 减棋盘原点换算成盘内坐标
   const cardHandlers = useMemo(() => {
     const map: Record<number, PanResponderInstance> = {};
-    // 舰队是**参数**（随尺寸档位变）——但这份 PanResponder 只建一次，
-    // 所以从 `paramsRef` 现读最新值，不进依赖数组（进了会重建整张手势表）。
+    // 尺寸同步后按实际舰队重建，新增舰船与长按预览都要使用本局舰长。
     for (const def of paramsRef.current.fleet) {
       const shipId = def.id;
       map[shipId] = PanResponder.create({
@@ -412,7 +411,7 @@ function useShipDrag(params: {
       });
     }
     return map;
-  }, []);
+  }, [params.fleet]);
 
   return { drag, boardHandlers, cardHandlers, pressedId };
 }
@@ -621,6 +620,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
   const [selectedShipId, setSelectedShipId] = useState<number | null>(null);
   const [horizontal, setHorizontal] = useState(true);
   const [placementSubmitted, setPlacementSubmitted] = useState(false);
+  const placementSizeRef = useRef(DEFAULT_BOARD);
 
   // 系统/浏览器返回拦截：对局中弹退出确认，终局后放行
   useEffect(() => navigation.addListener('beforeRemove', (e: any) => {
@@ -701,7 +701,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
       }
     }
     return b;
-  }, [placementShips]);
+  }, [placementShips, boardSize]);
 
   const allPlaced = placementShips.every((s) => s.placed);
 
@@ -713,12 +713,25 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
     const ws = new RoomSocket(code, token);
     socketRef.current = ws;
 
+    const receiveGame = (g: GameSync) => {
+      // 尺寸与舰队必须同批更新，避免用默认 10×10 布阵渲染 6×6/12×12 牌面。
+      if (placementSizeRef.current !== g.board_size) {
+        placementSizeRef.current = g.board_size;
+        setPlacementShips(randomPlacementClient(g.board_size, g.fleet ?? FALLBACK_FLEET,
+          !!g.rules?.adjacent_placement));
+        setWeaponAssign(Object.fromEntries(WEAPON_KEYS.map(key =>
+          [key, g.own_weapons?.[key]?.ship_id ?? DEFAULT_WEAPON_ASSIGN[key]])));
+        setSelectedShipId(null);
+      }
+      setGame(g);
+    };
+
     const handleSync = (msg: SocketMessage) => {
       const roomData = msg.room as Room;
       if (roomData) setRoom(roomData);
       if (msg.game) {
         const g = msg.game as GameSync;
-        setGame(g);
+        receiveGame(g);
         if (g.phase !== 'placing') {
           setPlacementSubmitted(true);
         }
@@ -742,7 +755,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
     const handleGameStart = (msg: SocketMessage) => {
       const g = msg.game as GameSync;
       if (g) {
-        setGame(g);
+        receiveGame(g);
         setShowGameOver(false);
         setLastShot(null);
         setShotFx(null);

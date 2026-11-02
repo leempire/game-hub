@@ -24,6 +24,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import room_manager as rm
+from app.game import battleship as bs
 
 
 @pytest.fixture(autouse=True)
@@ -130,6 +131,30 @@ def _pick(ws, size):
 
 
 class TestBattleshipSize:
+    @pytest.mark.parametrize("size", [6, 10, 12])
+    def test_ws_placement_enters_battle_for_each_size(self, client, ws_open, size):
+        t1, _ = _register(client, _u(f"place{size}a"))
+        t2, _ = _register(client, _u(f"place{size}b"))
+        code = _create_room(client, t1)["code"]
+        _join_room(client, t2, code)
+        ws1, ws2 = ws_open(code, t1), ws_open(code, t2)
+        if size != 10:
+            _pick(ws1, size)
+        ws2.send_json({"type": "ready"})
+        ws1.send_json({"type": "start"})
+        for ws in (ws1, ws2):
+            game = _recv_type(ws, "game_start")["game"]
+            assignment = {key: value["ship_id"] for key, value in game["own_weapons"].items()}
+            assert bs.validate_weapon_assignment(assignment, size)
+            ws.send_json({"type": "placement", "ships": bs.random_placement(size=size)})
+            for _ in range(20):
+                message = ws.receive_json()
+                if message["type"] in ("error", "placement_ready"):
+                    break
+            assert message["type"] == "placement_ready", message
+        for ws in (ws1, ws2):
+            assert _recv_type(ws, "game_start")["game"]["phase"] == "battle"
+
     def test_create_room_defaults_to_standard(self, client):
         """建房给缺省档（标准 10×10）；创建接口不收尺寸。"""
         t1, _ = _register(client, _u("def"))

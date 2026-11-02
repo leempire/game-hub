@@ -1121,7 +1121,7 @@ def _start_battleship(room: dict) -> dict | None:
         "winner": None,
         "reason": None,
         # ── 特殊武器（v1.10）── 挂靠关系在布阵时写入
-        "weapons": {host["id"]: {}, other["id"]: {}},
+        "weapons": {p["id"]: normalize_weapon_assignment(None, n) for p in (host, other)},
         "weapons_used": {host["id"]: [], other["id"]: []},
         "radar_results": {host["id"]: [], other["id"]: []},
         # 命中续射的「先手第一发」补偿标记，只有真实开炮会置位
