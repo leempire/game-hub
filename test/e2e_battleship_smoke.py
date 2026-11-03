@@ -5,6 +5,7 @@ Usage: ensure backend (50541) and frontend web (50540) are running, then
 python test/e2e_battleship_smoke.py
 """
 import re
+import json
 import sys
 import time
 
@@ -60,6 +61,14 @@ def main():
         pb = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
         pa.set_default_timeout(15000)
         pb.set_default_timeout(15000)
+        errors = []
+        def received(payload):
+            message = json.loads(payload)
+            if message.get('type') == 'error':
+                errors.append(message.get('message'))
+        for page in (pa, pb):
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.on('websocket', lambda ws: ws.on('framereceived', received))
 
         register(pa, UA)
         register(pb, UB)
@@ -78,8 +87,7 @@ def main():
 
         # ── 棋盘尺寸是**房间级设置**（v13）：房主在大厅里挑 ────────
         # 这一步与深空休眠的选图那一步同构：验的是「芯片接线 + 文案跟着变」，
-        # 而尺寸**真的驱动开局**由 `test_ws_battleship_size.py` 与服务端的
-        # `gs["size"]` 断言锁住（浏览器这边只看得到界面）。
+        # 后面还会真正开两局 6×6 / 12×12，防止只验证芯片却漏掉开局白屏。
         # v1.15 起这些芯片在「玩法设置」抽屉里（房间页只留一行摘要）。
         open_settings(pa)
         assert pa.locator('[data-testid="room-settings-board_size-6"]').count() == 1, \
@@ -182,6 +190,30 @@ def main():
         assert '房间不存在' not in body_b, f'B 返回后房间被删除: {body_b[:150]}'
         assert code in body_a, f'A 返回后未显示房间号 {code}'
         ok('双方点击结算「返回」，回到房间页，房间保留（未删除）')
+
+        for size in (6, 12):
+            open_settings(pa)
+            pa.locator(f'[data-testid="room-settings-board_size-{size}"]').click()
+            close_settings(pa)
+            pb.get_by_text('准 备', exact=True).click()
+            pa.get_by_text('开始游戏', exact=True).click()
+            for page in (pa, pb):
+                page.get_by_text('完成布阵', exact=True).wait_for()
+                assert page.locator('[data-testid^="bs-placement-"]').count() == size * size
+                assert '巡逻艇' in page.locator('body').inner_text()
+                page.get_by_text('完成布阵', exact=True).click()
+            for page in (pa, pb):
+                try:
+                    page.get_by_text('攻击面板', exact=True).wait_for()
+                except Exception:
+                    raise AssertionError(f'{size}×{size} 开战失败：{errors}；{page.locator("body").inner_text()}')
+            assert not errors, errors
+            ok(f'{size}×{size} 双端开局无白屏、舰队完整、默认布阵可提交并进入战斗')
+            pa.get_by_text('认输', exact=True).click()
+            pa.get_by_text('确认认输', exact=True).click()
+            for page in (pa, pb):
+                page.get_by_text('返回房间', exact=True).click()
+                page.get_by_text('房间号', exact=True).wait_for()
 
         browser.close()
     print(f'=== 海战棋冒烟通过：{STEP} 步 ===')

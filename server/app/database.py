@@ -388,6 +388,8 @@ def _build_players_record(room: dict) -> list[dict]:
         color = colors.get(p["id"])
         if color:
             entry["color"] = color
+        if p.get("ai_difficulty"):
+            entry["ai_difficulty"] = p["ai_difficulty"]
         players.append(entry)
     return players
 
@@ -495,6 +497,9 @@ def _build_snapshot(room: dict) -> dict:
     game = room["game"]
     if game == "spider":
         from app.game.spider import snapshot
+        return snapshot(gs)
+    if game == "uttt":
+        from app.game.uttt import snapshot
         return snapshot(gs)
     if game == "gomoku":
         return {

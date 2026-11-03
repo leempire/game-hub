@@ -247,6 +247,7 @@ export interface HistoryPlayer {
   nickname: string | null;
   seat: number;
   color?: string;
+  ai_difficulty?: 'easy' | 'normal' | 'hard';
 }
 
 export interface HistoryResult {
@@ -407,11 +408,21 @@ export interface LuzhanqiSnapshot {
   reason: string | null;
 }
 
-export type GameSnapshot = GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot;
+export interface UtttSnapshot {
+  game: 'uttt';
+  boards: number[][];
+  local_results: number[];
+  active_board: number | null;
+  moves: { board: number; cell: number; color: string }[];
+  winner: string | null;
+  reason: string | null;
+}
+
+export type GameSnapshot = GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot;
 
 export interface GameRecord {
   id: number;
-  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis';
+  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis' | 'uttt';
   room_code: string;
   players: HistoryPlayer[];
   results: HistoryResult[];

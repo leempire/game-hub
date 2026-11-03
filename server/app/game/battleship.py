@@ -367,7 +367,7 @@ def normalize_weapon_assignment(weapons: dict | None,
     """
     if validate_weapon_assignment(weapons, size):
         return dict(weapons)
-    return dict(DEFAULT_WEAPON_ASSIGNMENT)
+    return default_weapon_assignment(size)
 
 
 def weapons_view(

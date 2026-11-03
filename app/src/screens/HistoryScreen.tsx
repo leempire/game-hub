@@ -2,13 +2,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator,
+  ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
-import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon } from '../icons';
+import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
@@ -30,6 +30,7 @@ import { notify, formatDate } from '../utils';
 // 游戏名的唯一来源（以前这里另有一份 GAME_LABELS，与主页卡片各写一遍）
 import { gameTitle } from '../games';
 import SpiderBoard from '../SpiderBoard';
+import UtttBoard from '../UtttBoard';
 
 const PAGE_SIZE = 20;
 
@@ -94,6 +95,7 @@ export default function HistoryScreen() {
   };
 
   const renderGameIcon = (game: string) => {
+    if (game === 'uttt') return <UltimateTicTacToeIcon size={36} />;
     if (game === 'spider') return <SpiderIcon size={36} />;
     if (game === 'gomoku') return <GomokuIcon size={36} />;
     if (game === 'reversi') return <ReversiIcon size={36} />;
@@ -150,7 +152,10 @@ export default function HistoryScreen() {
                 </View>
                 <Text style={styles.timeText}>{formatDate(rec.ended_at)}</Text>
                 <Text style={styles.playersText}>
-                  {rec.players.map((p) => p.nickname || p.username).join(' vs ')}
+                  {rec.players.map((p) => {
+                    const difficulty = p.ai_difficulty && { easy: '简单', normal: '普通', hard: '困难' }[p.ai_difficulty];
+                    return `${p.nickname || p.username}${difficulty ? ' · ' + difficulty : ''}`;
+                  }).join(' vs ')}
                 </Text>
               </View>
               <Text style={styles.arrow}>{expanded ? '∨' : '›'}</Text>
@@ -193,6 +198,7 @@ export default function HistoryScreen() {
 
 // Inline board snapshot renderer
 function BoardSnapshot({ rec }: { rec: GameRecord }) {
+  const { width } = useWindowDimensions();
   const snap = rec.snapshot;
   // 棋类逐步回放：总手数来自服务端快照里的 moves（老战绩没有 → 0，不显示控制条）
   const totalSteps = replayStepCount(snap);
@@ -262,6 +268,12 @@ function BoardSnapshot({ rec }: { rec: GameRecord }) {
   }
   if (view.game === 'ludo') {
     return <LudoSnapshot snap={view} players={rec.players} />;
+  }
+  if (view.game === 'uttt') {
+    return <View testID="uttt-history" style={{ alignItems: 'center' }}>
+      <UtttBoard boards={view.boards} local_results={view.local_results}
+        lastMove={view.moves?.[view.moves.length - 1]} size={Math.min(300, width - 80)} />
+    </View>;
   }
   if (view.game === 'connect4') {
     return (

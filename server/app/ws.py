@@ -3,6 +3,7 @@
 import json
 import asyncio
 import logging
+from copy import deepcopy
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -21,6 +22,7 @@ from app.game.game2048 import game_to_sync as g2048_game_to_sync
 from app.game.game2048 import leaderboard as g2048_leaderboard
 from app.game.xiangqi import game_to_sync as xiangqi_game_to_sync
 from app.game import luzhanqi as lzq
+from app.game import uttt, uttt_ai
 from app.game.luzhanqi import view_for as luzhanqi_view_for
 from app.game.luzhanqi import mask_battle as luzhanqi_mask_battle
 from app.game.tetris import (
@@ -159,7 +161,7 @@ async def ws_room(websocket: WebSocket, code: str):
                 await _broadcast(code, {
                     "type": "player_disconnected", "user_id": user_id,
                     # 重连倒计时的起点（测试会把超时调小，客户端别写死 120）
-                    "timeout": rm.get_disconnect_timeout(),
+                    "timeout": None if room["game"] == "spider" else rm.get_disconnect_timeout(),
                 })
             else:
                 # 等待中：玩家可能已被移出房间，广播最新大厅
@@ -201,6 +203,8 @@ async def _handle_message(code: str, user_id: int, data: dict):
                                         "reason": result["game"]["reason"]})
     elif msg_type == "move":
         await _handle_move(code, user_id, data)
+    elif msg_type == "uttt_move":
+        await _handle_uttt_move(code, user_id, data)
     elif msg_type == "xiangqi_move":
         await _handle_xiangqi_move(code, user_id, data)
     elif msg_type == "placement":
@@ -384,6 +388,8 @@ async def _handle_start(code: str, user_id: int):
                 sync_game = xiangqi_game_to_sync(gs, pid)
             elif room["game"] == "connect4":
                 sync_game = _connect4_state_for_sync(gs, pid)
+            elif room["game"] == "uttt":
+                sync_game = uttt.game_to_sync(gs, pid)
             else:
                 sync_game = _game_state_for_sync(gs, pid)
             await _send_ws(ws, {
@@ -425,6 +431,29 @@ async def _handle_move(code: str, user_id: int, data: dict):
             await _send_ws(ws, {"type": "error", "message": result["error"]})
         return
     await _broadcast(code, {"type": "move", **result["move"]})
+    if result["game_over"]:
+        await _broadcast(code, {"type": "game_over", **result["game_over"]})
+    else:
+        _maybe_schedule_bot_turn(code, room, room["game_state"])
+
+
+async def _send_uttt_state(code: str, room: dict, actor_id: int):
+    gs = room["game_state"]
+    for pid in gs["player_colors"]:
+        await _send_to(code, pid, {"type": "uttt_state", "actor_id": actor_id,
+                                  "game": uttt.game_to_sync(gs, pid)})
+
+
+async def _handle_uttt_move(code: str, user_id: int, data: dict):
+    result = rm.uttt_make_move(code, user_id, data.get("board"), data.get("cell"), data.get("revision"))
+    room = rm.get_room(code)
+    if not result["ok"]:
+        await _send_error(code, user_id, result["error"])
+        if room and room["game"] == "uttt" and room.get("game_state"):
+            await _send_to(code, user_id, {"type": "uttt_state", "actor_id": user_id,
+                "game": uttt.game_to_sync(room["game_state"], user_id)})
+        return
+    await _send_uttt_state(code, room, user_id)
     if result["game_over"]:
         await _broadcast(code, {"type": "game_over", **result["game_over"]})
     else:
@@ -990,6 +1019,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = xiangqi_game_to_sync(room["game_state"], user_id)
         elif room["game"] == "connect4":
             game_info = _connect4_state_for_sync(room["game_state"], user_id)
+        elif room["game"] == "uttt":
+            game_info = uttt.game_to_sync(room["game_state"], user_id)
         elif room["game"] == "tetris":
             game_info = tetris_game_to_sync(room["game_state"], user_id)
         elif room["game"] == "uno":
@@ -1048,7 +1079,7 @@ def _connect4_state_for_sync(gs: dict, user_id: int) -> dict:
 async def _handle_placement(code: str, user_id: int, data: dict):
     """Handle battleship ship placement."""
     ships = data.get("ships", [])
-    if not isinstance(ships, list) or len(ships) != 5:
+    if not isinstance(ships, list):
         await _send_error(code, user_id, "布阵格式错误")
         return
     # weapons 可选：旧客户端不发，服务端用默认分配兜底
@@ -2005,7 +2036,7 @@ def _maybe_schedule_bot_turn(code: str, room: dict, gs: dict):
             if color == next_color and _is_bot(room, pid):
                 rm.schedule_bot_turn(code, pid)
                 return
-    elif room["game"] in ("gomoku", "reversi", "xiangqi", "connect4", "luzhanqi"):
+    elif room["game"] in ("gomoku", "reversi", "xiangqi", "connect4", "luzhanqi", "uttt"):
         next_color = gs["next"]
         for pid, color in gs["player_colors"].items():
             if color == next_color and _is_bot(room, pid):
@@ -2057,6 +2088,8 @@ async def _bot_do_turn(code: str, bot_id: int):
         await _bot_xiangqi_move(code, bot_id, room, gs)
     elif room["game"] == "connect4":
         await _bot_connect4_move(code, bot_id, room, gs)
+    elif room["game"] == "uttt":
+        await _bot_uttt_move(code, bot_id, room, gs)
     elif room["game"] == "luzhanqi":
         await _bot_luzhanqi_move(code, bot_id, room, gs)
     elif room["game"] == "uno":
@@ -2163,6 +2196,21 @@ async def _bot_luzhanqi_move(code: str, bot_id: int, room: dict, gs: dict):
         await _broadcast(code, {"type": "game_over", **result["game_over"]})
     else:
         _maybe_schedule_bot_turn(code, room, gs)
+
+
+async def _bot_uttt_move(code: str, bot_id: int, room: dict, gs: dict):
+    color = gs["player_colors"].get(bot_id)
+    if not color or gs["next"] != color or gs.get("winner"):
+        return
+    revision = gs["revision"]
+    difficulty = next((p.get("ai_difficulty") for p in room["players"] if p["id"] == bot_id), "normal")
+    view = deepcopy(uttt.game_to_sync(gs, bot_id))
+    move = await asyncio.to_thread(uttt_ai.best_move, view, difficulty)
+    current = rm.get_room(code)
+    if (move is None or current is not room or room["status"] != "playing"
+            or room.get("game_state") is not gs or gs["revision"] != revision or gs["next"] != color):
+        return
+    await _handle_uttt_move(code, bot_id, {"board": move[0], "cell": move[1], "revision": revision})
 
 
 async def _bot_connect4_move(code: str, bot_id: int, room: dict, gs: dict):
@@ -2636,9 +2684,12 @@ def _broadcast_lobby_after_game_end(room: dict):
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return  # 单测里直接调 room_manager，没有事件循环，跳过广播
-    loop.create_task(_broadcast(room["code"], {
-        "type": "lobby", "room": rm.room_to_dict(room),
-    }))
+
+    async def send_lobby():
+        if rm.get_room(room["code"]) is room:
+            await _broadcast(room["code"], {"type": "lobby", "room": rm.room_to_dict(room)})
+
+    loop.create_task(send_lobby())
 
 
 rm.set_bot_turn_callback(_bot_do_turn)
