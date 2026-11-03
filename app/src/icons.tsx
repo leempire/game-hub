@@ -31,6 +31,19 @@ export function SpiderIcon({ size = 56 }: { size?: number }) {
   </Svg>;
 }
 
+export function UltimateTicTacToeIcon({ size = 56 }: { size?: number }) {
+  return <Svg width={size} height={size} viewBox="0 0 64 64">
+    <Rect x="3" y="3" width="58" height="58" rx="12" fill={colors.card} stroke={colors.primary} strokeWidth="2" />
+    {[22, 42].map(p => <G key={p} stroke={colors.primary} strokeWidth="2"><Line x1={p} y1="7" x2={p} y2="57" /><Line x1="7" y1={p} x2="57" y2={p} /></G>)}
+    {[12, 32, 52].flatMap((x, row) => [12, 32, 52].map((y, col) => <G key={`${row}-${col}`} stroke={colors.borderStrong} strokeWidth="1">
+      <Line x1={x-3} y1={y-6} x2={x-3} y2={y+6} /><Line x1={x+3} y1={y-6} x2={x+3} y2={y+6} />
+      <Line x1={x-6} y1={y-3} x2={x+6} y2={y-3} /><Line x1={x-6} y1={y+3} x2={x+6} y2={y+3} />
+    </G>))}
+    <G stroke={colors.primary} strokeWidth="2.5"><Line x1="7" y1="7" x2="17" y2="17" /><Line x1="17" y1="7" x2="7" y2="17" /></G>
+    <Circle cx="52" cy="52" r="5" fill={colors.card} stroke={colors.danger} strokeWidth="2.5" />
+  </Svg>;
+}
+
 // 应用 Logo（方案C）：圆角方形渐变底 + 白色六芒星与外接圆
 export function AppLogo({ size = 56 }: { size?: number }) {
   return (

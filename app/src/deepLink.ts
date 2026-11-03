@@ -31,6 +31,7 @@ const ROUTE_BY_PATH: Record<string, string> = {
   luzhanqi: 'Luzhanqi',
   xiangqi: 'Xiangqi',
   connect4: 'ConnectFour',
+  uttt: 'UltimateTicTacToe',
   tetris: 'Tetris',
   uno: 'Uno',
   stasis: 'Stasis',

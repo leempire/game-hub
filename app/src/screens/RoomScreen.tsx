@@ -29,7 +29,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const socketRef = useRef<RoomSocket | null>(null);
-  // 海战棋的人机难度档（简单/普通/困难）。难度存在每个 bot 自己身上，一房可混搭。
+  // 支持三档难度的游戏，档位存在每个 bot 自己身上。
   // **必须放在 `if (loading)` 提前返回之前**——放到下面会让首次渲染少调一个 hook，
   // React 直接报「Rendered more hooks than during the previous render」并白屏。
   const [botDifficulty, setBotDifficulty] = useState('normal');
@@ -271,7 +271,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   // 任何 `key` 的语义，一行规则都不写。没有可调项的游戏（五子棋等）服务端不下发它。
   const settings = room.settings ?? [];
   // 深空休眠支持人机（stasis_ai.py 做人机队友，由 tick 循环按 1 秒间隔驱动，不是回合制调度）
-  const supportsBots = room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi';
+  const supportsBots = room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi' || room.game === 'uttt';
   // 房间只有两种状态：非游戏中即大厅（对局结束的房间回到等待态，可续开）
   const isLobbyStatus = room.status !== 'playing';
   // 掉线只在游戏中存在：等待房没有「掉线」概念（人不在房里就没有掉线一说）
@@ -286,7 +286,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
 
   // 海战棋的人机有难度档（简单=随机、普通=搜索追击、困难=概率热力图）。
   // botDifficulty 的 useState 在组件顶部（提前返回之前），这里只做取值与展示。
-  const isBattleship = room.game === 'battleship';
+  const hasBotDifficulty = room.game === 'battleship' || room.game === 'uttt';
   const BOT_DIFFICULTIES: Array<{ key: string; label: string }> = [
     { key: 'easy', label: '简单' },
     { key: 'normal', label: '普通' },
@@ -294,7 +294,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   ];
 
   const handleAddBot = () => {
-    socketRef.current?.addBot(isBattleship ? botDifficulty : undefined);
+    socketRef.current?.addBot(hasBotDifficulty ? botDifficulty : undefined);
   };
 
   const handleRemoveBot = (botId: number) => {
@@ -439,8 +439,8 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
               </Text>
             </TouchableOpacity>
           )}
-          {/* 海战棋人机的难度选择：加人机前先选档 */}
-          {canAddBot && isBattleship && (
+          {/* 支持难度档的游戏在添加人机前选择 */}
+          {canAddBot && hasBotDifficulty && (
             <View style={styles.difficultyRow}>
               <Text style={styles.difficultyLabel}>人机难度</Text>
               <View style={styles.difficultyChips}>

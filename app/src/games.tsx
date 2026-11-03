@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon,
   Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon,
-  LuzhanqiIcon, SpiderIcon,
+  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon,
 } from './icons';
 
 /**
@@ -23,7 +23,7 @@ import {
 /** 服务端的 `game` 值。帮助系统 `GAME_HELP` 也拿它当键（少一个游戏会编译不过）。 */
 export type GameKey =
   | 'gomoku' | 'minesweeper' | 'reversi' | 'battleship' | 'dots' | 'ludo'
-  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider';
+  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt';
 
 export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop';
 
@@ -69,6 +69,8 @@ export const GAMES: GameEntry[] = [
     badge: '2人对战', category: 'board', ionicon: 'disc', Icon: ReversiIcon },
   { key: 'connect4', title: '重力四子棋', short: '重力四子棋', desc: '选列落子，先连四子者胜',
     badge: '2人对战', category: 'board', ionicon: 'apps', Icon: ConnectFourIcon },
+  { key: 'uttt', title: '终极井字棋', short: '终极井字棋', desc: '落子指定对手战场，赢下三盘连成一线',
+    badge: '2人对战', category: 'board', ionicon: 'grid', Icon: UltimateTicTacToeIcon },
   { key: 'dots', title: '点格棋', short: '点格棋', desc: '画边封格，格子多者胜',
     badge: '2人对战', category: 'board', ionicon: 'grid', Icon: DotsIcon },
   { key: 'battleship', title: '海战棋', short: '海战棋', desc: '布阵炮击，击沉对方全部舰船',

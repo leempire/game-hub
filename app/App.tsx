@@ -29,6 +29,7 @@ const LINKING = {
       Xiangqi: 'xiangqi/:code',
       Luzhanqi: 'luzhanqi/:code',
       ConnectFour: 'connect4/:code',
+      UltimateTicTacToe: 'uttt/:code',
       Tetris: 'tetris/:code',
       Uno: 'uno/:code',
       Stasis: 'stasis/:code',

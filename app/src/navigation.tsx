@@ -23,6 +23,7 @@ import LudoScreen from './screens/LudoScreen';
 import XiangqiScreen from './screens/XiangqiScreen';
 import LuzhanqiScreen from './screens/LuzhanqiScreen';
 import ConnectFourScreen from './screens/ConnectFourScreen';
+import UltimateTicTacToeScreen from './screens/UltimateTicTacToeScreen';
 import TetrisScreen from './screens/TetrisScreen';
 import UnoScreen from './screens/UnoScreen';
 import StasisScreen from './screens/StasisScreen';
@@ -50,6 +51,7 @@ export type RootStackParamList = {
   Xiangqi: { code: string };
   Luzhanqi: { code: string };
   ConnectFour: { code: string };
+  UltimateTicTacToe: { code: string };
   Tetris: { code: string };
   Uno: { code: string };
   Stasis: { code: string };
@@ -265,6 +267,8 @@ function RoomScreenWrapper({ route, navigation }: { route: any; navigation: any 
           navigation.navigate('Luzhanqi', { code: c });
         } else if (game === 'connect4') {
           navigation.navigate('ConnectFour', { code: c });
+        } else if (game === 'uttt') {
+          navigation.navigate('UltimateTicTacToe', { code: c });
         } else if (game === 'tetris') {
           navigation.navigate('Tetris', { code: c });
         } else if (game === 'uno') {
@@ -426,6 +430,10 @@ function LudoScreenWrapper({ route, navigation }: { route: any; navigation: any 
   );
 }
 
+function UltimateTicTacToeScreenWrapper({ route, navigation }: { route: any; navigation: any }) {
+  return <UltimateTicTacToeScreen code={route.params.code} onLeave={() => navigation.popTo('MainTabs')} />;
+}
+
 export default function AppNavigation() {
   const { token, loading } = useAuth();
 
@@ -465,6 +473,10 @@ export default function AppNavigation() {
             component={BattleshipScreenWrapper}
             options={{ headerShown: true, title: gameTitle('battleship'), headerStyle: { backgroundColor: colors.card } }}
           />
+          <Stack.Screen
+            name="UltimateTicTacToe"
+            component={UltimateTicTacToeScreenWrapper}
+            options={{ headerShown: true, title: gameTitle('uttt'), headerStyle: { backgroundColor: colors.card } }} />
           <Stack.Screen
             name="Dots"
             component={DotsScreenWrapper}

@@ -228,6 +228,9 @@ export class RoomSocket {
     this.sendOrQueue({ type: 'swap_respond', from_id: fromId, accept });
   }
   move(x: number, y: number): void { this.send({ type: 'move', x, y }); }
+  utttMove(board: number, cell: number, revision: number): void {
+    this.send({ type: 'uttt_move', board, cell, revision });
+  }
   /** 中国象棋走子：起点 → 终点（x = 列，y = 行）。 */
   xiangqiMove(fromX: number, fromY: number, toX: number, toY: number): void {
     this.send({ type: 'xiangqi_move', from_x: fromX, from_y: fromY, to_x: toX, to_y: toY });

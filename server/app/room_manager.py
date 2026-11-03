@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from app import persistence
 from app import room_settings
-from app.game import spider
+from app.game import spider, uttt, uttt_ai
 from app.game import stasis as stasis_engine
 from app.game import stasis_ai
 
@@ -467,7 +467,7 @@ def create_room(
 ) -> dict:
     """Create a new room."""
     if game not in ("gomoku", "reversi", "minesweeper", "battleship", "dots", "ludo",
-                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider"):
+                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider", "uttt"):
         raise ValueError("不支持的游戏类型")
     code = _generate_code()
     room_name = name or f"{user['username']}的房间"
@@ -549,7 +549,7 @@ def join_room(code: str, user: dict, password: str | None) -> dict:
 def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
     """Add a bot player to a waiting room. Returns updated room.
 
-    difficulty only applies to battleship (三档 AI)；其余游戏忽略。
+    difficulty applies to battleship / uttt (三档 AI)；其余游戏忽略。
     Stored per-bot so one room can host bots of mixed skill.
 
     Raises ValueError if conditions are not met.
@@ -562,7 +562,7 @@ def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
     if room["status"] == "playing":
         raise ValueError("只能在等待大厅添加人机")
     if room["game"] not in ("gomoku", "reversi", "battleship", "dots", "ludo", "xiangqi",
-                            "connect4", "uno", "stasis", "luzhanqi"):
+                            "connect4", "uno", "stasis", "luzhanqi", "uttt"):
         raise ValueError("该游戏不支持人机")
     # 满员即止：双人游戏 max_players=2，加一个 bot 后自然无法再加；
     # 飞行棋/UNO max_players=4，可连加 3 个凑满 4 人局
@@ -572,6 +572,8 @@ def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
     bot = _make_bot_player(code, seq)
     if room["game"] == "battleship":
         bot["ai_difficulty"] = bs_normalize_difficulty(difficulty)
+    elif room["game"] == "uttt":
+        bot["ai_difficulty"] = uttt_ai.normalize_difficulty(difficulty)
     room["players"].append(bot)
     _touch_activity(room)
     return room
@@ -830,9 +832,9 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
             _maybe_destroy_or_mark(room)
             return ("game_over", room) if go else ("removed", room)
         # Non-minesweeper/ludo/2048: leaving during play = surrender
-        room["players"] = [p for p in room["players"] if p["id"] != user_id]
         winner_color = _opponent_color(_user_color(room, user_id), room["game"])
         _set_game_over(room, winner_color, "surrender")
+        room["players"] = [p for p in room["players"] if p["id"] != user_id]
         if is_host:
             _transfer_host(room)
         _maybe_destroy_or_mark(room)
@@ -886,6 +888,8 @@ def start_game(code: str, user_id: int, *, prepared_spider: dict | None = None) 
         return _start_xiangqi(room)
     if room["game"] == "connect4":
         return _start_connect4(room)
+    if room["game"] == "uttt":
+        return _start_uttt(room)
     if room["game"] == "tetris":
         return _start_tetris(room)
     if room["game"] == "uno":
@@ -1063,6 +1067,17 @@ def _start_luzhanqi(room: dict) -> dict | None:
     gs["flag_revealed"] = {lzq.RED: False, lzq.BLACK: False}
     room["game_state"] = gs
     room["empty_since"] = None
+    _touch_activity(room)
+    return gs
+
+
+def _start_uttt(room: dict) -> dict | None:
+    if len(room["players"]) != 2:
+        return None
+    gs = uttt.create_game()
+    gs["revision"] = (room.get("game_state") or {}).get("revision", -1) + 1
+    gs["player_colors"] = {p["id"]: color for p, color in zip(room["players"], ("black", "white"))}
+    room.update(status="playing", game_started_at=_now_iso(), game_state=gs, empty_since=None)
     _touch_activity(room)
     return gs
 
@@ -2252,6 +2267,28 @@ def luzhanqi_setup(code: str, user_id: int, action: str, a=None, b=None, name=No
         return {"ok": False, "error": "未知的布阵操作"}
     _touch_activity(room)
     return {"ok": True, "color": color}
+
+
+def uttt_make_move(code: str, user_id: int, board, cell, revision) -> dict:
+    room = _rooms.get(code)
+    if not room or room["game"] != "uttt" or room["status"] != "playing":
+        return {"ok": False, "error": "游戏未在进行中"}
+    gs = room["game_state"]
+    color = _user_color(room, user_id)
+    if not color:
+        return {"ok": False, "error": "你不是游戏玩家"}
+    if type(revision) is not int or revision != gs["revision"]:
+        return {"ok": False, "error": "棋盘已更新，请重新选格"}
+    error = uttt.apply_move(gs, board, cell, color)
+    if error:
+        return {"ok": False, "error": error}
+    over = None
+    if gs["winner"]:
+        over = {"winner": gs["winner"], "reason": gs["reason"]}
+        _set_game_over(room, **over)
+    result = {"ok": True, "game_over": over}
+    _finish_action(code, result)
+    return result
 
 
 def connect4_make_move(code: str, user_id: int, col: int) -> dict:
