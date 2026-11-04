@@ -87,7 +87,8 @@ def join_room(page, code):
     page.get_by_text('加入', exact=True).first.click()
     page.get_by_placeholder('输入6位房间号').fill(code)
     page.get_by_text('加入', exact=True).last.click()
-    page.get_by_text('房间号', exact=True).wait_for(timeout=15000)
+    # 加入弹窗也有「房间号」，等待真实房间码出现才能读取玩法。
+    page.get_by_text(code, exact=True).wait_for(timeout=15000)
     assert '军棋' in page.locator('body').inner_text(), '房间页未显示「军棋」'
 
 
