@@ -26,6 +26,8 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 from websocket import create_connection
 
+from e2e_room_helpers import remember_guides
+
 BASE = 'http://localhost:50540'
 API = 'http://127.0.0.1:50541'
 WS = 'ws://127.0.0.1:50541'
@@ -75,6 +77,7 @@ def register(page, username):
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
     page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
+    remember_guides(page)
 
 
 def opacity(page, testid):

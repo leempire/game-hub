@@ -15,6 +15,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
+from e2e_room_helpers import remember_guides
+
 BASE = 'http://localhost:50540'
 PWD = 'test123456'
 TS = int(time.time())
@@ -35,6 +37,7 @@ def register(page, username):
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
     page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
+    remember_guides(page)
 
 
 def goto_tab(page, name):
@@ -43,7 +46,7 @@ def goto_tab(page, name):
 
 
 # 玩家列表里除名字以外的那些小标签（徽标 / 按钮）
-BADGES = {'房主', '未准备', '已准备', '断线', '换位', '等待同意', '移除', '人机'}
+BADGES = {'房主', '未准备', '已准备', '断线', '换位', '等待同意', '移除', '人机', '简单难度', '普通难度', '困难难度'}
 
 
 def player_order(page):
@@ -86,6 +89,8 @@ def main():
             pb.get_by_placeholder('输入6位房间号').fill(code)
             pb.get_by_text('加入', exact=True).last.click()
             pb.get_by_text('房间号', exact=True).wait_for(timeout=15000)
+            pa.get_by_text(ub, exact=True).wait_for(timeout=15000)
+            pb.get_by_text(ua, exact=True).wait_for(timeout=15000)
             assert player_order(pa) == [ua, ub], player_order(pa)
             ok(f'两人就位，座位顺序 [{ua}, {ub}]')
 
