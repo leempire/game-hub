@@ -284,9 +284,9 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
     : (isLudo || isUno || isStasis) ? room.players.length < 2 : !isFull;
   const canStart = allReady && !needMorePlayers;
 
-  // 海战棋的人机有难度档（简单=随机、普通=搜索追击、困难=概率热力图）。
+  // 全部支持人机的游戏都提供三档；合作游戏中代表队友执行力。
   // botDifficulty 的 useState 在组件顶部（提前返回之前），这里只做取值与展示。
-  const hasBotDifficulty = room.game === 'battleship' || room.game === 'uttt';
+  const hasBotDifficulty = supportsBots;
   const BOT_DIFFICULTIES: Array<{ key: string; label: string }> = [
     { key: 'easy', label: '简单' },
     { key: 'normal', label: '普通' },

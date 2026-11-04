@@ -14,6 +14,8 @@ export const colors = {
   success: '#047857',       // emerald-700   白字 5.48 ｜ 文字 5.48 ✓
   bg: '#F9FAFB',
   card: '#FFFFFF',
+  surfaceMuted: '#F3F4F6', // 次级表面；textSecondary 对比度 6.87:1
+  disabled: '#E5E7EB',     // 禁用控件底色，文字仍用 textMuted，不单靠透明度
   border: '#E5E7EB',        // 仅作分隔线/装饰（1.24:1）—— 不可作为控件的唯一边界
   borderStrong: '#8A90A0',  // 输入框等控件的可见边界 3.19 ✓
   text: '#111827',          // 17.74 ✓
@@ -483,6 +485,18 @@ export const radius = {
   lg: 16,
   xl: 24,
   full: 9999,
+};
+
+/** 卡片与弹窗的唯一阴影参数。颜色只用于装饰，不承担控件边界。 */
+export const shadow = {
+  card: {
+    shadowColor: colors.black, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
+  },
+  modal: {
+    shadowColor: colors.black, shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18, shadowRadius: 20, elevation: 8,
+  },
 };
 
 export const fontSize = {

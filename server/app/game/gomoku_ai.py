@@ -5,7 +5,9 @@ Board: list[list[int]] (15×15), board[y][x], EMPTY=0 / BLACK=1 / WHITE=2.
 """
 
 import copy
+import random
 import time
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.gomoku import (
     BOARD_SIZE, EMPTY, BLACK, WHITE, DIRECTIONS,
     place_stone, check_win,
@@ -184,10 +186,10 @@ def _minimax(board, last_x, last_y, last_player,
 
     *last_player* just placed at (last_x, last_y); we check win there.
     """
-    if last_player is not None and check_win(board, last_x, last_y):
+    if last_player is not None and board[last_y][last_x] == last_player and check_win(board, last_x, last_y):
         return -100000, None          # prev player won → current loses
-    if time.time() > deadline:
-        return 0, None
+    if time.monotonic() > deadline:
+        raise _Timeout
 
     current = _opp(last_player) if last_player else BLACK
     if depth == 0:
@@ -213,9 +215,13 @@ def _minimax(board, last_x, last_y, last_player,
     return best_score, best_move
 
 
+class _Timeout(Exception):
+    """Discard incomplete iterative-deepening layers."""
+
+
 # ── public API ────────────────────────────────────────────────────
 
-def best_move(board, player):
+def best_move(board, player, difficulty="normal", rng=None):
     """Choose best move for *player*.
 
     Args:
@@ -227,6 +233,12 @@ def best_move(board, player):
     if all(board[y][x] != EMPTY
            for y in range(BOARD_SIZE) for x in range(BOARD_SIZE)):
         return None
+
+    level = normalize_difficulty(difficulty)
+    if level == "easy":
+        legal = [(x, y) for y in range(BOARD_SIZE) for x in range(BOARD_SIZE)
+                 if board[y][x] == EMPTY]
+        return (rng or random).choice(legal)
 
     # empty board → centre
     if all(board[y][x] == EMPTY
@@ -244,14 +256,17 @@ def best_move(board, player):
         return threats.pop()
 
     # iterative deepening minimax
-    deadline = time.time() + _TIME_BUDGET
+    deadline = time.monotonic() + (_TIME_BUDGET if level == "normal" else 0.5)
     move = None
     for depth in range(2, 5):
-        _, m = _minimax(board, 0, 0, None, depth,
-                        -100001, 100001, deadline)
+        try:
+            _, m = _minimax(board, 0, 0, _opp(player), depth,
+                            -100001, 100001, deadline)
+        except _Timeout:
+            break
         if m is not None:
             move = m
-        if time.time() > deadline:
+        if time.monotonic() > deadline:
             break
     if move is None:
         cands = _candidates(board)

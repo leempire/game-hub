@@ -11,6 +11,7 @@ Board: list[list[int]] (6×7), board[row][col], EMPTY=0 / BLACK=1 / WHITE=2.
 import random
 import time
 
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.connect4 import (
     COLS, ROWS, EMPTY, BLACK, WHITE,
     landing_row, check_win, legal_columns, would_win_at,
@@ -144,11 +145,18 @@ def _root_scores(board, heights, player, depth, deadline) -> dict[int, int]:
     return scores
 
 
-def best_move(board: list[list[int]], player: int, time_budget: float = _TIME_BUDGET) -> int | None:
+def best_move(board: list[list[int]], player: int, time_budget: float | None = None,
+              difficulty="normal", rng=None) -> int | None:
     """返回落子列号；盘面已满返回 None。"""
     cols = legal_columns(board)
     if not cols:
         return None
+
+    level = normalize_difficulty(difficulty)
+    if level == "easy":
+        return (rng or random).choice(cols)
+    if time_budget is None:
+        time_budget = _TIME_BUDGET if level == "normal" else 1.0
 
     # 一步能赢就直接赢（不去搜，时间不足时也绝不会看漏）
     for c in cols:

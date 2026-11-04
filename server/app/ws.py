@@ -23,6 +23,7 @@ from app.game.game2048 import leaderboard as g2048_leaderboard
 from app.game.xiangqi import game_to_sync as xiangqi_game_to_sync
 from app.game import luzhanqi as lzq
 from app.game import uttt, uttt_ai
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.luzhanqi import view_for as luzhanqi_view_for
 from app.game.luzhanqi import mask_battle as luzhanqi_mask_battle
 from app.game.tetris import (
@@ -1590,7 +1591,7 @@ async def _handle_luzhanqi_move(code: str, user_id: int, data: dict):
 async def _handle_add_bot(code: str, user_id: int, data: dict | None = None):
     """Handle add_bot request from host.
 
-    data.difficulty 只对海战棋有意义（三档 AI），其余游戏忽略。
+    data.difficulty 对全部支持人机的游戏生效，缺省为普通。
     """
     difficulty = (data or {}).get("difficulty")
     try:
@@ -1974,7 +1975,7 @@ async def _bot_uno_turn(code: str, bot_id: int, room: dict, gs: dict):
     if gs.get("turn") != seat:
         await _bot_uno_jump(code, bot_id, room, gs, seat)
         return
-    act = uno_ai.best_action(gs, seat)
+    act = uno_ai.best_action(gs, seat, _bot_difficulty(room, bot_id))
     if not act:
         return
     if act["action"] == "play":
@@ -2009,7 +2010,7 @@ async def _bot_uno_jump(code: str, bot_id: int, room: dict, gs: dict, seat: int)
     0.8~1.2 秒，牌堆顶可能已经被别人抢掉了。`uno_ai.best_jump` 只回答「想不想抢」，
     「抢不抢得到」由引擎的 `can_jump` 说了算（AI 不给裁决，同其它游戏）。
     """
-    act = uno_ai.best_jump(gs, seat)
+    act = uno_ai.best_jump(gs, seat, _bot_difficulty(room, bot_id))
     if not act:
         return
     result = rm.uno_play_action(code, bot_id, act["card"], act.get("color"),
@@ -2113,14 +2114,24 @@ async def _bot_do_turn(code: str, bot_id: int):
         await _bot_uno_turn(code, bot_id, room, gs)
 
 
+def _bot_search_current(code: str, room: dict, gs: dict, next_player, ply: int) -> bool:
+    """A threaded search must never apply to a replaced, finished or advanced game."""
+    return (rm.get_room(code) is room and room["status"] == "playing"
+            and room.get("game_state") is gs and not gs.get("winner")
+            and not gs.get("finished") and gs.get("next") == next_player
+            and len(gs["moves"]) == ply)
+
+
 async def _bot_gomoku_move(code: str, bot_id: int, room: dict, gs: dict):
     """Execute a gomoku AI move for the bot."""
     color = gs["player_colors"].get(bot_id)
     if not color or gs["next"] != color:
         return
     stone = GOMOKU_BLACK if color == "black" else GOMOKU_WHITE
-    move = gomoku_ai.best_move(gs["board"], stone)
-    if move is None:
+    ply = len(gs["moves"])
+    move = await asyncio.to_thread(gomoku_ai.best_move, deepcopy(gs["board"]), stone,
+                                   _bot_difficulty(room, bot_id))
+    if move is None or not _bot_search_current(code, room, gs, color, ply):
         return
     x, y = move
     result = rm.make_move(code, bot_id, x, y)
@@ -2139,7 +2150,11 @@ async def _bot_reversi_move(code: str, bot_id: int, room: dict, gs: dict):
     if not color or gs["next"] != color:
         return
     stone = REVERSI_BLACK if color == "black" else REVERSI_WHITE
-    move = reversi_ai.best_move(gs["board"], stone)
+    ply = len(gs["moves"])
+    move = await asyncio.to_thread(reversi_ai.best_move, deepcopy(gs["board"]), stone,
+                                   _bot_difficulty(room, bot_id))
+    if not _bot_search_current(code, room, gs, color, ply):
+        return
     if move is None:
         # No legal moves: auto-pass (handled by reversi_make_move)
         # Just advance turn to opponent
@@ -2177,8 +2192,10 @@ async def _bot_xiangqi_move(code: str, bot_id: int, room: dict, gs: dict):
     if not color or gs["next"] != color:
         return
     board_copy = [row[:] for row in gs["board"]]
-    move = await asyncio.to_thread(xiangqi_ai.best_move, board_copy, color)
-    if move is None:
+    ply = len(gs["moves"])
+    move = await asyncio.to_thread(xiangqi_ai.best_move, board_copy, color,
+                                   difficulty=_bot_difficulty(room, bot_id))
+    if move is None or not _bot_search_current(code, room, gs, color, ply):
         return
     frm, to = move
     result = rm.xiangqi_make_move(code, bot_id, frm, to)
@@ -2202,8 +2219,10 @@ async def _bot_luzhanqi_move(code: str, bot_id: int, room: dict, gs: dict):
     if not color or gs["next"] != color or gs.get("phase") != "playing":
         return
     view = luzhanqi_view_for(gs, color)
-    move = await asyncio.to_thread(luzhanqi_ai.best_move, view)
-    if move is None:
+    ply = len(gs["moves"])
+    move = await asyncio.to_thread(luzhanqi_ai.best_move, deepcopy(view),
+                                   difficulty=_bot_difficulty(room, bot_id))
+    if move is None or not _bot_search_current(code, room, gs, color, ply):
         return
     result = rm.luzhanqi_make_move(code, bot_id, move[0], move[1])
     if not result["ok"]:
@@ -2241,8 +2260,10 @@ async def _bot_connect4_move(code: str, bot_id: int, room: dict, gs: dict):
         return
     stone = C4_BLACK if color == "black" else C4_WHITE
     board_copy = [row[:] for row in gs["board"]]
-    col = await asyncio.to_thread(connect4_ai.best_move, board_copy, stone)
-    if col is None:
+    ply = len(gs["moves"])
+    col = await asyncio.to_thread(connect4_ai.best_move, board_copy, stone,
+                                  difficulty=_bot_difficulty(room, bot_id))
+    if col is None or not _bot_search_current(code, room, gs, color, ply):
         return
     result = rm.connect4_make_move(code, bot_id, col)
     if not result["ok"]:
@@ -2262,8 +2283,10 @@ async def _bot_dots_move(code: str, bot_id: int, room: dict, gs: dict):
     player_num = DOTS_P1 if color == "black" else DOTS_P2
     if gs["next"] != player_num:
         return
-    move = dots_ai.best_move(gs)
-    if move is None:
+    ply = len(gs["moves"])
+    move = await asyncio.to_thread(dots_ai.best_move, deepcopy(gs),
+                                   _bot_difficulty(room, bot_id))
+    if move is None or not _bot_search_current(code, room, gs, player_num, ply):
         return
     orient, y, x = move
     result = rm.dots_make_move(code, bot_id, orient, y, x)
@@ -2309,7 +2332,7 @@ async def _bot_ludo_turn(code: str, bot_id: int, room: dict, gs: dict):
             # 无可动飞机 / 三连六惩罚 → 回合已移交（或仍在自己手里但只能重掷）
             _maybe_schedule_bot_turn(code, room, gs)
             return
-    piece_id = ludo_ai.best_move(gs)
+    piece_id = ludo_ai.best_move(gs, _bot_difficulty(room, bot_id))
     if piece_id is None:
         return
     result = rm.ludo_move_action(code, bot_id, piece_id)
@@ -2345,8 +2368,8 @@ def _bot_difficulty(room: dict, bot_id: int) -> str:
     """Bot's AI tier, stored per-player so a room can host bots of mixed skill."""
     for p in room["players"]:
         if p["id"] == bot_id:
-            return battleship_ai.normalize_difficulty(p.get("ai_difficulty"))
-    return battleship_ai.DEFAULT_DIFFICULTY
+            return normalize_difficulty(p.get("ai_difficulty"))
+    return "normal"
 
 
 async def _bot_battleship_fire(code: str, bot_id: int, room: dict, gs: dict):

@@ -27,6 +27,7 @@ from __future__ import annotations
 import random
 import time
 
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.luzhanqi import (
     CAMP_CELLS, COLS, DILEI, GONGBING, HQ_CELLS, IMMOBILE, JUNQI,
     JUNZHANG, LIANZHANG, LVZHANG, NEIGHBORS, PAIZHANG, PIECE_COUNTS, RANKS,
@@ -488,7 +489,7 @@ def _score_move(board, frm, to, piece, color, target, beliefs, enemy_hits, rng) 
     return score + rng.random() * 0.4            # 打散同分着法，别每局都走同一步
 
 
-def best_move(view: dict, time_budget: float = _TIME_BUDGET):
+def best_move(view: dict, time_budget: float | None = None, difficulty="normal", rng=None):
     """给视图里那一方算一步棋，返回 ``((fr,fc),(tr,tc))`` 或 ``None``。"""
     legal = view.get("legal") or []
     color = view.get("your_color") or ""
@@ -497,8 +498,14 @@ def best_move(view: dict, time_budget: float = _TIME_BUDGET):
     board = [list(row) for row in view.get("cells") or []]
     if len(board) != ROWS:
         return None
+    level = normalize_difficulty(difficulty)
+    rng = rng or random.Random()
+    if level == "easy":
+        m = rng.choice(legal)
+        return ((int(m[0]), int(m[1])), (int(m[2]), int(m[3])))
+    if time_budget is None:
+        time_budget = _TIME_BUDGET if level == "normal" else 0.9
     deadline = time.monotonic() + time_budget
-    rng = random.Random()
     hidden = view.get("mode", "open") == "hidden"
 
     # 能吃军旗就直接赢（两种模式共用；搜索里也有这条，但先拦一下省时间）
@@ -537,5 +544,5 @@ def best_move(view: dict, time_budget: float = _TIME_BUDGET):
     scored.sort(key=lambda x: -x[0])
     best = scored[0][0]
     near = [s for s in scored[:max(1, min(_TOP_K, len(scored)))] if best - s[0] <= 2.0]
-    _, frm, to = near[rng.randrange(len(near))]
+    _, frm, to = scored[0] if level == "hard" else near[rng.randrange(len(near))]
     return frm, to

@@ -104,7 +104,7 @@ from app.game.battleship import (
     BOARD_SIZE as BS_BOARD_SIZE,
     DEFAULT_SIZE as BS_DEFAULT_SIZE,
 )
-from app.game.battleship_ai import normalize_difficulty as bs_normalize_difficulty
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.dots import (
     create_game as dots_create_game,
     apply_move as dots_apply_move,
@@ -549,7 +549,7 @@ def join_room(code: str, user: dict, password: str | None) -> dict:
 def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
     """Add a bot player to a waiting room. Returns updated room.
 
-    difficulty applies to battleship / uttt (三档 AI)；其余游戏忽略。
+    difficulty applies to every supported AI game (三档 AI)。
     Stored per-bot so one room can host bots of mixed skill.
 
     Raises ValueError if conditions are not met.
@@ -570,10 +570,7 @@ def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
         raise ValueError("房间已满")
     seq = sum(1 for p in room["players"] if p.get("is_bot")) + 1
     bot = _make_bot_player(code, seq)
-    if room["game"] == "battleship":
-        bot["ai_difficulty"] = bs_normalize_difficulty(difficulty)
-    elif room["game"] == "uttt":
-        bot["ai_difficulty"] = uttt_ai.normalize_difficulty(difficulty)
+    bot["ai_difficulty"] = normalize_difficulty(difficulty)
     room["players"].append(bot)
     _touch_activity(room)
     return room
@@ -1477,7 +1474,7 @@ def _stasis_bot_think(room: dict, gs: dict):
         if not p.get("is_bot"):
             continue
         try:
-            action = stasis_ai.decide(gs, p["id"])
+            action = stasis_ai.decide(gs, p["id"], normalize_difficulty(p.get("ai_difficulty")))
         except Exception:
             continue
         if not action:
@@ -3404,7 +3401,7 @@ def room_to_dict(room: dict) -> dict:
             "is_host": p["id"] == room["host_id"],
             "connected": p["connected"],
             "is_bot": p.get("is_bot", False),
-            # 人机的 AI 难度档（仅海战棋，见 add_bot）
+            # 人机的 AI 难度档（全部支持人机的游戏，见 add_bot）
             "ai_difficulty": p.get("ai_difficulty"),
             # 断线重连剩余秒数（仅游戏中且已断线时有值）——客户端据此倒计时，
             # 不要在界面上写死 120：测试会把超时改成 5 秒，写死就对不上了。

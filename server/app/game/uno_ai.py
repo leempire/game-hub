@@ -34,6 +34,7 @@ v1.14 起房规可配（`uno_rules`），AI 跟着多两条判断：
 import random
 from collections import Counter
 
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.uno import (
     COLORS, SKIP, REVERSE, DRAW2, SKIP_ALL, DISCARD_ALL, MERCY_LIMIT,
     active_seats, best_color, card_color, card_kind, is_wild,
@@ -127,7 +128,7 @@ def _swap_target(game: dict, seat: int) -> int | None:
     return min(pool, key=lambda s: (len(game["hands"].get(s, [])), s))
 
 
-def best_action(game: dict, seat: int) -> dict | None:
+def best_action(game: dict, seat: int, difficulty="normal", rng=None) -> dict | None:
     """给该座位挑一个动作；没得挑（不是他的回合/已终局）返回 None。"""
     if game.get("finished") or seat in game.get("out", []):
         return None
@@ -146,6 +147,11 @@ def best_action(game: dict, seat: int) -> dict | None:
         return {"action": "pass"}
 
     if options:
+        level = normalize_difficulty(difficulty)
+        if level == "easy":
+            return _play(game, seat, (rng or random).choice(options))
+        if level == "hard":
+            return _play(game, seat, min(options, key=lambda c: _hard_priority(game, seat, c)))
         # min 是稳定的：同优先级取先出现的那张，行为可预期
         return _play(game, seat, min(options, key=lambda c: _priority(game, seat, c)))
 
@@ -167,7 +173,7 @@ def best_roulette_color(game: dict, seat: int) -> str:
     return min(COLORS, key=lambda col: (seen.get(col, 0), COLORS.index(col)))
 
 
-def best_jump(game: dict, seat: int) -> dict | None:
+def best_jump(game: dict, seat: int, difficulty="normal", rng=None) -> dict | None:
     """不轮到他时能抢出的一张牌；抢不了（没开房规 / 没有相同牌）返回 None。
 
     抢出是白赚一手（不占自己的回合），所以默认「能抢就抢」。唯一要克制的是 **7**：
@@ -180,6 +186,8 @@ def best_jump(game: dict, seat: int) -> dict | None:
     if not cards:
         return None
     # 能抢的牌彼此完全相同（都等于牌堆顶那张），取哪一张都一样
+    if normalize_difficulty(difficulty) == "easy" and (rng or random).random() < 0.5:
+        return None
     card = cards[0]
     if card_kind(card) == "7" and game["rules"]["seven_zero"] in ("swap", "both"):
         target = _swap_target(game, seat)
@@ -224,3 +232,20 @@ def _play(game: dict, seat: int, card: str) -> dict:
     if card_kind(card) == "7" and game["rules"]["seven_zero"] in ("swap", "both"):
         act["target"] = _swap_target(game, seat)
     return act
+
+
+def _hard_priority(game: dict, seat: int, card: str) -> tuple:
+    """Use public hand counts to stop a near-win and retain a useful color majority."""
+    kind = card_kind(card)
+    active = active_seats(game)
+    step = game["direction"]
+    next_seat = (seat + step) % game["num_players"]
+    while next_seat not in active and next_seat != seat:
+        next_seat = (next_seat + step) % game["num_players"]
+    opponent = team_of(game, seat) is None or team_of(game, next_seat) != team_of(game, seat)
+    threatened = opponent and len(game["hands"].get(next_seat, [])) <= 2
+    attack = kind in (SKIP, DRAW2, SKIP_ALL) or (kind == REVERSE and game["num_players"] == 2) or kind.startswith("+")
+    remaining = list(game["hands"].get(seat, []))
+    remaining.remove(card)
+    same_color = sum(card_color(c) == card_color(card) for c in remaining)
+    return (0 if threatened and attack else 1, _priority(game, seat, card), -same_color)

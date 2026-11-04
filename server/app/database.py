@@ -1,10 +1,14 @@
 """SQLite database initialization and helper functions."""
 
 import json
+import hashlib
 import sqlite3
 import os
 import threading
+from uuid import uuid4
 from datetime import datetime, timezone, timedelta
+
+from app import participants
 
 
 _db_path: str = "data/gamehub.db"
@@ -119,10 +123,7 @@ def _create_tables(conn: sqlite3.Connection):
             ended_at TEXT NOT NULL
         )
     """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_game_records_players
-        ON game_records(players_json)
-    """)
+    participants.create_schema(conn)
 
 
 def seed_admin(username: str, password_hash: str, salt: str):
@@ -177,9 +178,9 @@ def row_to_user(row: sqlite3.Row) -> dict:
 def save_game_record(room: dict):
     """Persist a finished game to the game_records table.
 
-    Safe to call multiple times for the same room — records are keyed on
-    room_code + ended_at, so a duplicate insert is simply a no-op via
-    INSERT OR IGNORE.
+    A stable key stored in the game state makes duplicate callbacks and hot
+    restarts idempotent. A fresh game state gets a fresh key for the next round.
+    Participants are written in the same transaction as the final snapshot.
     """
     # 房间状态只有 waiting/playing，对局结束后回到 waiting，所以不能再用
     # 房间状态判断「是否打完了一局」——改看对局态本身：五子棋/翻转棋/点格棋/
@@ -192,13 +193,19 @@ def save_game_record(room: dict):
     snapshot = _build_snapshot(room)
     started_at = room.get("game_started_at", room.get("created_at", _now_iso()))
     ended_at = _now_iso()
+    round_start = room.get("game_started_at")
+    stable_key = (hashlib.sha256(json.dumps(
+        [room["code"], room["game"], round_start], separators=(",", ":"),
+    ).encode()).hexdigest() if round_start else uuid4().hex)
+    record_key = gs.setdefault("_record_key", stable_key)
     conn = get_conn()
     try:
-        conn.execute(
-            """INSERT INTO game_records
+        cursor = conn.execute(
+            """INSERT OR IGNORE INTO game_records
                (game, room_code, players_json, results_json,
-                snapshot_json, started_at, ended_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                snapshot_json, started_at, ended_at, record_key,
+                practice, challenge_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 room["game"],
                 room["code"],
@@ -207,45 +214,42 @@ def save_game_record(room: dict):
                 json.dumps(snapshot, ensure_ascii=False),
                 started_at,
                 ended_at,
+                record_key,
+                int(bool(room.get("practice"))),
+                room.get("challenge_date"),
             ),
         )
+        if cursor.rowcount:
+            has_bots = participants.write_participants(
+                conn, cursor.lastrowid, players, results, snapshot, room["code"],
+            )
+            conn.execute("""UPDATE game_records SET has_bots = ?, participants_indexed = 1
+                            WHERE id = ?""", (int(has_bots), cursor.lastrowid))
         conn.commit()
     finally:
         conn.close()
 
 
 def get_user_history(user_id: int, page: int = 1, size: int = 20) -> dict:
-    """Return paginated history records for a user.
-
-    A record belongs to a user when the user's username appears in
-    players_json. We scan with LIKE '%username%' (room sizes are tiny so
-    this is acceptable).
-    """
+    """Read exact user IDs through the participant index (practice excluded)."""
     conn = get_conn()
     try:
-        user_row = conn.execute(
-            "SELECT username FROM users WHERE id = ?", (user_id,)
-        ).fetchone()
-        if not user_row:
-            return {"items": [], "total": 0, "page": page, "size": size}
-        username = user_row["username"]
-        like = f'%"{username}"%'
         total = conn.execute(
-            "SELECT COUNT(*) FROM game_records WHERE players_json LIKE ?",
-            (like,),
+            """SELECT COUNT(*) FROM game_participants p
+               JOIN game_records r ON r.id = p.record_id
+               JOIN users u ON u.id = p.user_id
+               WHERE p.user_id = ? AND r.practice = 0""", (user_id,),
         ).fetchone()[0]
-        offset = (page - 1) * size
         rows = conn.execute(
-            """SELECT id, game, room_code, players_json, results_json,
-                      snapshot_json, started_at, ended_at
-               FROM game_records
-               WHERE players_json LIKE ?
-               ORDER BY id DESC
-               LIMIT ? OFFSET ?""",
-            (like, size, offset),
+            """SELECT r.* FROM game_participants p
+               JOIN game_records r ON r.id = p.record_id
+               JOIN users u ON u.id = p.user_id
+               WHERE p.user_id = ? AND r.practice = 0
+               ORDER BY r.id DESC LIMIT ? OFFSET ?""",
+            (user_id, size, (page - 1) * size),
         ).fetchall()
-        items = [_row_to_record(r) for r in rows]
-        return {"items": items, "total": total, "page": page, "size": size}
+        return {"items": [_row_to_record(row) for row in rows], "total": total,
+                "page": page, "size": size}
     finally:
         conn.close()
 
@@ -271,26 +275,15 @@ def get_user_stats(user_id: int) -> dict:
     2048 的 `end`（没合出 2048）和有胜负但打平都不该稀释胜率；
     连胜遇到任何非 `win` 都中断（平局/认输同样断）。
     """
-    empty = {
-        "total": 0, "wins": 0, "losses": 0, "draws": 0,
-        "win_rate": None, "current_streak": 0, "best_streak": 0,
-        "recent_7d": 0, "top_games": [], "recent_games": [],
-        "best_scores": {}, "best_times": {},
-    }
     conn = get_conn()
     try:
-        user_row = conn.execute(
-            "SELECT username FROM users WHERE id = ?", (user_id,)
-        ).fetchone()
-        if not user_row:
-            return empty
-        username = user_row["username"]
         rows = conn.execute(
-            """SELECT game, results_json, ended_at
-               FROM game_records
-               WHERE players_json LIKE ?
-               ORDER BY id ASC""",
-            (f'%"{username}"%',),
+            """SELECT r.game, p.result, p.metrics_json, r.ended_at
+               FROM game_participants p
+               JOIN game_records r ON r.id = p.record_id
+               JOIN users u ON u.id = p.user_id
+               WHERE p.user_id = ? AND r.practice = 0 ORDER BY r.id ASC""",
+            (user_id,),
         ).fetchall()
     finally:
         conn.close()
@@ -305,17 +298,9 @@ def get_user_stats(user_id: int) -> dict:
     cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
     for row in rows:
-        try:
-            results = json.loads(row["results_json"])
-        except (TypeError, ValueError):
-            continue
-        mine = next(
-            (e for e in results if e.get("username") == username), None
-        )
-        if not mine:
-            continue
+        mine = json.loads(row["metrics_json"])
         game = row["game"]
-        result = mine.get("result")
+        result = row["result"]
         total += 1
         game_counts[game] = game_counts.get(game, 0) + 1
         if result == "win":
@@ -381,9 +366,11 @@ def _build_players_record(room: dict) -> list[dict]:
     players = []
     for idx, p in enumerate(room["players"]):
         entry: dict = {
+            "user_id": p["id"],
             "username": p["username"],
             "nickname": p.get("nickname"),
             "seat": idx,
+            "is_bot": bool(p.get("is_bot") or p["id"] < 0),
         }
         color = colors.get(p["id"])
         if color:

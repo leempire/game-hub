@@ -14,6 +14,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import room_manager as rm
+from app.participants import backfill
 from app.database import init_db, get_conn, save_game_record, get_user_history
 
 
@@ -525,6 +526,7 @@ def test_user_stats_aggregates_results(client):
                     "{}", ended, ended,
                 ),
             )
+            backfill(conn)
             conn.commit()
         finally:
             conn.close()
@@ -587,6 +589,7 @@ def test_user_stats_keeps_personal_best_per_game(client):
                     "{}", ended, ended,
                 ),
             )
+            backfill(conn)
             conn.commit()
         finally:
             conn.close()
@@ -625,6 +628,7 @@ def test_user_stats_keeps_best_mine_time_per_difficulty(client):
                     json.dumps([entry]), "{}", ended, ended,
                 ),
             )
+            backfill(conn)
             conn.commit()
         finally:
             conn.close()

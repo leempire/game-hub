@@ -14,6 +14,7 @@
 import random
 import time
 
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.xiangqi import (
     ROWS,
     all_legal_moves,
@@ -138,7 +139,7 @@ def _root_search(board, color: str, moves, depth: int, deadline: float):
     return [(s, mv) for s, mv in results if s == best]
 
 
-def best_move(board, color: str, time_budget: float = _TIME_BUDGET):
+def best_move(board, color: str, time_budget: float | None = None, difficulty="normal", rng=None):
     """给 color 方算一步棋。返回 ``((fr,fc),(tr,tc))`` 或 None（无着可走）。
 
     **不改动传入的 board**（走子后一律撤销）——调用方可能正拿着房间里的盘面。
@@ -148,10 +149,15 @@ def best_move(board, color: str, time_budget: float = _TIME_BUDGET):
         return None
     if len(moves) == 1:
         return moves[0]
+    level = normalize_difficulty(difficulty)
+    if level == "easy":
+        return (rng or random).choice(moves)
+    if time_budget is None:
+        time_budget = _TIME_BUDGET if level == "normal" else 1.5
     deadline = time.time() + time_budget
     ordered = _order_moves(board, moves)
     best = ordered[0]
-    for depth in range(1, _MAX_DEPTH + 1):
+    for depth in range(1, (_MAX_DEPTH if level == "normal" else _MAX_DEPTH + 2) + 1):
         try:
             tier = _root_search(board, color, ordered, depth, deadline)
         except _Timeout:

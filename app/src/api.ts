@@ -127,7 +127,7 @@ export interface RoomPlayer {
   is_host: boolean;
   connected: boolean;
   is_bot?: boolean;
-  /** 人机的 AI 难度档（仅海战棋：easy/normal/hard），其他游戏为 null。 */
+  /** 人机的 AI 难度档（所有支持人机的游戏：easy/normal/hard）；旧房间可为 null。 */
   ai_difficulty?: string | null;
   /** 断线重连剩余秒数；在线或非游戏中为 null。客户端据此倒计时。 */
   reconnect_left?: number | null;
