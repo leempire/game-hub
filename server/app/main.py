@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.cfg import config, server_dir
 from app.database import init_db, seed_admin, set_password
 from app.security import init_security, hash_password
-from app.routers import auth, admin, rooms, app_update, history
+from app.routers import auth, admin, rooms, app_update, history, competition, game_social
 from app.ws import (
     router as ws_router,
     _register_dc_timeout_callback,
@@ -87,12 +87,20 @@ async def on_startup():
     loop.create_task(reschedule_after_restore())
 
 
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Save timed-room balances before the service stops."""
+    await rm.room_timing.shutdown(rm.all_rooms())
+
+
 # Mount routers
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(rooms.router)
 app.include_router(app_update.router)
 app.include_router(history.router)
+app.include_router(competition.router)
+app.include_router(game_social.router)
 app.include_router(ws_router)
 
 # APK 静态托管：server/data/app-release/ -> /media/app-release/

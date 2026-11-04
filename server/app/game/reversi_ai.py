@@ -5,7 +5,9 @@ Board: list[list[int]] (8×8), board[y][x], EMPTY=0 / BLACK=1 / WHITE=2.
 """
 
 import copy
+import random
 import time
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.reversi import (
     BOARD_SIZE, EMPTY, BLACK, WHITE,
     get_legal_moves, apply_move, opponent, count_stones,
@@ -26,18 +28,28 @@ _WEIGHTS = [
 ]
 
 
+def _weight(x, y, size):
+    if size == BOARD_SIZE:
+        return _WEIGHTS[y][x]
+    if x in (0, size - 1) and y in (0, size - 1):
+        return 100
+    if x in (0, 1, size - 2, size - 1) and y in (0, 1, size - 2, size - 1):
+        return -50 if x not in (0, size - 1) and y not in (0, size - 1) else -20
+    return 10 if x in (0, size - 1) or y in (0, size - 1) else 1
+
+
 # ── evaluation ─────────────────────────────────────────────────────
 
 def _pos_score(board, player):
     """Sum of position weights for *player*'s stones minus opponent's."""
     opp = opponent(player)
     score = 0
-    for y in range(BOARD_SIZE):
-        for x in range(BOARD_SIZE):
+    for y in range(len(board)):
+        for x in range(len(board)):
             if board[y][x] == player:
-                score += _WEIGHTS[y][x]
+                score += _weight(x, y, len(board))
             elif board[y][x] == opp:
-                score -= _WEIGHTS[y][x]
+                score -= _weight(x, y, len(board))
     return score
 
 
@@ -59,7 +71,7 @@ def _evaluate(board, player):
     """Combined evaluation for *player*."""
     pos = _pos_score(board, player)
     mob = _mobility_score(board, player) * 5
-    empty = sum(1 for y in range(BOARD_SIZE) for x in range(BOARD_SIZE)
+    empty = sum(1 for y in range(len(board)) for x in range(len(board))
                 if board[y][x] == EMPTY)
     stn = _stone_score(board, player) * (2 if empty < 12 else 0)
     return pos + mob + stn
@@ -69,8 +81,8 @@ def _evaluate(board, player):
 
 def _minimax(board, player, depth, alpha, beta, deadline):
     """NegaMax with alpha-beta. Score is from *player*'s perspective."""
-    if time.time() > deadline:
-        return 0, None
+    if time.monotonic() > deadline:
+        raise _Timeout
 
     moves = get_legal_moves(board, player)
     opp = opponent(player)
@@ -95,7 +107,7 @@ def _minimax(board, player, depth, alpha, beta, deadline):
         return -sc, None
 
     # move ordering: corners first for better pruning
-    moves.sort(key=lambda m: _WEIGHTS[m[1]][m[0]], reverse=True)
+    moves.sort(key=lambda m: _weight(m[0], m[1], len(board)), reverse=True)
 
     best_score, best_move = -100001, None
     for mx, my in moves:
@@ -112,9 +124,13 @@ def _minimax(board, player, depth, alpha, beta, deadline):
     return best_score, best_move
 
 
+class _Timeout(Exception):
+    """Discard incomplete iterative-deepening layers."""
+
+
 # ── public API ────────────────────────────────────────────────────
 
-def best_move(board, player):
+def best_move(board, player, difficulty="normal", rng=None):
     """Choose best move for *player*.
 
     Args:
@@ -129,7 +145,10 @@ def best_move(board, player):
     if len(moves) == 1:
         return moves[0]
 
-    empty = sum(1 for y in range(BOARD_SIZE) for x in range(BOARD_SIZE)
+    level = normalize_difficulty(difficulty)
+    if level == "easy":
+        return (rng or random).choice(moves)
+    empty = sum(1 for y in range(len(board)) for x in range(len(board))
                 if board[y][x] == EMPTY)
     # adaptive depth: deeper in endgame (fewer moves per position)
     if empty <= 10:
@@ -139,13 +158,18 @@ def best_move(board, player):
     else:
         max_depth = 4
 
-    deadline = time.time() + _TIME_BUDGET
+    deadline = time.monotonic() + (_TIME_BUDGET if level == "normal" else 0.5)
+    if level == "hard":
+        max_depth += 2
     result = moves[0]
     for depth in range(1, max_depth + 1):
-        _, m = _minimax(board, player, depth,
-                        -100001, 100001, deadline)
+        try:
+            _, m = _minimax(board, player, depth,
+                            -100001, 100001, deadline)
+        except _Timeout:
+            break
         if m is not None:
             result = m
-        if time.time() > deadline:
+        if time.monotonic() > deadline:
             break
     return result

@@ -17,7 +17,8 @@ import {
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave, useWebKeys } from '../backGuard';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 import {
   TetrisPiece, TetrisRules, TetrisLeaderRow, gravityMs, GARBAGE_LABEL,
   ID_TO_PIECE, GARBAGE_ID, cellsOf, stepDown, movePiece, rotatePiece,
@@ -118,7 +119,7 @@ function cellLabel(value: number): string {
 const SIDE_W = 92;
 /** 棋盘之外的开销：导航栏 64 + 顶栏 32 + 容器 8 + 面板内边距与边框 20
  *  + 操作区（47 + 上边距 16）63 + 认输（34 + 上边距 8）46 + 提示条槽 34 ≈ 267，取 280。 */
-const CHROME_H = 280;
+const CHROME_H = 380;
 
 /** 拖动时「走一格」需要的位移：手指跨过 0.8 格就真的走一格（实时跟手）。 */
 const DRAG_STEP_RATIO = 0.8;
@@ -140,6 +141,7 @@ function useCellSize(rows: number, cols: number) {
 export default function TetrisScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const navigation = useNavigation<any>();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<TetrisPayload | null>(null);
   const [rules, setRules] = useState<TetrisRules | null>(null);
@@ -412,7 +414,7 @@ export default function TetrisScreen({ code, onLeave }: Props) {
     ws.on('game_over', handleGameOver);
     ws.on('room_closed', handleClosed);
     ws.on('error', (msg) => notify('提示', msg.message as string));
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
 
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave, setLocal, flash, flush]);
@@ -554,8 +556,8 @@ export default function TetrisScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   const handleLeaveRoom = async () => {
     if (!token) return;
@@ -574,7 +576,7 @@ export default function TetrisScreen({ code, onLeave }: Props) {
   const boardH = rows * cell + 4;
 
   return (
-    <View style={styles.container}>
+    <GameShell game="tetris" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.container}>
       {/* 顶栏：排行榜胶囊 + 规则入口 */}
       <View style={styles.topBar}>
         <TouchableOpacity
@@ -587,7 +589,7 @@ export default function TetrisScreen({ code, onLeave }: Props) {
             第 {Math.max(1, leaderboard.findIndex((r) => r.user_id === user?.id) + 1)} 名 · {leaderboard.length} 人
           </Text>
         </TouchableOpacity>
-        <GameHelpButton game="tetris" />
+
       </View>
 
       {/* 排行榜浮层盖住棋盘一角，所以做成可收起 */}
@@ -740,14 +742,13 @@ export default function TetrisScreen({ code, onLeave }: Props) {
       ) : null}
 
       {/* 结算 */}
-      <ModalM visible={showGameOver} onClose={() => {}}>
-        <Text style={styles.modalTitle}>本局结束</Text>
+      <GameResult visible={showGameOver} result={'本局结束'} players={shellPlayers(room, user?.id, game)} roomButtonTestID="t-result-back" onBackToRoom={handleBackToRoom}
+        onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
         <Text style={styles.modalSub}>
           {ranking.length > 0
             ? `${nameOf(ranking[0].user_id)} 以 ${ranking[0].score} 分获得第一名`
             : REASON_LABELS[game?.reason || ''] || '对局结束'}
-        </Text>
-        <View style={styles.rankList}>
+        </Text><View style={styles.rankList}>
           {ranking.map((r) => (
             <View key={r.user_id} style={styles.rankRow}>
               <Text style={styles.rankNo}>{r.rank}</Text>
@@ -757,10 +758,7 @@ export default function TetrisScreen({ code, onLeave }: Props) {
             </View>
           ))}
         </View>
-        <TouchableOpacity style={styles.primaryBtn} onPress={handleBackToRoom} testID="t-result-back">
-          <Text style={styles.primaryBtnText}>返回房间</Text>
-        </TouchableOpacity>
-      </ModalM>
+      </GameResult>
 
       {/* 认输 / 退出确认 */}
       <ModalM visible={confirm !== null} onClose={() => setConfirm(null)}>
@@ -783,7 +781,7 @@ export default function TetrisScreen({ code, onLeave }: Props) {
           </TouchableOpacity>
         </View>
       </ModalM>
-    </View>
+    </GameShell>
   );
 }
 

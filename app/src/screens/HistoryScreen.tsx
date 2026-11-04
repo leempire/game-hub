@@ -5,6 +5,7 @@ import {
   ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import RecordShareActions from '../RecordShareActions';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
@@ -14,7 +15,7 @@ import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
 import { makeLayout } from '../luzhanqiBoard';
 import {
-  colors, spacing, radius, fontSize, g2048Tile, ludoColors,
+  colors, spacing, radius, fontSize, g2048Tile, ludoColors, gameSurfaces, shadow,
   playerColors, battleshipShipColors, battleshipWater, withAlpha,
   reversiBoard, dotsInk,
   xiangqiBoard, xiangqiLine, xiangqiFace, xiangqiRed, xiangqiBlack,
@@ -173,6 +174,7 @@ export default function HistoryScreen() {
                   ))}
                 </View>
                 <BoardSnapshot rec={rec} />
+                <RecordShareActions token={token} recordId={rec.id} />
               </View>
             )}
           </TouchableOpacity>
@@ -197,7 +199,7 @@ export default function HistoryScreen() {
 }
 
 // Inline board snapshot renderer
-function BoardSnapshot({ rec }: { rec: GameRecord }) {
+export function BoardSnapshot({ rec }: { rec: GameRecord }) {
   const { width } = useWindowDimensions();
   const snap = rec.snapshot;
   // 棋类逐步回放：总手数来自服务端快照里的 moves（老战绩没有 → 0，不显示控制条）
@@ -231,7 +233,7 @@ function BoardSnapshot({ rec }: { rec: GameRecord }) {
     );
   }
   if (view.game === 'xiangqi') {
-    return <XiangqiBoard snap={view} />;
+    return <View><XiangqiBoard snap={view} /><Text style={{ color: colors.textSecondary, marginTop: spacing.sm }} testID="xiangqi-history-notation">{(view.moves || []).map((move: any, index: number) => move.notation ? `${index + 1}. ${move.notation}` : '').filter(Boolean).join(' · ')}</Text></View>;
   }
   if (view.game === 'battleship') {
     return <BattleshipSnapshot snap={view} players={rec.players} />;
@@ -295,7 +297,7 @@ function BoardSnapshot({ rec }: { rec: GameRecord }) {
     return <SnapshotTetris snap={view as any} />;
   }
   if (view.game === 'uno') {
-    return <UnoSnapshotView snap={view as any} />;
+    return <UnoSnapshotView snap={view as any} players={rec.players} />;
   }
   // stasis 快照类型尚未进 GameSnapshot 联合（api.ts），故用 as any 比较与传参。
   if ((view as any).game === 'stasis') {
@@ -452,7 +454,7 @@ const stasisSnapStyles = StyleSheet.create({
  * 牌面渲染直接复用对局屏那份 `UnoCardView`——分开写两份的话，同一张牌在
  * 战绩页和对局页会长得不一样（飞行棋棋盘踩过这个坑）。
  */
-function UnoSnapshotView({ snap }: { snap: any }) {
+function UnoSnapshotView({ snap, players }: { snap: any; players: GameRecord['players'] }) {
   const ranking: any[] = snap.ranking || [];
   const hands: Record<string, string[]> = snap.hands || {};
   const cw = 26;
@@ -468,6 +470,14 @@ function UnoSnapshotView({ snap }: { snap: any }) {
       {snap.rules_name ? (
         <Text style={snapUnoStyles.rulesName}>{`玩法：${snap.rules_name}`}</Text>
       ) : null}
+      {snap.series && <View testID="uno-history-series">
+        <Text style={snapUnoStyles.rulesName}>{snap.series.target} 分赛 · 第 {snap.series.rounds} 局 · {snap.series.finished ? '系列赛已结束' : '系列赛继续'}</Text>
+        {Object.entries(snap.series.scores || {}).map(([uid, score]) => {
+          const seat = (snap.seat_uids || []).indexOf(Number(uid));
+          const player = players.find(member => member.seat === seat);
+          return <Text key={uid} style={snapUnoStyles.rulesName}>{player?.nickname || player?.username || '玩家'} · {String(score)} 分</Text>;
+        })}
+      </View>}
       {/* 组队档（v1.16）：胜负是**队伍**，所以名次前面标出谁和谁一队 ——
           否则回放里两个并列第一看起来像「两个人都赢了」。老战绩没有这两个
           字段，缺了就不显示。 */}
@@ -897,7 +907,7 @@ function BattleshipSnapshot({ snap, players }: {
                         left: x * bsCell, top: y * bsCell,
                         width: bsCell, height: bsCell,
                         backgroundColor: cell > 0
-                          ? BS_SHIP_COLORS[cell] || '#666'
+                          ? BS_SHIP_COLORS[cell] || colors.textMuted
                           : battleshipWater,
                       }]}
                     />
@@ -996,7 +1006,7 @@ function DotsSnapshot({ snap, hideResult = false }: { snap: any; hideResult?: bo
               <View key={`h${y}-${x}`} style={[dotsStyles.hEdge, {
                 left: dDot + x * dCell + dDot, top: dDot + y * dCell - 1,
                 width: dCell - dDot, height: 2,
-                backgroundColor: pColors[val] || '#666',
+                backgroundColor: pColors[val] || colors.textMuted,
               }]} />
             ) : null)
           )}
@@ -1006,7 +1016,7 @@ function DotsSnapshot({ snap, hideResult = false }: { snap: any; hideResult?: bo
               <View key={`v${y}-${x}`} style={[dotsStyles.vEdge, {
                 left: dDot + x * dCell - 1, top: dDot + y * dCell + dDot,
                 width: 2, height: dCell - dDot,
-                backgroundColor: pColors[val] || '#666',
+                backgroundColor: pColors[val] || colors.textMuted,
               }]} />
             ) : null)
           )}
@@ -1064,7 +1074,7 @@ function Snapshot2048({ snap }: { snap: any }) {
                         snap2048Styles.cell,
                         {
                           left: c * 32, top: r * 32, width: 28, height: 28,
-                          backgroundColor: val === 0 ? '#cdc1b4' : tileColor.bg,
+                          backgroundColor: val === 0 ? gameSurfaces.tileSlot : tileColor.bg,
                         },
                       ]}
                     >
@@ -1172,7 +1182,7 @@ const snapTetrisStyles = StyleSheet.create({
 });
 
 const dotsStyles = StyleSheet.create({
-  board: { position: 'relative', backgroundColor: '#FAFAF8', borderRadius: 4, overflow: 'hidden' },
+  board: { position: 'relative', backgroundColor: gameSurfaces.paper, borderRadius: 4, overflow: 'hidden' },
   dot: { position: 'absolute', backgroundColor: dotsInk, zIndex: 2 },
   boxFill: { position: 'absolute', zIndex: 0 },
   hEdge: { position: 'absolute', zIndex: 1 },
@@ -1192,7 +1202,7 @@ const snap2048Styles = StyleSheet.create({
   boards: { flexDirection: 'row', gap: spacing.md },
   boardWrap: { alignItems: 'center' },
   label: { fontSize: fontSize.xs, color: colors.textSecondary, marginBottom: 2 },
-  board: { position: 'relative', backgroundColor: '#bbada0', borderRadius: 4, overflow: 'hidden' },
+  board: { position: 'relative', backgroundColor: gameSurfaces.tileFrame, borderRadius: 4, overflow: 'hidden' },
   cell: { position: 'absolute', alignItems: 'center', justifyContent: 'center', borderRadius: 3 },
   cellText: { fontWeight: '800' },
 });
@@ -1222,7 +1232,7 @@ function MineBoard({
             styles.mineCell,
             {
               width: mCell, height: mCell,
-              backgroundColor: isRevealed ? '#d4c29a' : '#b8b8b8',
+              backgroundColor: isRevealed ? gameSurfaces.historyMineRevealed : gameSurfaces.historyMineCover,
             },
           ]}
         >
@@ -1259,12 +1269,12 @@ function LudoSnapshot({ snap, players }: {
 
   return (
     <View style={ludoSnapStyles.container}>
-      <Text style={ludoSnapStyles.title}>终局排名</Text>
+      <Text style={ludoSnapStyles.title}>{snap.winner_team != null ? `第 ${snap.winner_team + 1} 队获胜` : '终局排名'}</Text>
       {ranking.map((r) => (
         <View key={r.seat} style={[ludoSnapStyles.row, r.rank === 1 && ludoSnapStyles.first]}>
           <Text style={ludoSnapStyles.rank}>#{r.rank}</Text>
-          <View style={[ludoSnapStyles.colorDot, { backgroundColor: ludoColors[r.color] || '#999' }]} />
-          <Text style={ludoSnapStyles.name}>{r.nickname || r.username}</Text>
+          <View style={[ludoSnapStyles.colorDot, { backgroundColor: ludoColors[r.color] || colors.borderStrong }]} />
+          <Text style={ludoSnapStyles.name}>{r.nickname || r.username}{snap.seat_teams?.[r.seat] != null ? ` · 第 ${snap.seat_teams[r.seat] + 1} 队` : ''}</Text>
           <Text style={ludoSnapStyles.count}>{r.finished_count}/4 到达</Text>
         </View>
       ))}
@@ -1272,7 +1282,7 @@ function LudoSnapshot({ snap, players }: {
       <View style={ludoSnapStyles.boardWrap}>
         {Object.entries(ludoPlayers).map(([seat, p]: [string, any]) => (
           <View key={seat} style={ludoSnapStyles.playerRow}>
-            <View style={[ludoSnapStyles.colorDot, { backgroundColor: ludoColors[p.color] || '#999' }]} />
+            <View style={[ludoSnapStyles.colorDot, { backgroundColor: ludoColors[p.color] || colors.borderStrong }]} />
             <Text style={ludoSnapStyles.pieces}>
               {p.pieces.map((v: number) => v === 57 ? '✓' : v === -1 ? '·' : v).join(' ')}
             </Text>
@@ -1309,11 +1319,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     marginBottom: spacing.md,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    ...shadow.card,
   },
   row: { flexDirection: 'row', alignItems: 'center' },
   iconWrap: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
@@ -1359,7 +1365,7 @@ const styles = StyleSheet.create({
     backgroundColor: xiangqiFace,
   },
   mineRow: { flexDirection: 'row' },
-  mineCell: { alignItems: 'center', justifyContent: 'center', borderWidth: 0.5, borderColor: '#999' },
+  mineCell: { alignItems: 'center', justifyContent: 'center', borderWidth: 0.5, borderColor: colors.borderStrong },
   mineText: { color: colors.danger, fontWeight: '800', fontSize: 14 },
   mineNum: { fontWeight: '800', fontSize: 13 },
   mineFlag: { color: colors.primary, fontWeight: '800', fontSize: 13 },

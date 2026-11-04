@@ -9,7 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.security import decode_token_ws
 from app.database import get_conn, row_to_user
-from app import room_manager as rm
+from app import room_manager as rm, spectating
 from app.game.minesweeper import game_to_sync as mine_game_to_sync
 from app.game.reversi import game_to_sync as reversi_game_to_sync
 from app.game.battleship import game_to_sync as bs_game_to_sync
@@ -22,7 +22,8 @@ from app.game.game2048 import game_to_sync as g2048_game_to_sync
 from app.game.game2048 import leaderboard as g2048_leaderboard
 from app.game.xiangqi import game_to_sync as xiangqi_game_to_sync
 from app.game import luzhanqi as lzq
-from app.game import uttt, uttt_ai
+from app.game import uttt, uttt_ai, gomoku as gomoku_engine, connect4 as connect4_engine
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.luzhanqi import view_for as luzhanqi_view_for
 from app.game.luzhanqi import mask_battle as luzhanqi_mask_battle
 from app.game.tetris import (
@@ -54,8 +55,25 @@ _connections: dict[str, dict[int, WebSocket]] = {}
 def _register_dc_timeout_callback():
     """Register the callback for disconnect timeout events."""
 
-    async def _on_timeout(code: str, winner: str):
+    async def _on_timeout(code: str, winner: str | int, timeout_event: dict | None = None):
         room = rm.get_room(code)
+        if room and room["game"] == "2048":
+            if timeout_event is None:
+                return
+            # 使用超时发生时捕获的公开事件，防同轮多个超时重复终局；
+            # 每次发送前核对本局身份，慢连接或延迟任务不能污染续开的新局。
+            messages = [timeout_event["move"]]
+            if timeout_event["game_over"]:
+                messages.append({"type": "game_over", **timeout_event["game_over"]})
+            for message in messages:
+                for connection in list(_connections.get(code, {}).values()):
+                    if rm.get_room(code) is not room or room["game_state"] is not timeout_event["game_state"]:
+                        return
+                    try:
+                        await _send_ordered(connection, message)
+                    except Exception:
+                        pass
+            return
         if room and room["game"] == "spider":
             await _broadcast(code, {"type": "spider_state", "game": rm.spider.game_to_sync(room["game_state"])})
             await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(room)})
@@ -71,6 +89,12 @@ def _register_dc_timeout_callback():
                 await _broadcast_uno_game_over(code, room)
             else:
                 await _maybe_autopass_uno(code, room)
+            return
+        if room and room["game"] == "ludo":
+            await _broadcast(code, {"type": "game_over",
+                "reason": room["game_state"].get("reason", "disconnect"),
+                "winner_team": room["game_state"].get("winner_team"),
+                "ranking": room.get("_ludo_ranking", [])})
             return
         await _broadcast(code, {
             "type": "game_over",
@@ -172,11 +196,28 @@ async def ws_room(websocket: WebSocket, code: str):
                     })
 
 
+_dispatch_tasks: set = set()
+
+
 async def _handle_message(code: str, user_id: int, data: dict):
+    task = asyncio.current_task()
+    room = rm.get_room(code)
+    _dispatch_tasks.add(task)
+    try:
+        await _dispatch_message(code, user_id, data)
+    finally:
+        _dispatch_tasks.discard(task)
+        if room is not None:
+            await _flush_pending_lobby(room)
+
+
+async def _dispatch_message(code: str, user_id: int, data: dict):
     """Route a client message to the appropriate handler."""
     msg_type = data.get("type")
     room = rm.get_room(code)
     if not room:
+        return
+    if not await _time_guard(code):
         return
     if msg_type == "ping":
         conns = _connections.get(code, {})
@@ -207,6 +248,8 @@ async def _handle_message(code: str, user_id: int, data: dict):
         await _handle_uttt_move(code, user_id, data)
     elif msg_type == "xiangqi_move":
         await _handle_xiangqi_move(code, user_id, data)
+    elif msg_type == "xiangqi_undo":
+        await _handle_xiangqi_undo(code, user_id)
     elif msg_type == "placement":
         await _handle_placement(code, user_id, data)
     elif msg_type == "fire":
@@ -243,6 +286,10 @@ async def _handle_message(code: str, user_id: int, data: dict):
         await _handle_uno_draw(code, user_id)
     elif msg_type == "uno_pass":
         await _handle_uno_pass(code, user_id)
+    elif msg_type == "uno_challenge_wild4":
+        await _handle_uno_arbitration(code, user_id, "challenge_wild4")
+    elif msg_type == "uno_catch":
+        await _handle_uno_arbitration(code, user_id, "catch_uno", data.get("target"))
     elif msg_type == "uno_call":
         await _handle_uno_call(code, user_id, data)
     elif msg_type == "uno_roulette":
@@ -335,6 +382,8 @@ async def _handle_start(code: str, user_id: int):
     if room["game"] == "minesweeper":
         players_info = rm._get_players_info(room)
         sync_game = mine_game_to_sync(gs, players_info)
+        if room.get("challenge_date"):
+            sync_game["challenge"] = rm.challenge_info(room)
         await _broadcast(code, {
             "type": "game_start",
             "game": sync_game,
@@ -394,7 +443,7 @@ async def _handle_start(code: str, user_id: int):
                 sync_game = _game_state_for_sync(gs, pid)
             await _send_ws(ws, {
                 "type": "game_start",
-                "game": sync_game,
+                "game": _timed_view(room, pid, sync_game),
                 "first": first_color,
             })
     # Schedule bot first move if needed
@@ -403,15 +452,17 @@ async def _handle_start(code: str, user_id: int):
 
 async def _handle_move(code: str, user_id: int, data: dict):
     x = data.get("x")
-    if x is None:
+    if type(x) is not int:
+        await _send_error(code, user_id, "请提供整数棋盘坐标")
         return
     room = rm.get_room(code)
     # 重力四子棋只发列号（落点行由服务端按重力算），所以放在 y 校验之前
     if room and room["game"] == "connect4":
-        await _handle_connect4_move(code, user_id, int(x))
+        await _handle_connect4_move(code, user_id, x, data.get("action", "drop"))
         return
     y = data.get("y")
-    if y is None:
+    if type(y) is not int:
+        await _send_error(code, user_id, "请提供整数棋盘坐标")
         return
     if room and room["game"] == "minesweeper":
         await _handle_reveal(code, user_id, data)
@@ -460,9 +511,9 @@ async def _handle_uttt_move(code: str, user_id: int, data: dict):
         _maybe_schedule_bot_turn(code, room, room["game_state"])
 
 
-async def _handle_connect4_move(code: str, user_id: int, col: int):
+async def _handle_connect4_move(code: str, user_id: int, col: int, action: str = "drop"):
     """Handle a Connect Four drop: broadcast the authoritative landing row."""
-    result = rm.connect4_make_move(code, user_id, col)
+    result = rm.connect4_make_move(code, user_id, col, action)
     if not result["ok"]:
         conns = _connections.get(code, {})
         ws = conns.get(user_id)
@@ -716,6 +767,7 @@ async def _handle_roll(code: str, user_id: int):
             "type": "game_over",
             "reason": result["game_over"]["reason"],
             "ranking": result["game_over"].get("ranking", []),
+            "winner_team": result["game_over"].get("winner_team"),
         })
     else:
         _maybe_schedule_bot_turn(code, room, room["game_state"])
@@ -758,6 +810,7 @@ async def _handle_move_piece(code: str, user_id: int, data: dict):
             "type": "game_over",
             "reason": result["game_over"]["reason"],
             "ranking": result["game_over"].get("ranking", []),
+            "winner_team": result["game_over"].get("winner_team"),
         })
     else:
         _maybe_schedule_bot_turn(code, room, room["game_state"])
@@ -840,6 +893,7 @@ async def _handle_surrender(code: str, user_id: int):
                 "type": "game_over",
                 "reason": go["reason"],
                 "ranking": go.get("ranking", []),
+                "winner_team": go.get("winner_team"),
             })
         else:
             _maybe_schedule_bot_turn(code, room, room["game_state"])
@@ -907,6 +961,7 @@ async def _handle_leave(code: str, user_id: int):
                 "type": "game_over",
                 "reason": updated_room["game_state"].get("reason", "all_finished"),
                 "ranking": ranking,
+                "winner_team": updated_room["game_state"].get("winner_team"),
             })
         elif updated_room["game"] == "2048":
             gs = updated_room["game_state"]
@@ -966,6 +1021,7 @@ async def kick_user(user_id: int, reason: str):
 
     关闭码 4001 = 未授权：客户端 `RoomSocket` 见到它不再重连。断开后照常走
     `ws_room` 的掉线流程（对局中的会起判负计时），和他自己掉线一样处理。"""
+    await spectating.kick_user(user_id, reason)
     for code, conns in list(_connections.items()):
         ws = conns.get(user_id)
         if ws is None:
@@ -979,14 +1035,22 @@ async def kick_user(user_id: int, reason: str):
 async def _broadcast(code: str, message: dict, exclude: set[int] | None = None):
     """Send a message to all connected players in a room."""
     conns = _connections.get(code, {})
+    room = rm.get_room(code)
     exclude = exclude or set()
     for uid, ws in list(conns.items()):
         if uid in exclude:
             continue
         try:
-            await _send_ordered(ws, message)
+            payload = message
+            if room and room["game"] == "xiangqi" and message.get("type") in ("move", "clock_update"):
+                payload = _timed_view(room, uid, dict(message))
+            await _send_ordered(ws, payload)
         except Exception:
             pass
+    if room and message.get("type") == "game_over":
+        if room["game"] == "luzhanqi" and room.get("game_state"):
+            await _luzhanqi_send_view(code, room, room["game_state"], "luzhanqi_state")
+        await _flush_pending_lobby(room)
 
 
 def _build_sync(room: dict, user_id: int) -> dict:
@@ -1033,6 +1097,10 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = lzq.game_to_sync(room["game_state"], user_id)
         else:
             game_info = _game_state_for_sync(room["game_state"], user_id)
+    if game_info is not None:
+        game_info = _timed_view(room, user_id, game_info)
+    if game_info is not None and room.get("challenge_date"):
+        game_info["challenge"] = rm.challenge_info(room)
     # in_game：这个人在本局里还算不算「在局玩家」。房间页只对在局玩家自动跳对局页——
     # 扫雷/飞行棋/2048 的玩家出局后仍留在房间里，不加这个判断他们一点「退出」
     # 就会被 sync 弹回对局页（点了没反应、页面闪一下还在原处）。
@@ -1045,7 +1113,11 @@ def _build_sync(room: dict, user_id: int) -> dict:
 def _game_state_for_sync(gs: dict, user_id: int) -> dict:
     """Build the game state portion of a sync message (gomoku)."""
     return {
-        "board_size": 15,
+        "board_size": len(gs["board"]),
+        "forbidden": bool(gs.get("forbidden")),
+        "legal": ([] if gs.get("winner") else gomoku_engine.legal_moves(
+            gs["board"], GOMOKU_BLACK if gs["next"] == "black" else GOMOKU_WHITE,
+            gs.get("forbidden", False))),
         "board": gs["board"],
         "moves": gs["moves"],
         "next": gs["next"],
@@ -1062,6 +1134,9 @@ def _connect4_state_for_sync(gs: dict, user_id: int) -> dict:
     不必写死尺寸——五子棋那套写死 `board_size: 15` 的载荷不能复用。
     """
     return {
+        "popout": bool(gs.get("popout")),
+        "legal_actions": ([] if gs.get("winner") else connect4_engine.legal_actions(
+            gs["board"], C4_BLACK if gs["next"] == "black" else C4_WHITE, gs.get("popout", False))),
         "cols": C4_COLS,
         "rows": C4_ROWS,
         "board": gs["board"],
@@ -1425,7 +1500,8 @@ async def _broadcast_tetris_start(code: str, room: dict, gs: dict):
         if ws:
             await _send_ws(ws, {
                 "type": "game_start",
-                "game": tetris_game_to_sync(gs, pid),
+                "game": {**tetris_game_to_sync(gs, pid),
+                         **({"challenge": rm.challenge_info(room)} if room.get("challenge_date") else {})},
             })
 
 
@@ -1436,6 +1512,8 @@ async def _broadcast_2048_start(code: str, room: dict, gs: dict):
         ws = conns.get(pid)
         if ws:
             sync_game = g2048_game_to_sync(gs, pid)
+            if room.get("challenge_date"):
+                sync_game["challenge"] = rm.challenge_info(room)
             await _send_ws(ws, {
                 "type": "game_start",
                 "game": sync_game,
@@ -1492,7 +1570,7 @@ async def _luzhanqi_send_view(code: str, room: dict, gs: dict,
         ws = _connections.get(code, {}).get(pid)
         if not ws:
             continue
-        await _send_ws(ws, {"type": msg_type, "game": luzhanqi_view_for(gs, color)})
+        await _send_ws(ws, {"type": msg_type, "game": _timed_view(room, pid, luzhanqi_view_for(gs, color))})
 
 
 async def _luzhanqi_broadcast_begin(code: str, room: dict, gs: dict):
@@ -1501,7 +1579,7 @@ async def _luzhanqi_broadcast_begin(code: str, room: dict, gs: dict):
         ws = _connections.get(code, {}).get(pid)
         if not ws:
             continue
-        await _send_ws(ws, {"type": "luzhanqi_begin", "game": luzhanqi_view_for(gs, color)})
+        await _send_ws(ws, {"type": "luzhanqi_begin", "game": _timed_view(room, pid, luzhanqi_view_for(gs, color))})
     _maybe_schedule_bot_turn(code, room, gs)
 
 
@@ -1573,7 +1651,7 @@ async def _handle_luzhanqi_move(code: str, user_id: int, data: dict):
 async def _handle_add_bot(code: str, user_id: int, data: dict | None = None):
     """Handle add_bot request from host.
 
-    data.difficulty 只对海战棋有意义（三档 AI），其余游戏忽略。
+    data.difficulty 对全部支持人机的游戏生效，缺省为普通。
     """
     difficulty = (data or {}).get("difficulty")
     try:
@@ -1759,6 +1837,7 @@ async def _broadcast_uno_game_over(code: str, room: dict):
         "emptied": snap.get("emptied"),
         "ranking": room.get("_uno_ranking", []),
         "points": snap["points"],
+        "series": gs.get("series"),
         "seat_uids": snap["seat_uids"],
     })
 
@@ -1889,6 +1968,22 @@ async def _handle_uno_roulette(code: str, user_id: int, data: dict):
     await _after_uno_turn(code, room)
 
 
+async def _handle_uno_arbitration(code: str, user_id: int, kind: str, target=None):
+    result = rm.uno_arbitration_action(code, user_id, kind, target)
+    if not result.get("ok"):
+        await _send_uno_error(code, user_id, result.get("error"))
+        return
+    room = rm.get_room(code)
+    fields = {key: result[key] for key in ("success", "offender", "penalty_seat", "penalty", "target")
+              if key in result}
+    await _uno_event(code, kind, rm._get_player_seat(room, user_id), **fields)
+    await _send_uno_state(code, room)
+    if result.get("game_over"):
+        await _broadcast_uno_game_over(code, room)
+    else:
+        await _after_uno_turn(code, room)
+
+
 async def _handle_uno_call(code: str, user_id: int, data: dict):
     """`target` 可选：组队档里替队友喊 UNO（不传则由引擎决定替谁喊）。"""
     target = data.get("target")
@@ -1917,6 +2012,10 @@ async def _after_uno_turn(code: str, room: dict):
     _maybe_schedule_bot_turn(code, room, gs)
     # 抢出房规：不轮到他的人机也可能能抢一手，单独排（见函数注释）
     _maybe_schedule_bot_jump_uno(code, room, gs)
+    for seat, player in enumerate(room["players"]):
+        if player.get("is_bot") and gs.get("uno_vulnerable"):
+            if rm.uno_engine.uno_official.catch_targets(gs, seat):
+                rm.schedule_bot_turn(code, player["id"])
 
 
 def _maybe_schedule_bot_jump_uno(code: str, room: dict, gs: dict):
@@ -1954,10 +2053,14 @@ async def _bot_uno_turn(code: str, bot_id: int, room: dict, gs: dict):
     seat = rm._get_player_seat(room, bot_id)
     if seat is None or gs.get("finished"):
         return
+    arbitration = uno_ai.best_arbitration(gs, seat, _bot_difficulty(room, bot_id))
+    if arbitration:
+        await _handle_uno_arbitration(code, bot_id, arbitration["action"], arbitration.get("target"))
+        return
     if gs.get("turn") != seat:
         await _bot_uno_jump(code, bot_id, room, gs, seat)
         return
-    act = uno_ai.best_action(gs, seat)
+    act = uno_ai.best_action(gs, seat, _bot_difficulty(room, bot_id))
     if not act:
         return
     if act["action"] == "play":
@@ -1992,7 +2095,7 @@ async def _bot_uno_jump(code: str, bot_id: int, room: dict, gs: dict, seat: int)
     0.8~1.2 秒，牌堆顶可能已经被别人抢掉了。`uno_ai.best_jump` 只回答「想不想抢」，
     「抢不抢得到」由引擎的 `can_jump` 说了算（AI 不给裁决，同其它游戏）。
     """
-    act = uno_ai.best_jump(gs, seat)
+    act = uno_ai.best_jump(gs, seat, _bot_difficulty(room, bot_id))
     if not act:
         return
     result = rm.uno_play_action(code, bot_id, act["card"], act.get("color"),
@@ -2096,14 +2199,26 @@ async def _bot_do_turn(code: str, bot_id: int):
         await _bot_uno_turn(code, bot_id, room, gs)
 
 
+def _bot_search_current(code: str, room: dict, gs: dict, next_player, ply: int) -> bool:
+    """A threaded search must never apply to a replaced, finished or advanced game."""
+    return (rm.get_room(code) is room and room["status"] == "playing"
+            and room.get("game_state") is gs and not gs.get("winner")
+            and not gs.get("finished") and gs.get("next") == next_player
+            and len(gs["moves"]) == ply)
+
+
 async def _bot_gomoku_move(code: str, bot_id: int, room: dict, gs: dict):
     """Execute a gomoku AI move for the bot."""
     color = gs["player_colors"].get(bot_id)
     if not color or gs["next"] != color:
         return
     stone = GOMOKU_BLACK if color == "black" else GOMOKU_WHITE
-    move = gomoku_ai.best_move(gs["board"], stone)
-    if move is None:
+    ply = len(gs["moves"])
+    move = await asyncio.to_thread(gomoku_ai.best_move, deepcopy(gs["board"]), stone,
+                                   _bot_difficulty(room, bot_id), forbidden=gs.get("forbidden", False))
+    if not await _time_guard(code):
+        return
+    if move is None or not _bot_search_current(code, room, gs, color, ply):
         return
     x, y = move
     result = rm.make_move(code, bot_id, x, y)
@@ -2122,7 +2237,13 @@ async def _bot_reversi_move(code: str, bot_id: int, room: dict, gs: dict):
     if not color or gs["next"] != color:
         return
     stone = REVERSI_BLACK if color == "black" else REVERSI_WHITE
-    move = reversi_ai.best_move(gs["board"], stone)
+    ply = len(gs["moves"])
+    move = await asyncio.to_thread(reversi_ai.best_move, deepcopy(gs["board"]), stone,
+                                   _bot_difficulty(room, bot_id))
+    if not await _time_guard(code):
+        return
+    if not _bot_search_current(code, room, gs, color, ply):
+        return
     if move is None:
         # No legal moves: auto-pass (handled by reversi_make_move)
         # Just advance turn to opponent
@@ -2159,9 +2280,16 @@ async def _bot_xiangqi_move(code: str, bot_id: int, room: dict, gs: dict):
     color = gs["player_colors"].get(bot_id)
     if not color or gs["next"] != color:
         return
-    board_copy = [row[:] for row in gs["board"]]
-    move = await asyncio.to_thread(xiangqi_ai.best_move, board_copy, color)
-    if move is None:
+    game_copy = deepcopy(gs)
+    board_copy = game_copy["board"]
+    ply = len(gs["moves"])
+    revision = gs.get("revision", 0)
+    move = await asyncio.to_thread(xiangqi_ai.best_move, board_copy, color,
+                                   difficulty=_bot_difficulty(room, bot_id), game=game_copy)
+    if not await _time_guard(code):
+        return
+    if (move is None or gs.get("revision", 0) != revision
+            or not _bot_search_current(code, room, gs, color, ply)):
         return
     frm, to = move
     result = rm.xiangqi_make_move(code, bot_id, frm, to)
@@ -2185,8 +2313,10 @@ async def _bot_luzhanqi_move(code: str, bot_id: int, room: dict, gs: dict):
     if not color or gs["next"] != color or gs.get("phase") != "playing":
         return
     view = luzhanqi_view_for(gs, color)
-    move = await asyncio.to_thread(luzhanqi_ai.best_move, view)
-    if move is None:
+    ply = len(gs["moves"])
+    move = await asyncio.to_thread(luzhanqi_ai.best_move, deepcopy(view),
+                                   difficulty=_bot_difficulty(room, bot_id))
+    if move is None or not _bot_search_current(code, room, gs, color, ply):
         return
     result = rm.luzhanqi_make_move(code, bot_id, move[0], move[1])
     if not result["ok"]:
@@ -2224,10 +2354,17 @@ async def _bot_connect4_move(code: str, bot_id: int, room: dict, gs: dict):
         return
     stone = C4_BLACK if color == "black" else C4_WHITE
     board_copy = [row[:] for row in gs["board"]]
-    col = await asyncio.to_thread(connect4_ai.best_move, board_copy, stone)
-    if col is None:
+    ply = len(gs["moves"])
+    if gs.get("popout"):
+        action = await asyncio.to_thread(connect4_ai.best_action, board_copy, stone, True,
+                                         difficulty=_bot_difficulty(room, bot_id))
+    else:
+        col = await asyncio.to_thread(connect4_ai.best_move, board_copy, stone,
+                                      difficulty=_bot_difficulty(room, bot_id))
+        action = None if col is None else {"action": "drop", "col": col}
+    if action is None or not _bot_search_current(code, room, gs, color, ply):
         return
-    result = rm.connect4_make_move(code, bot_id, col)
+    result = rm.connect4_make_move(code, bot_id, action["col"], action["action"])
     if not result["ok"]:
         return
     await _broadcast(code, {"type": "move", **result["move"]})
@@ -2245,8 +2382,10 @@ async def _bot_dots_move(code: str, bot_id: int, room: dict, gs: dict):
     player_num = DOTS_P1 if color == "black" else DOTS_P2
     if gs["next"] != player_num:
         return
-    move = dots_ai.best_move(gs)
-    if move is None:
+    ply = len(gs["moves"])
+    move = await asyncio.to_thread(dots_ai.best_move, deepcopy(gs),
+                                   _bot_difficulty(room, bot_id))
+    if move is None or not _bot_search_current(code, room, gs, player_num, ply):
         return
     orient, y, x = move
     result = rm.dots_make_move(code, bot_id, orient, y, x)
@@ -2286,13 +2425,14 @@ async def _bot_ludo_turn(code: str, bot_id: int, room: dict, gs: dict):
                 "type": "game_over",
                 "reason": result["game_over"]["reason"],
                 "ranking": result["game_over"].get("ranking", []),
+            "winner_team": result["game_over"].get("winner_team"),
             })
             return
         if gs["phase"] != "move":
             # 无可动飞机 / 三连六惩罚 → 回合已移交（或仍在自己手里但只能重掷）
             _maybe_schedule_bot_turn(code, room, gs)
             return
-    piece_id = ludo_ai.best_move(gs)
+    piece_id = ludo_ai.best_move(gs, _bot_difficulty(room, bot_id))
     if piece_id is None:
         return
     result = rm.ludo_move_action(code, bot_id, piece_id)
@@ -2318,6 +2458,7 @@ async def _bot_ludo_turn(code: str, bot_id: int, room: dict, gs: dict):
             "type": "game_over",
             "reason": result["game_over"]["reason"],
             "ranking": result["game_over"].get("ranking", []),
+            "winner_team": result["game_over"].get("winner_team"),
         })
     else:
         # 掷 6 加手时 current_seat 未变，会再次调度到自己
@@ -2328,8 +2469,8 @@ def _bot_difficulty(room: dict, bot_id: int) -> str:
     """Bot's AI tier, stored per-player so a room can host bots of mixed skill."""
     for p in room["players"]:
         if p["id"] == bot_id:
-            return battleship_ai.normalize_difficulty(p.get("ai_difficulty"))
-    return battleship_ai.DEFAULT_DIFFICULTY
+            return normalize_difficulty(p.get("ai_difficulty"))
+    return "normal"
 
 
 async def _bot_battleship_fire(code: str, bot_id: int, room: dict, gs: dict):
@@ -2639,6 +2780,7 @@ async def reschedule_after_restore():
         if gs.get("winner") or gs.get("finished"):
             continue
         try:
+            rm.room_timing.schedule(room)
             if room["game"] == "stasis":
                 # 深空休眠：tick 状态全在 game_state 里（引擎是纯函数 + 显式 dt），
                 # 恢复只需要重起任务。因为用的是**游戏内时钟**而不是墙钟，
@@ -2672,24 +2814,84 @@ async def reschedule_after_restore():
 # ── Register callbacks ────────────────────────────────────────
 
 
-def _broadcast_lobby_after_game_end(room: dict):
-    """对局结束：把房间最新状态（含刚被复位为未准备的 ready）广播给房间页。
+async def _flush_pending_lobby(room: dict):
+    if room.pop("_lobby_after_game_over", False) and rm.get_room(room["code"]) is room:
+        await _broadcast(room["code"], {"type": "lobby", "room": rm.room_to_dict(room)})
 
-    对局屏认 `game_over`，房间页不认——**已出局的观战者**（扫雷/飞行棋/2048 允许
-    「本人出局、其他人继续」）会一直停在房间页，手里还是开局那一刻的 ready 快照：
-    界面显示「已准备」、房主看到「开始游戏」可点，点下去服务端却拒绝，症状又是
-    「点了没反应」。终局后补一条 lobby，房间页就永远是权威数据。
+
+def _broadcast_lobby_after_game_end(room: dict):
+    """Flush after game_over/dispatch, or after an out-of-band caller completes.
+
+    HTTP/background/direct-rm callers may not emit game_over. Their task's done
+    callback preserves the old lobby-only notification while reading the final
+    membership, rather than capturing stale room_to_dict data during the save.
     """
+    room["_lobby_after_game_over"] = True
     try:
         loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
     except RuntimeError:
-        return  # 单测里直接调 room_manager，没有事件循环，跳过广播
+        return
+    if task is not None and task not in _dispatch_tasks:
+        def after_caller(_):
+            if room.get("_lobby_after_game_over") and not loop.is_closed():
+                loop.create_task(_flush_pending_lobby(room))
+        task.add_done_callback(after_caller)
 
-    async def send_lobby():
-        if rm.get_room(room["code"]) is room:
-            await _broadcast(room["code"], {"type": "lobby", "room": rm.room_to_dict(room)})
 
-    loop.create_task(send_lobby())
+def _timed_view(room: dict, user_id: int, view: dict) -> dict:
+    rm.room_timing.decorate(room, view)
+    if room["game"] == "xiangqi":
+        allowed, reason = rm.xiangqi_undo_permission(room, user_id)
+        view.update(can_undo=allowed, undo_reason=reason)
+    return view
+
+
+async def _time_guard(code: str) -> bool:
+    room = rm.get_room(code)
+    if room is None:
+        return False
+    event = rm.room_timing.settle(room)
+    if event:
+        await _on_room_deadline(code, room, event)
+    return event != "clock"
+
+
+async def _on_room_deadline(code: str, room: dict, event: str):
+    if rm.get_room(code) is not room:
+        return
+    gs = room.get("game_state") or {}
+    if event == "clock":
+        if room["status"] != "playing":
+            return
+        expired = gs["clock"]["expired"]
+        winner = rm._opponent_color(expired, room["game"])
+        rm._set_game_over(room, winner, "timeout")
+        await _broadcast(code, {"type": "game_over", "winner": winner, "reason": "timeout"})
+    elif event == "setup":
+        rm._touch_activity(room)
+        await _broadcast(code, {"type": "setup_left", "remaining_ms": 0})
+        await _luzhanqi_broadcast_begin(code, room, gs)
+    elif event == "checkpoint" and room["status"] == "playing":
+        if gs.get("clock"):
+            await _broadcast(code, {"type": "clock_update", "clock": rm.room_timing.decorate(room, {})["clock"]})
+        elif gs.get("phase") == "setup":
+            await _broadcast(code, {"type": "setup_left", "remaining_ms": gs.get("setup_remaining_ms")})
+
+
+async def _handle_xiangqi_undo(code: str, user_id: int):
+    result = rm.xiangqi_undo_action(code, user_id)
+    if not result["ok"]:
+        await _send_error(code, user_id, result["error"])
+        return
+    room = rm.get_room(code)
+    if room is not None:
+        for pid in room["game_state"]["player_colors"]:
+            await _send_to(code, pid, {"type": "xiangqi_state",
+                "game": _timed_view(room, pid, xiangqi_game_to_sync(room["game_state"], pid))})
+
+
+rm.room_timing.configure(rm.get_room, _on_room_deadline)
 
 
 rm.set_bot_turn_callback(_bot_do_turn)

@@ -9,11 +9,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { getRoom, leaveRoom, fetchMyStats, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
-import { colors, spacing, radius, fontSize, g2048Tile, playerColors, withAlpha } from '../theme';
+import { gameSurfaces, shadow, colors, spacing, radius, fontSize, g2048Tile, playerColors, withAlpha } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave, useWebKeys } from '../backGuard';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 
 interface LeaderRow {
   user_id: number;
@@ -291,6 +292,7 @@ const TileView = React.memo(function TileView({
 export default function Game2048Screen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const { width: winWidth } = useWindowDimensions();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<GameState | null>(null);
   const [tiles, setTiles] = useState<Tile[]>([]);
@@ -526,7 +528,7 @@ export default function Game2048Screen({ code, onLeave }: Props) {
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
 
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
 
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave, applyMove, resetTiles, flushSettle]);
@@ -537,12 +539,13 @@ export default function Game2048Screen({ code, onLeave }: Props) {
       notify('提示', '多人对局不支持撤销');
       return;
     }
+    if (room?.challenge) { notify('提示', '每日挑战不支持撤销'); return; }
     if (!game.undo_available) {
       notify('提示', '还没有可以撤销的步数');
       return;
     }
     socketRef.current?.undo2048();
-  }, [game]);
+  }, [game, room?.challenge]);
 
   const sendMove = useCallback((direction: string) => {
     if (!game || game.winner || game.game_over) return;
@@ -681,8 +684,8 @@ export default function Game2048Screen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   const isMyGameOver = game?.game_over || false;
   const nameOf = (uid: number): string => {
@@ -701,7 +704,23 @@ export default function Game2048Screen({ code, onLeave }: Props) {
   );
 
   return (
-    <View style={styles.container}>
+    <GameShell game="2048" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.container} actions={<View style={styles.bottomBar}>
+        {/* 撤销只在单人局出现：多人局由服务端拒绝，客户端也不展示入口 */}
+        {game && !game.winner && game.player_count === 1 && !room?.challenge && (
+          <TouchableOpacity style={styles.undoBtn} onPress={undoMove} testID="g2048-undo">
+            <Ionicons name="arrow-undo-outline" size={18} color={colors.text} />
+            <Text style={styles.undoBtnText}>撤销</Text>
+          </TouchableOpacity>
+        )}
+        {game && !game.winner && (
+          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
+            <Text style={styles.surrenderBtnText}>认输</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
+          <Text style={styles.leaveBtnText}>退出</Text>
+        </TouchableOpacity>
+      </View>}>
       {/* Top info bar */}
       <View style={styles.topBar}>
         <View style={styles.topLeft}>
@@ -711,8 +730,8 @@ export default function Game2048Screen({ code, onLeave }: Props) {
           )}
         </View>
         <View style={styles.topRight}>
-          <GameHelpButton game="2048" size={24} />
-          <Text style={styles.roomCode}>#{code}</Text>
+
+
         </View>
       </View>
 
@@ -749,7 +768,7 @@ export default function Game2048Screen({ code, onLeave }: Props) {
                   key={`bg-${r}-${c}`}
                   style={[styles.cell, {
                     left: PAD + c * step, top: PAD + r * step,
-                    width: cellSize, height: cellSize, backgroundColor: '#cdc1b4',
+                    width: cellSize, height: cellSize, backgroundColor: gameSurfaces.tileSlot,
                   }]}
                 />
               );
@@ -862,23 +881,7 @@ export default function Game2048Screen({ code, onLeave }: Props) {
       </View>
 
       {/* Action buttons */}
-      <View style={styles.bottomBar}>
-        {/* 撤销只在单人局出现：多人局由服务端拒绝，客户端也不展示入口 */}
-        {game && !game.winner && game.player_count === 1 && (
-          <TouchableOpacity style={styles.undoBtn} onPress={undoMove} testID="g2048-undo">
-            <Ionicons name="arrow-undo-outline" size={18} color={colors.text} />
-            <Text style={styles.undoBtnText}>撤销</Text>
-          </TouchableOpacity>
-        )}
-        {game && !game.winner && (
-          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
-            <Text style={styles.surrenderBtnText}>认输</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
-          <Text style={styles.leaveBtnText}>退出</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* Confirm modal */}
       <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
@@ -919,10 +922,10 @@ export default function Game2048Screen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>对局结束</Text>
+      <GameResult visible={showGameOver} result={game?.max_tile && game.max_tile >= WIN_TILE ? '合成 2048，胜利！' : '游戏结束'} players={shellPlayers(room, user?.id, game)} onBackToRoom={handleBackToRoom}
+        onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+
+
             {game && (() => {
               const rows: RankRow[] = game.ranking?.length
                 ? game.ranking
@@ -935,7 +938,6 @@ export default function Game2048Screen({ code, onLeave }: Props) {
               // 2048 是各玩各的跑分竞速，**不是胜负对抗**：只有真的合出 2048
               // 才叫胜利，其余（分数最高 / 卡死 / 认输）一律「游戏结束」。
               // 千万别用 rank === 1 当胜负——排名第一只是分高，不是赢。
-              const title = mine && mine.max_tile >= WIN_TILE ? '合成 2048，胜利！' : '游戏结束';
               const subtitle = mine
                 ? `第 ${mine.rank} / ${rows.length} 名` +
                   (champion && champion.user_id !== user?.id
@@ -944,7 +946,6 @@ export default function Game2048Screen({ code, onLeave }: Props) {
                 : '';
               return (
                 <>
-                  <Text style={styles.modalResult}>{title}</Text>
                   <Text style={styles.modalReason}>{subtitle}</Text>
                   {game.reason && REASON_LABELS[game.reason] && (
                     <Text style={styles.modalReason}>{REASON_LABELS[game.reason]}</Text>
@@ -973,13 +974,10 @@ export default function Game2048Screen({ code, onLeave }: Props) {
                 </>
               );
             })()}
-            <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleBackToRoom}>
-              <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+
+
+      </GameResult>
+    </GameShell>
   );
 }
 
@@ -1061,15 +1059,14 @@ const styles = StyleSheet.create({
   rankTile: { fontSize: fontSize.xs, color: colors.textMuted },
   rankScore: { minWidth: 64, textAlign: 'right', fontSize: fontSize.md, fontWeight: '800', color: colors.text },
   boardWrap: {
-    position: 'relative', backgroundColor: '#bbada0', borderRadius: radius.md,
+    position: 'relative', backgroundColor: gameSurfaces.tileFrame, borderRadius: radius.md,
     overflow: 'hidden',
     // Web 端：告诉浏览器别把这块的平移当成页面滚动/横滑返回手势——被系统手势
     // 抢走时 touch 序列会被 cancel，PanResponder 收不到 release，表现就是
     // 「横滑没反应」。RNW 支持该属性（映射到 CSS touch-action），但 RN 的
     // ViewStyle 类型里没有，所以只给 Web 加上。
     ...(Platform.OS === 'web' ? ({ touchAction: 'none' } as any) : null),
-    shadowColor: colors.black, shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18, shadowRadius: 6, elevation: 3,
+    ...shadow.card,
   },
   cell: {
     position: 'absolute', alignItems: 'center', justifyContent: 'center',

@@ -126,6 +126,18 @@ RULE_META: list[dict] = [
     },
 ]
 
+RULE_META.extend([
+    {"key": "wild4_strict", "label": "+4严格校验", "kind": "toggle",
+     "blurb": "有当前颜色牌时禁止出普通变色+4；关闭时可虚张声势，由质疑规则仲裁。"},
+    {"key": "wild4_challenge", "label": "+4质疑", "kind": "toggle",
+     "blurb": "首次变色+4的下家可在出牌或摸牌前质疑。成功出牌者摸4；失败质疑者摸6并跳过。叠牌后窗口关闭。"},
+    {"key": "uno_penalty", "label": "漏喊UNO抓罚", "kind": "toggle",
+     "blurb": "出牌后剩1张但未喊UNO，可在下一次有效出牌或摸牌前被对手抓罚2张。"},
+    {"key": "score_target", "label": "赛制", "kind": "choice",
+     "blurb": "500分赛跨局累计获胜时对手余牌点数；回大厅重新准备续开，成员或座位变化重新计分。",
+     "choices": [{"value": 0, "label": "单局"}, {"value": 500, "label": "累计500分"}]},
+])
+
 # key → 默认值。**这就是「经典 UNO」**。
 DEFAULTS: dict = {
     "stack_mode": "same",
@@ -136,6 +148,10 @@ DEFAULTS: dict = {
     "deck": "classic",
     "mercy": False,
     "teams": "off",
+    "wild4_strict": False,
+    "wild4_challenge": False,
+    "uno_penalty": False,
+    "score_target": 0,
 }
 
 # 取值域（校验用）。没有列的键按 bool 处理。
@@ -144,12 +160,15 @@ _CHOICES = {
     "seven_zero": SEVEN_ZERO_MODES,
     "deck": DECK_KINDS,
     "teams": TEAM_MODES,
+    "score_target": (0, 500),
 }
 
 
 # ── 预设档位 ────────────────────────────────────────────────
 
 PRESETS: dict[str, dict] = {
+    "official": {"name": "官方", "blurb": "不叠牌、允许质疑+4、漏喊UNO可抓罚；+4严格校验可另行开启。",
+                 "rules": {**DEFAULTS, "stack_mode": "off", "wild4_challenge": True, "uno_penalty": True}},
     "classic": {
         "name": "经典",
         "blurb": "标准的 UNO：+2 只能叠 +2，第一个出完手牌的人获胜。",
@@ -229,7 +248,7 @@ def normalize(rules: dict | None) -> dict:
         if key not in DEFAULTS:
             raise ValueError(f"没有这条房规：{key}")
         if key in _CHOICES:
-            if value not in _CHOICES[key]:
+            if isinstance(value, bool) or value not in _CHOICES[key]:
                 raise ValueError(f"「{_label_of(key)}」没有这个取值")
         elif not isinstance(value, bool):
             raise ValueError(f"「{_label_of(key)}」的取值不对")

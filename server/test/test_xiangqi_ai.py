@@ -176,20 +176,24 @@ def test_escapes_check():
     print("  ✓ test_escapes_check")
 
 
-def test_never_loses_to_random_player():
+def test_never_loses_to_random_player(monkeypatch):
     """AI 对随机走子不能输——棋力低于随机的 AI 等于没有 AI。
 
     断言的是「不输」而不是「全胜」：随机对手偶尔能靠躲子拖到 60 回合无吃子判和，
     硬要求全胜会让这条用例偶发失败（**测试不要依赖随机性**）。真正的棋力不变式是
     「随机赢不了 AI」，胜局数只作下界。
     """
+    # 固定完整搜索层数：150ms 壁钟截断受机器负载影响，连带改变搜索中的
+    # shuffle 次数与对手 RNG 轨迹；仅 seed 不能让这条棋力回归可重现。
+    # 时间上限另由 test_respects_time_budget 验证。
+    monkeypatch.setattr("app.game.xiangqi_ai._MAX_DEPTH", 2)
     wins = draws = losses = 0
     for seed in (7, 11, 23):
         random.seed(seed)
         gs = create_game()
         for _ in range(300):
             color = gs["next"]
-            mv = (best_move(gs["board"], color, 0.15) if color == RED
+            mv = (best_move(gs["board"], color, 60.0) if color == RED
                   else random.choice(all_legal_moves(gs["board"], color)))
             if mv is None:
                 break
@@ -235,6 +239,8 @@ if __name__ == "__main__":
     test_finds_forced_win_in_one()
     test_takes_the_free_rook()
     test_escapes_check()
-    test_never_loses_to_random_player()
+    from pytest import MonkeyPatch
+    with MonkeyPatch.context() as patch:
+        test_never_loses_to_random_player(patch)
     test_self_play_produces_only_legal_moves_and_terminates()
     print("\nAll xiangqi AI tests passed! ✓")

@@ -15,6 +15,7 @@
 // 视觉（v1.9 联网调研后重做）：深色毡面牌桌 + 对手座位扇形牌背 + 中央弃牌堆
 // 套一圈**当前颜色的实心环** + 自己手牌扇形重叠（可出的牌抬高 + 双环）。
 // 设计依据见 docs/游戏设计/UNO/设计.md「界面构成」与「交互设计」两节。
+import QuickChatControls from '../QuickChatControls';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Platform, Animated, Easing,
@@ -31,11 +32,12 @@ import {
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 import { useDisconnectCountdown } from '../disconnect';
 import { UnoCardView, UnoHandBacks, UNO_CARD_H, UNO_CARD_W } from '../UnoCardView';
 import { UnoColorBadge } from '../icons';
-import { UNO_COLOR_KEYS, UNO_COLOR_NAMES, cardLabel, cardKind } from '../uno';
+import { UNO_COLOR_KEYS, UNO_COLOR_NAMES, cardLabel, cardKind, UnoSeries } from '../uno';
 
 /** 扇形手牌：相邻牌重叠这么多像素（露出 `UNO_CARD_W - OVERLAP`）。 */
 const OVERLAP = 22;
@@ -46,6 +48,7 @@ const PRESS_LIFT = 10;
 /** 弃牌堆的尺寸（比手牌大一档：它是全桌的视觉焦点）。 */
 const PILE_W = 88;
 const PILE_H = 132;
+
 
 /** 服务端逐人下发的对局状态（`game_start` / `sync` / `uno_state` 同构）。 */
 interface UnoPayload {
@@ -115,6 +118,10 @@ interface UnoPayload {
   can_draw: boolean;
   can_pass: boolean;
   can_call_uno: boolean;
+  can_challenge_wild4?: boolean;
+  wild4_challenge_targets?: number[];
+  catch_uno_targets?: number[];
+  series?: UnoSeries | null;
   /** 能替谁喊 UNO（组队档里可能只有队友那一张）。服务端下发，客户端不自己推。 */
   uno_targets?: number[];
   winner: number | null;
@@ -151,6 +158,9 @@ const REASON_LABELS: Record<string, string> = {
 /** `uno_event` 的载荷：公开事件（谁做了什么），供提示条与动效。 */
 interface UnoEvent {
   kind: string;
+  success?: boolean;
+  offender?: number;
+  penalty_seat?: number;
   seat: number | null;
   card?: string;
   color?: string;
@@ -173,6 +183,7 @@ interface UnoEvent {
 export default function UnoScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const navigation = useNavigation<any>();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<UnoPayload | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
@@ -191,6 +202,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
   const [pressed, setPressed] = useState<number | null>(null);
 
   const socketRef = useRef<RoomSocket | null>(null);
+  const getChatSocket = useCallback(() => socketRef.current, [code]);
   const skipRemoveRef = useRef(false);
   const gameOverShownRef = useRef(false);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -371,6 +383,10 @@ export default function UnoScreen({ code, onLeave }: Props) {
         flash(`${subject}喊了 UNO！`);
       } else if (ev.kind === 'autopass') {
         flash(`${subject}已掉线 · 自动过牌`);
+      } else if (ev.kind === 'challenge_wild4') {
+        flash(`质疑 +4 ${ev.success ? '成功' : '失败'} · ${nameOfSeat(ev.penalty_seat)} 罚摸 ${ev.penalty ?? 0} 张`);
+      } else if (ev.kind === 'catch_uno') {
+        flash(`${nameOfSeat(ev.target)} 漏喊 UNO · 罚摸 ${ev.penalty ?? 0} 张`);
       } else if (ev.kind === 'surrender') {
         flash(`${subject}认输退出`);
       } else if (ev.kind === 'leave') {
@@ -395,6 +411,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
             ranking: (msg.ranking as UnoRankRow[]) || [],
             points: (msg.points as Record<string, number>) || {},
             finished: true,
+            series: (msg.series as UnoSeries | null) ?? prev.series,
           }
         : prev));
       if (!gameOverShownRef.current) {
@@ -418,7 +435,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
     ws.on('game_over', handleGameOver);
     ws.on('room_closed', handleClosed);
     ws.on('error', (msg) => notify('提示', msg.message as string));
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
 
     return () => { ws.close(); };
   }, [token, code, nameOfSeat, onLeave, flash]);
@@ -494,8 +511,8 @@ export default function UnoScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   const handleLeaveRoom = async () => {
     if (!token) return;
@@ -578,10 +595,46 @@ export default function UnoScreen({ code, onLeave }: Props) {
   })();
 
   return (
-    <View style={styles.container}>
+    <GameShell game="uno" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.container} actions={iAmOut && !showGameOver ? null : <View style={styles.actions}>
+          <QuickChatControls token={token} code={code} phrases={room?.quick_phrases} getSocket={getChatSocket} enabled={shellConnected && !iAmOut && !game?.finished} />
+          {game?.can_challenge_wild4 && <TouchableOpacity style={styles.actBtn} testID="uno-challenge-wild4"
+            disabled={!shellConnected} onPress={() => socketRef.current?.unoChallengeWild4()}>
+            <Text style={styles.actBtnText}>质疑 +4</Text>
+          </TouchableOpacity>}
+          {(game?.catch_uno_targets ?? []).map(target => {
+            const player = room?.players.find(member => member.id === game?.seat_uids[target]);
+            return <TouchableOpacity key={target} style={styles.actBtn}
+              testID={`uno-catch-${target}`} disabled={!shellConnected} onPress={() => socketRef.current?.unoCatch(target)}>
+              <Text style={styles.actBtnText}>抓 {player?.nickname || player?.username || '对手'} 漏喊</Text>
+            </TouchableOpacity>;
+          })}
+          <TouchableOpacity
+            style={[styles.actBtn, !(isMyTurn && game?.can_pass) && styles.idle]}
+            onPress={() => isMyTurn && game?.can_pass && socketRef.current?.unoPass()}
+            disabled={!(isMyTurn && game?.can_pass)}
+            testID="u-pass"
+          >
+            <Text style={styles.actBtnText}>过牌</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actBtn, styles.unoBtn, !game?.can_call_uno && styles.idle]}
+            onPress={() => unoTarget !== undefined && socketRef.current?.unoCall(unoTarget)}
+            disabled={!game?.can_call_uno}
+            testID="u-uno"
+          >
+            <Text style={styles.unoBtnText}>{unoForMate ? '替队友喊' : '喊 UNO'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.surrenderBtn}
+            onPress={() => setConfirm('surrender')}
+            testID="u-surrender"
+          >
+            <Text style={styles.surrenderText}>认输</Text>
+          </TouchableOpacity>
+        </View>}>
       {/* 规则入口（与象棋 / 四子棋一样放在对局屏内，不占牌桌空间） */}
       <View style={styles.topBar}>
-        <GameHelpButton game="uno" size={24} />
+
       </View>
 
       {/* ── 牌桌（深色毡面） ────────────────────────────────── */}
@@ -828,33 +881,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
             <Text style={styles.waitBtnText}>返回房间</Text>
           </TouchableOpacity>
         </View>
-      ) : (
-        <View style={styles.actions}>
-          <TouchableOpacity
-            style={[styles.actBtn, !(isMyTurn && game?.can_pass) && styles.idle]}
-            onPress={() => isMyTurn && game?.can_pass && socketRef.current?.unoPass()}
-            disabled={!(isMyTurn && game?.can_pass)}
-            testID="u-pass"
-          >
-            <Text style={styles.actBtnText}>过牌</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actBtn, styles.unoBtn, !game?.can_call_uno && styles.idle]}
-            onPress={() => unoTarget !== undefined && socketRef.current?.unoCall(unoTarget)}
-            disabled={!game?.can_call_uno}
-            testID="u-uno"
-          >
-            <Text style={styles.unoBtnText}>{unoForMate ? '替队友喊' : '喊 UNO'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.surrenderBtn}
-            onPress={() => setConfirm('surrender')}
-            testID="u-surrender"
-          >
-            <Text style={styles.surrenderText}>认输</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      ) : null}
 
       {/* 选色：黑牌选色 / 颜色轮盘点名，**共用同一个弹窗**（两件事都是「点一个颜色」，
           分成两个框只会多一份要维护的样式与返回键处理） */}
@@ -913,9 +940,17 @@ export default function UnoScreen({ code, onLeave }: Props) {
       </ModalM>
 
       {/* 结算 */}
-      <ModalM visible={showGameOver} onClose={() => {}}>
-        <Text style={styles.modalTitle}>本局结束</Text>
-        <Text style={styles.modalSub}>{resultText}</Text>
+      <GameResult visible={showGameOver} result={game?.series?.finished ? '系列赛结束' : game?.series ? '本局结束，系列赛继续' : resultText} players={shellPlayers(room, user?.id, game)} roomButtonTestID="u-result-back" onBackToRoom={handleBackToRoom}
+        onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+        {game?.series && <View testID="uno-series-score" style={{ gap: spacing.xs }}>
+          <Text style={{ color: colors.text, fontWeight: '700' }}>{game.series.target} 分赛 · 已完成 {game.series.rounds} 局</Text>
+          <Text style={{ color: colors.textSecondary }}>{resultText}</Text>
+          {Object.entries(game.series.scores).map(([uid, score]) => {
+            const player = room?.players.find(member => member.id === Number(uid));
+            const champion = game.series?.finished && game.series.winners.includes(Number(uid));
+            return <Text key={uid} style={{ color: champion ? colors.success : colors.textSecondary }}>{player?.nickname || player?.username || '玩家'} · {score} 分{champion ? ' · 系列赛胜者' : ''}</Text>;
+          })}
+        </View>}
         <View style={styles.rankList}>
           {ranking.map((r) => (
             <View key={r.seat} style={styles.rankRow}>
@@ -930,10 +965,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
             </View>
           ))}
         </View>
-        <TouchableOpacity style={styles.primaryBtn} onPress={handleBackToRoom} testID="u-result-back">
-          <Text style={styles.primaryBtnText}>返回房间</Text>
-        </TouchableOpacity>
-      </ModalM>
+      </GameResult>
 
       {/* 认输 / 退出确认 */}
       <ModalM visible={confirm !== null} onClose={() => setConfirm(null)}>
@@ -956,7 +988,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
           </TouchableOpacity>
         </View>
       </ModalM>
-    </View>
+    </GameShell>
   );
 }
 

@@ -69,3 +69,13 @@ export function cardLabel(card: string): string {
 // ⚠️ 这里原本有一个 `unoRuleBlurb`（一条房规「当前取值」的说明）。v1.15 搬到了
 // `roomSettings.tsx` 的 `settingBlurb` —— 它已经与 UNO 无关了：扫雷难度 / 军棋玩法 /
 // 深空休眠地图 / 海战棋棋盘现在都走同一套「房间级设置」的渲染。
+/** Authoritative cumulative score for a 500-point series, persisted in each round snapshot. */
+export interface UnoSeries {
+  target: number;
+  scores: Record<string, number>;
+  user_ids: number[];
+  rounds: number;
+  finished: boolean;
+  winners: number[];
+  last_points?: number;
+}

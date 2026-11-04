@@ -21,6 +21,7 @@ export interface PendingRoute {
 /** 路径第一段 → 路由名。顺序无关，但必须与 `navigation.tsx` 的 Stack.Screen 对应。 */
 const ROUTE_BY_PATH: Record<string, string> = {
   room: 'Room',
+  watch: 'Watch',
   gomoku: 'Gomoku',
   reversi: 'Reversi',
   battleship: 'Battleship',
@@ -93,4 +94,14 @@ export function takePendingRoute(): Promise<PendingRoute | null> {
   if (consumed) return Promise.resolve(null);
   consumed = true;
   return captured;
+}
+
+
+/** A room's startup link is already fulfilled once its game is on top. */
+export function destinationAlreadyOpen(target: PendingRoute,
+  current: { name?: string; params?: Record<string, string> } | undefined): boolean {
+  if (!current || current.params?.code !== target.params.code) return false;
+  if (current.name === target.screen) return true;
+  return target.screen === 'Room' && !!current.name && current.name !== 'Watch'
+    && Object.values(ROUTE_BY_PATH).includes(current.name);
 }

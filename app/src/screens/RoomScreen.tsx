@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../auth';
 import { getRoom, joinRoom, leaveRoom, Room, RoomPlayer } from '../api';
@@ -13,6 +13,8 @@ import { colors, spacing, radius, fontSize } from '../theme';
 import { notify } from '../utils';
 import { RoomSettingsRow, RoomSettingsSheet } from '../roomSettings';
 import { GameHelpButton } from '../help';
+import GameIntro from '../GameIntro';
+import { createPractice } from '../social';
 import type { GameKey } from '../games';
 // 游戏名的唯一来源（这一行以前是一串嵌套三元，与主页卡片各写一遍）
 import { gameTitle } from '../games';
@@ -25,10 +27,20 @@ interface Props {
 
 export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const { token, user } = useAuth();
+  const navigation = useNavigation<any>();
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const socketRef = useRef<RoomSocket | null>(null);
+  const focusedRef = useRef(true);
+  const enteringRef = useRef(false);
+  const callbacksRef = useRef({ onLeave, onGameStart });
+  useEffect(() => { callbacksRef.current = { onLeave, onGameStart }; }, [onLeave, onGameStart]);
+  const enterGame = useCallback((game?: string) => {
+    if (!focusedRef.current || enteringRef.current) return;
+    enteringRef.current = true;
+    callbacksRef.current.onGameStart(code, game);
+  }, [code]);
   // 支持三档难度的游戏，档位存在每个 bot 自己身上。
   // **必须放在 `if (loading)` 提前返回之前**——放到下面会让首次渲染少调一个 hook，
   // React 直接报「Rendered more hooks than during the previous render」并白屏。
@@ -43,6 +55,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   useModalBackGuard(swapFrom !== null, () => setSwapFrom(null));
   // WS sync 到达后 REST 快照即为陈旧数据（如 connected），不再覆盖实时状态
   const syncedRef = useRef(false);
+  const syncVersionRef = useRef(0);
   // Track game type in a ref to avoid stale closure in handleGameStart
   const gameTypeRef = useRef<string | undefined>(undefined);
 
@@ -55,16 +68,18 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const refreshAndEnterGame = useCallback(async () => {
     if (!token) return;
     try {
+      const version = syncVersionRef.current;
       const r = await getRoom(token, code);
-      setRoom(r);
+      if (!focusedRef.current || syncVersionRef.current !== version) return;
+      if (!syncedRef.current) setRoom(r);
       gameTypeRef.current = r.game;
       if (r.status === 'playing' && r.in_game !== false) {
-        onGameStart(code, r.game);
+        enterGame(r.game);
       }
     } catch {
       // 房间可能已解散：交给 WS 的 room_closed 处理，这里不打扰用户
     }
-  }, [token, code, onGameStart]);
+  }, [token, code, enterGame]);
 
   const fetchRoom = useCallback(async () => {
     if (!token) return;
@@ -79,32 +94,35 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           r = await joinRoom(token, code, null);
         } catch (joinErr) {
           notify('无法加入', (joinErr as Error).message);
-          onLeave();
-          return;
+          callbacksRef.current.onLeave();
+          return false;
         }
       }
       if (!syncedRef.current) {
         setRoom(r);
         gameTypeRef.current = r.game;
       }
+      return true;
     } catch (err) {
       notify('加载失败', (err as Error).message);
+      return false;
     } finally {
       setLoading(false);
     }
-  }, [token, code, user?.id, onLeave]);
+  }, [token, code, user?.id]);
 
   // Connect WS on mount
   useEffect(() => {
     if (!token) return;
-    fetchRoom();
-
+    let disposed = false;
+    syncedRef.current = false;
     const ws = new RoomSocket(code, token);
     socketRef.current = ws;
 
     const handleSync = (msg: SocketMessage) => {
       const roomData = msg.room as Room;
       syncedRef.current = true;
+      syncVersionRef.current += 1;
       if (roomData) {
         setRoom(roomData);
         gameTypeRef.current = roomData.game;
@@ -112,14 +130,15 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
       // 游戏进行中才跳对局页。**还要看自己是否仍在局中**：扫雷/飞行棋/2048
       // 允许「本人已出局、其他人继续」，这类玩家回到房间页后不能再被弹回去
       // （否则点「退出」没反应、页面闪一下还在原处）。服务端用 in_game 告知。
-      if (msg.game && roomData.status === 'playing' && msg.in_game !== false) {
-        onGameStart(code, roomData.game);
+      if (msg.game && roomData?.status === 'playing' && msg.in_game !== false) {
+        enterGame(roomData.game);
       }
     };
 
     const handleLobby = (msg: SocketMessage) => {
       const roomData = msg.room as Room;
       syncedRef.current = true;
+      syncVersionRef.current += 1;
       if (roomData) {
         setRoom(roomData);
         gameTypeRef.current = roomData.game;
@@ -127,13 +146,13 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
     };
 
     const handleGameStart = () => {
-      onGameStart(code, gameTypeRef.current);
+      enterGame(gameTypeRef.current);
     };
 
     const handleRoomClosed = () => {
       notify('房间已解散', '房主已离开');
       ws.close();
-      onLeave();
+      callbacksRef.current.onLeave();
     };
 
     const handleError = (msg: SocketMessage) => {
@@ -165,12 +184,14 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
     ws.on('swap_request', handleSwapRequest);
     ws.on('swap_result', handleSwapResult);
 
-    ws.connect();
-
+    void fetchRoom().then(ready => {
+      if (ready && !disposed && focusedRef.current) ws.connect();
+    });
     return () => {
+      disposed = true;
       ws.close();
     };
-  }, [token, code, fetchRoom, onGameStart, onLeave]);
+  }, [token, code, fetchRoom, enterGame]);
 
   // 从对局页返回时本页不会重挂载，其 socket 可能已被对局页连接替换并被服务端弹出；
   // 每次重新聚焦强制重连，保证重新注册能收到 game_start/lobby 广播（跳过首次挂载）。
@@ -181,13 +202,13 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const startFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 本页当前是否在前台：兜底定时器只在本页还开着时才补查，
   // 已经跳进对局页了就别再多跑一次 REST（navigate 同路由虽是无害的，但没必要）
-  const focusedRef = useRef(true);
   useEffect(() => () => {
     if (startFallbackRef.current) clearTimeout(startFallbackRef.current);
   }, []);
   useFocusEffect(useCallback(() => {
     const ws = socketRef.current;
     focusedRef.current = true;
+    enteringRef.current = false;
     if (firstFocusRef.current) {
       firstFocusRef.current = false;
     } else {
@@ -284,9 +305,9 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
     : (isLudo || isUno || isStasis) ? room.players.length < 2 : !isFull;
   const canStart = allReady && !needMorePlayers;
 
-  // 海战棋的人机有难度档（简单=随机、普通=搜索追击、困难=概率热力图）。
+  // 全部支持人机的游戏都提供三档；合作游戏中代表队友执行力。
   // botDifficulty 的 useState 在组件顶部（提前返回之前），这里只做取值与展示。
-  const hasBotDifficulty = room.game === 'battleship' || room.game === 'uttt';
+  const hasBotDifficulty = supportsBots;
   const BOT_DIFFICULTIES: Array<{ key: string; label: string }> = [
     { key: 'easy', label: '简单' },
     { key: 'normal', label: '普通' },
@@ -328,6 +349,15 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           </View>
         </TouchableOpacity>
 
+        <GameIntro game={room.game} userId={user?.id} practice={room.practice} onPractice={async () => {
+          if (!token) throw new Error('请先登录');
+          const result = await createPractice(token, room.game);
+          if (focusedRef.current) navigation.replace('Room', { code: result.code });
+        }} />
+        {room.challenge && <View style={styles.finishedBanner}>
+          <Text style={styles.finishedBannerText}>每日挑战 · {room.challenge.date}（UTC） · 固定单人房规
+            {room.challenge.first_reveal ? ' · 首次请翻开正中央格子' : ''}</Text>
+        </View>}
         {/* 上一局已结束提示：按已打完的局数判断，不再依赖第三种房间状态 */}
         {(room.round ?? 0) > 0 && (
           <View style={styles.finishedBanner}>
@@ -370,25 +400,25 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
         </Text>
         {room.players.map((p: RoomPlayer) => (
           <View key={p.id} style={styles.playerRow}>
-            <View style={styles.playerInfo}>
-              <Text style={[styles.playerName, showOffline && !p.connected && styles.playerDisconnected]}>
-                {p.nickname || p.username}
-              </Text>
-              {p.is_host && <Text style={styles.hostBadge}>房主</Text>}
-              {p.is_bot && (
-                <Text style={styles.botBadge}>
-                  人机{p.ai_difficulty
-                    ? `·${BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? ''}`
-                    : ''}
+            <View style={styles.playerHeader}>
+              <View style={styles.playerInfo}>
+                <Text numberOfLines={1} style={[styles.playerName, showOffline && !p.connected && styles.playerDisconnected]}>
+                  {p.nickname || p.username}
                 </Text>
-              )}
+                <View style={styles.playerMeta}>
+                  {p.is_host && <Text style={styles.hostBadge}>房主</Text>}
+                  {p.is_bot && <Text style={styles.botBadge}>
+                    {BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? '普通'}难度
+                  </Text>}
+                </View>
+              </View>
+              <View style={styles.playerStatus}>
+                {showOffline && !p.connected && <Text style={[styles.statusPill, styles.disconnectedPill]}>断线</Text>}
+                {!p.is_bot && p.ready && <Text style={[styles.statusPill, styles.readyPill]}>已准备</Text>}
+                {!p.is_bot && !p.ready && !p.is_host && <Text style={[styles.statusPill, styles.unreadyPill]}>未准备</Text>}
+              </View>
             </View>
-            <View style={styles.playerBadges}>
-              {showOffline && !p.connected && (
-                <Text style={[styles.statusPill, styles.disconnectedPill]}>断线</Text>
-              )}
-              {p.ready && <Text style={[styles.statusPill, styles.readyPill]}>已准备</Text>}
-              {!p.ready && !p.is_host && <Text style={[styles.statusPill, styles.unreadyPill]}>未准备</Text>}
+            {isLobbyStatus && p.id !== user?.id && <View style={styles.playerBadges}>
               {/* 换位（v1.16）：座位就是玩家列表里的下标，开局时决定先手 / 出牌顺序。
                   **只在大厅里出现**（对局中座位已锁死，服务端也会拒）。 */}
               {isLobbyStatus && p.id !== user?.id && (
@@ -411,7 +441,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
                   <Text style={[styles.rowBtnText, styles.removeBotBtnText]}>移除</Text>
                 </TouchableOpacity>
               )}
-            </View>
+            </View>}
           </View>
         ))}
 
@@ -476,7 +506,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
       <RoomSettingsSheet
         visible={settingsOpen}
         items={settings}
-        editable={isHost && isLobbyStatus}
+        editable={isHost && isLobbyStatus && !room.challenge}
         onClose={() => setSettingsOpen(false)}
         onPick={(key, value) => socketRef.current?.roomSetting(key, value)}
       />
@@ -579,9 +609,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   playerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: spacing.sm,
     backgroundColor: colors.card,
     borderRadius: radius.md,
     padding: spacing.md,
@@ -589,11 +617,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  playerInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  playerHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  playerInfo: { flex: 1, minWidth: 0, gap: spacing.xs },
+  playerMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  playerStatus: { flexDirection: 'row', gap: spacing.xs, flexShrink: 0 },
   playerName: { fontSize: fontSize.md, color: colors.text, fontWeight: '600' },
   playerDisconnected: { textDecorationLine: 'line-through', color: colors.textMuted },
   hostBadge: {
-    marginLeft: spacing.sm,
+    alignSelf: 'flex-start',
     backgroundColor: colors.warning,
     paddingHorizontal: spacing.sm,
     paddingVertical: 1,
@@ -604,15 +635,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   botBadge: {
-    marginLeft: spacing.sm,
-    backgroundColor: colors.textSecondary,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 1,
-    borderRadius: radius.full,
     fontSize: fontSize.xs,
-    color: colors.white,
-    fontWeight: '600',
-    overflow: 'hidden',
+    color: colors.textSecondary,
   },
   difficultyRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -690,11 +714,8 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     fontWeight: '600',
   },
-  // 玩家行右侧那一簇（状态胶囊 + 两颗动作按钮）。
-  // **`alignItems: 'center'` 是必须的**：默认的 `stretch` 会把状态胶囊拉满整行高度，
-  // 于是「已准备」被撑成一枚 52×44 的绿色大圆饼（截图实测），而旁边的按钮只有 44 高
-  // —— 三颗控件三种尺寸，正是这一行难看的根源。
-  playerBadges: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // 次要操作独立一行，保留完整触控面积，避免与昵称和状态争抢宽度。
+  playerBadges: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   // 状态胶囊：**标签比按钮小一档**（22 高 vs 44 高）是常见的层级表达，所以它只居中、
   // 不跟着按钮一起长高。`lineHeight` 写死是为了让高度不随平台默认行高漂移。
   statusPill: {

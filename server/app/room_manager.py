@@ -4,12 +4,16 @@ import random
 import string
 import asyncio
 import logging
+from copy import deepcopy
 import time as _time
 from datetime import datetime, timezone
 
 from app import persistence
 from app import room_settings
-from app.game import spider, uttt, uttt_ai
+from app.quick_phrases import phrases_for as quick_phrases_for
+from app import room_timing
+from app.competition_rules import challenge_seed, challenge_info
+from app.game import spider, uttt, uttt_ai, xiangqi as xiangqi_engine
 from app.game import stasis as stasis_engine
 from app.game import stasis_ai
 
@@ -104,7 +108,7 @@ from app.game.battleship import (
     BOARD_SIZE as BS_BOARD_SIZE,
     DEFAULT_SIZE as BS_DEFAULT_SIZE,
 )
-from app.game.battleship_ai import normalize_difficulty as bs_normalize_difficulty
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.dots import (
     create_game as dots_create_game,
     apply_move as dots_apply_move,
@@ -156,7 +160,7 @@ from app.game.uno import (
     surrender as uno_surrender,
     compute_ranking as uno_compute_ranking,
 )
-from app.game import uno_rules
+from app.game import uno_rules, uno_series, uno as uno_engine, connect4 as connect4_engine, gomoku as gomoku_engine
 
 # Bot turn callback: registered by ws.py to schedule AI moves.
 # Signature: async callback(code, bot_user_id)
@@ -244,6 +248,7 @@ def _touch_activity(room: dict):
     支撑热重启（persistence 未 init 时 no-op，单测不受影响）。
     """
     room["last_activity"] = _time.time()
+    _reset_changed_uno_series(room)
     persistence.save_room(room)
 
 
@@ -274,6 +279,7 @@ def _finish_action(code: str, result: dict):
 
 def _destroy_room(code: str):
     """彻底销毁房间：取消任务 + 移出内存 + 删除落盘行。"""
+    room_timing.forget(code)
     _cancel_all_dc_tasks(code)
     _stop_stasis_tick(code)
     _rooms.pop(code, None)
@@ -295,6 +301,9 @@ def _normalize_restored_rules(room: dict) -> None:
 
     `normalize` 只补缺、不覆盖已有值，所以对当前版本的房间是恒等变换。
     """
+    for spec in room_settings.specs_for(room.get("game", "")):
+        if spec.store:
+            room.setdefault(spec.store, deepcopy(spec.default))
     if room.get("game") != "uno":
         return
     gs = room.get("game_state")
@@ -399,8 +408,9 @@ def get_all_rooms() -> list[dict]:
     """
     rooms = [
         r for r in _rooms.values()
-        if r["status"] == "playing"
-        or (r["status"] == "waiting" and _has_human_online(r))
+        if not r.get("challenge_date") and not r.get("practice") and (
+            r["status"] == "playing"
+            or (r["status"] == "waiting" and _has_human_online(r)))
     ]
     rooms.sort(key=lambda r: r["created_at"], reverse=True)
     return rooms
@@ -513,6 +523,9 @@ def create_room(
         # 两条优化房规（v1.18.1），默认关：保持既有对局的布阵与信息量不变
         room["bs_adjacent"] = False
         room["bs_hide_sunk_type"] = False
+    for spec in room_settings.specs_for(game):
+        if spec.store:
+            room.setdefault(spec.store, deepcopy(spec.default))
     _rooms[code] = room
     _touch_activity(room)
     return room
@@ -523,6 +536,8 @@ def join_room(code: str, user: dict, password: str | None) -> dict:
     room = _rooms.get(code)
     if not room:
         raise ValueError("__NOT_FOUND__")
+    if room.get("practice") and room.get("practice_owner_id", room["host_id"]) != user["id"]:
+        raise ValueError("这是私人练习房，不能加入")
     # 原玩家放行：游戏中重连、结束后重进、等待房重进都走这一条。
     # 必须先判「是否本房成员」再查 find_user_waiting_room——后者不区分房间，
     # 会把「凭房号回到自己所在的房」误判成「你已在房间中」。
@@ -534,6 +549,8 @@ def join_room(code: str, user: dict, password: str | None) -> dict:
                 room["host_id"] = user["id"]
             _touch_activity(room)
             return room
+    if room.get("challenge_date"):
+        raise ValueError("每日挑战为个人牌局，不能加入")
     if room["status"] == "playing":
         raise ValueError("游戏已开始")
     if room["password"] is not None and room["password"] != password:
@@ -549,7 +566,7 @@ def join_room(code: str, user: dict, password: str | None) -> dict:
 def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
     """Add a bot player to a waiting room. Returns updated room.
 
-    difficulty applies to battleship / uttt (三档 AI)；其余游戏忽略。
+    difficulty applies to every supported AI game (三档 AI)。
     Stored per-bot so one room can host bots of mixed skill.
 
     Raises ValueError if conditions are not met.
@@ -570,10 +587,7 @@ def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
         raise ValueError("房间已满")
     seq = sum(1 for p in room["players"] if p.get("is_bot")) + 1
     bot = _make_bot_player(code, seq)
-    if room["game"] == "battleship":
-        bot["ai_difficulty"] = bs_normalize_difficulty(difficulty)
-    elif room["game"] == "uttt":
-        bot["ai_difficulty"] = uttt_ai.normalize_difficulty(difficulty)
+    bot["ai_difficulty"] = normalize_difficulty(difficulty)
     room["players"].append(bot)
     _touch_activity(room)
     return room
@@ -720,7 +734,7 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
     """
     Handle player leaving.
     Returns (action, room) where action is 'closed', 'game_over', or 'removed'.
-    room is None when action is 'closed'.
+    room is None when action is 'closed', or when a non-member leaves (no-op).
 
     New lifecycle: host leaving does NOT unconditionally delete the room.
     Host is transferred to next human player by seat order.
@@ -729,6 +743,10 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
     room = _rooms.get(code)
     if not room:
         return ("closed", None)
+    # HTTP 退出后可能紧接着收到同一人的 WS leave；也不能让旧连接替非成员
+    # 结算别人的对局。无变更时不返回房间，避免传输层广播虚假的淘汰/大厅事件。
+    if not any(p["id"] == user_id for p in room["players"]):
+        return ("removed", None)
     is_host = user_id == room["host_id"]
     if room["status"] == "playing":
         if room["game"] == "spider":
@@ -853,6 +871,15 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
 
 
 def start_game(code: str, user_id: int, *, prepared_spider: dict | None = None) -> dict | None:
+    gs = _start_game_engine(code, user_id, prepared_spider=prepared_spider)
+    room = _rooms.get(code)
+    if gs is not None and room is not None:
+        room_timing.initialize(room)
+        _touch_activity(room)
+    return gs
+
+
+def _start_game_engine(code: str, user_id: int, *, prepared_spider: dict | None = None) -> dict | None:
     """
     Start the game. Returns game_state dict or None on failure.
     Sets room status to 'playing'. Works from waiting status.
@@ -905,7 +932,8 @@ def start_game(code: str, user_id: int, *, prepared_spider: dict | None = None) 
     room["game_started_at"] = _now_iso()
     room["empty_since"] = None
     game_state = {
-        "board": create_board(),
+        "board": create_board(room.get("gomoku_size", BOARD_SIZE)),
+        "forbidden": bool(room.get("gomoku_forbidden", False)),
         "moves": [],
         "next": "black",
         "winner": None,
@@ -990,7 +1018,9 @@ def _start_minesweeper(room: dict) -> dict:
     """
     diff = room.get("difficulty", "intermediate")
     daily = bool(room.get("mine_daily"))
-    seed = int(datetime.now(timezone.utc).strftime("%Y%m%d")) if daily else None
+    seed = (challenge_seed("minesweeper", room["challenge_date"])
+            if room.get("challenge_date") else
+            int(datetime.now(timezone.utc).strftime("%Y%m%d")) if daily else None)
     num_players = len(room["players"])
     game_state = mine_create_game(diff, num_players, seed=seed, daily=daily)
     room["status"] = "playing"
@@ -1008,7 +1038,7 @@ def _start_reversi(room: dict) -> dict | None:
     room["status"] = "playing"
     room["game_started_at"] = _now_iso()
     gs = {
-        "board": reversi_create_board(),
+        "board": reversi_create_board(room.get("reversi_size", REVERSI_BOARD_SIZE)),
         "moves": [],
         "next": "black",
         "winner": None,
@@ -1055,7 +1085,8 @@ def _start_luzhanqi(room: dict) -> dict | None:
     room["status"] = "playing"
     room["game_started_at"] = _now_iso()
     gs = lzq.create_game(room.get("luzhanqi_mode", "open"),
-                         room.get("luzhanqi_reveal", True))
+                         room.get("luzhanqi_reveal", True),
+                         setup_timeout_seconds=room.get("luzhanqi_setup_timeout", 0))
     host = next(p for p in room["players"] if p["id"] == room["host_id"])
     other_player = next(p for p in room["players"] if p["id"] != room["host_id"])
     gs["player_colors"][host["id"]] = lzq.RED          # 房主执红先行
@@ -1090,6 +1121,7 @@ def _start_connect4(room: dict) -> dict | None:
     room["game_started_at"] = _now_iso()
     gs = {
         "board": c4_create_board(),
+        "popout": bool(room.get("connect4_popout", False)),
         "moves": [],
         "next": "black",
         "winner": None,
@@ -1159,7 +1191,7 @@ def _start_dots(room: dict) -> dict | None:
         return None
     room["status"] = "playing"
     room["game_started_at"] = _now_iso()
-    gs = dots_create_game(DEFAULT_DOTS)
+    gs = dots_create_game(room.get("dots_count", DEFAULT_DOTS))
     host = next(p for p in room["players"] if p["id"] == room["host_id"])
     other = next(p for p in room["players"] if p["id"] != room["host_id"])
     gs["player_colors"] = {host["id"]: "black", other["id"]: "white"}
@@ -1179,7 +1211,8 @@ def _start_tetris(room: dict) -> dict | None:
     players = room["players"]
     if not 1 <= len(players) <= 4:
         return None
-    seed = random.randint(0, 2**31 - 1)
+    seed = (challenge_seed("tetris", room["challenge_date"])
+            if room.get("challenge_date") else random.randint(0, 2**31 - 1))
     colors = ["blue", "red", "green", "yellow"]
     player_ids = [p["id"] for p in players]
     # 所有人同一个 seed → 方块序列完全一致（公平，与 2048 同种子出块同理）。
@@ -1212,7 +1245,8 @@ def _start_2048(room: dict) -> dict | None:
     players = room["players"]
     if not 1 <= len(players) <= 4:
         return None
-    seed = random.randint(0, 2**31 - 1)
+    seed = (challenge_seed("2048", room["challenge_date"])
+            if room.get("challenge_date") else random.randint(0, 2**31 - 1))
     colors = ["blue", "red", "green", "yellow"]
     gs = {
         "boards": {p["id"]: g2048_create_board() for p in players},
@@ -1249,7 +1283,11 @@ def _start_ludo(room: dict) -> dict:
     num_players = len(room["players"])
     if num_players < 2:
         return None
-    game_state = ludo_create_game(num_players)
+    game_state = ludo_create_game(
+        num_players, teams=room.get("ludo_teams", "off"),
+        capture=room.get("ludo_capture", True), color_jump=room.get("ludo_color_jump", True),
+        exact_finish=room.get("ludo_exact_finish", True),
+        animation_speed=room.get("ludo_animation_speed", "normal"))
     room["status"] = "playing"
     room["game_started_at"] = _now_iso()
     room["game_state"] = game_state
@@ -1277,6 +1315,7 @@ def _start_uno(room: dict) -> dict | None:
     room["game_state"] = gs
     room["empty_since"] = None
     room["_uno_ranking"] = []
+    _prepare_uno_series(room, gs)
     _touch_activity(room)
     return gs
 
@@ -1302,6 +1341,8 @@ def set_room_setting(code: str, user_id: int, key: str, value) -> dict:
         raise ValueError("只有房主能改玩法设置")
     if room["status"] != "waiting":
         raise ValueError("对局已经开始，改不了玩法设置了")
+    if room.get("challenge_date"):
+        raise ValueError("每日挑战的玩法固定，不能修改")
     spec = room_settings.spec_for(room["game"], key)
     if spec is None:
         raise ValueError(f"这个房间没有「{key}」这项设置")
@@ -1473,7 +1514,7 @@ def _stasis_bot_think(room: dict, gs: dict):
         if not p.get("is_bot"):
             continue
         try:
-            action = stasis_ai.decide(gs, p["id"])
+            action = stasis_ai.decide(gs, p["id"], normalize_difficulty(p.get("ai_difficulty")))
         except Exception:
             continue
         if not action:
@@ -1770,7 +1811,7 @@ def _game2048_make_move(code: str, user_id: int, direction: str) -> dict:
     if not moved:
         # silent：往「走不动」的方向滑/点是 2048 的正常操作，不该弹错误提示
         return {"ok": False, "silent": True, "error": "无效移动"}
-    if len(gs["boards"]) == 1:
+    if len(gs["boards"]) == 1 and not room.get("challenge_date"):
         # 撤销栈只在单人局维护：多人局是「同种子竞速」，撤销会破坏可比性。
         # 只回滚盘面/分数/步数，**不回滚 RNG**——撤销后重新走子会拿到不同的新块，
         # 这是可接受的（单人局没有跨玩家公平性问题），也省下每步 625 个随机数的落盘。
@@ -1827,6 +1868,8 @@ def _game2048_undo(code: str, user_id: int) -> dict:
     room = _rooms.get(code)
     if not room or room["status"] != "playing" or room["game"] != "2048":
         return {"ok": False, "error": "游戏未在进行中"}
+    if room.get("challenge_date"):
+        return {"ok": False, "error": "每日挑战不支持撤销"}
     gs = room["game_state"]
     pid = user_id
     if pid not in gs["boards"]:
@@ -2054,13 +2097,26 @@ def make_move(code: str, user_id: int, x: int, y: int) -> dict:
     or {'ok': False, 'error': str}
     """
     result = _apply_move(code, user_id, x, y)
+    if result.get("ok"):
+        gs = _rooms[code]["game_state"]
+        stone = BLACK if gs["next"] == "black" else WHITE
+        result["move"]["legal"] = ([] if gs.get("winner") else
+            gomoku_engine.legal_moves(gs["board"], stone, gs.get("forbidden", False)))
+        if (not gs.get("winner") and gs.get("forbidden") and gs["next"] == "black"
+                and not result["move"]["legal"]):
+            _set_game_over(_rooms[code], "white", "no_legal_moves")
+            result["game_over"] = {"winner": "white", "reason": "no_legal_moves"}
+    if result.get("ok"):
+        room = _rooms[code]
+        room_timing.after_move(room)
+        room_timing.decorate(room, result["move"])
     _finish_action(code, result)
     return result
 
 
 def _apply_move(code: str, user_id: int, x: int, y: int) -> dict:
     room = _rooms.get(code)
-    if not room or room["status"] != "playing":
+    if not room or room["status"] != "playing" or room["game"] != "gomoku":
         return {"ok": False, "error": "游戏未在进行中"}
     gs = room["game_state"]
     color = _user_color(room, user_id)
@@ -2068,22 +2124,27 @@ def _apply_move(code: str, user_id: int, x: int, y: int) -> dict:
         return {"ok": False, "error": "你不是游戏玩家"}
     if gs["next"] != color:
         return {"ok": False, "error": "还没轮到你"}
-    if x < 0 or x >= BOARD_SIZE or y < 0 or y >= BOARD_SIZE:
+    if type(x) is not int or type(y) is not int or x < 0 or x >= len(gs["board"]) or y < 0 or y >= len(gs["board"]):
         return {"ok": False, "error": "坐标超出范围"}
     if gs["board"][y][x] != 0:
         return {"ok": False, "error": "该位置已有棋子"}
     # Place stone
     stone = BLACK if color == "black" else WHITE
+    if stone == BLACK and gs.get("forbidden"):
+        reason = gomoku_engine.forbidden_reason(gs["board"], x, y)
+        if reason:
+            label = {"double_three": "三三", "double_four": "四四", "overline": "长连"}.get(reason, "非法位置")
+            return {"ok": False, "error": f"黑棋禁手：{label}"}
     place_stone(gs["board"], x, y, stone)
     gs["moves"].append({"x": x, "y": y, "color": color})
     # Check win
-    if check_win(gs["board"], x, y):
+    if check_win(gs["board"], x, y, forbidden=gs.get("forbidden", False)):
         _set_game_over(room, color, "five")
         move_msg = {"x": x, "y": y, "color": color, "next": gs["next"]}
         go_msg = {"winner": color, "reason": "five"}
         return {"ok": True, "move": move_msg, "game_over": go_msg}
     # Check draw
-    if is_board_full(len(gs["moves"])):
+    if is_board_full(len(gs["moves"]), len(gs["board"])):
         _set_game_over(room, "draw", "draw")
         move_msg = {"x": x, "y": y, "color": color, "next": gs["next"]}
         go_msg = {"winner": "draw", "reason": "draw"}
@@ -2097,6 +2158,14 @@ def _apply_move(code: str, user_id: int, x: int, y: int) -> dict:
 def reversi_make_move(code: str, user_id: int, x: int, y: int) -> dict:
     """Attempt a reversi move. Returns result with flips, pass, game_over."""
     result = _reversi_make_move(code, user_id, x, y)
+    if result.get("ok"):
+        gs = _rooms[code]["game_state"]
+        stone = REVERSI_BLACK if gs["next"] == "black" else REVERSI_WHITE
+        result["move"]["legal"] = [] if gs.get("winner") else reversi_get_legal_moves(gs["board"], stone)
+    if result.get("ok"):
+        room = _rooms[code]
+        room_timing.after_move(room)
+        room_timing.decorate(room, result["move"])
     _finish_action(code, result)
     return result
 
@@ -2171,6 +2240,10 @@ def _reversi_make_move(code: str, user_id: int, x: int, y: int) -> dict:
 def xiangqi_make_move(code: str, user_id: int, frm, to) -> dict:
     """Attempt a xiangqi move. Returns result with the move and game_over."""
     result = _xiangqi_make_move(code, user_id, frm, to)
+    if result.get("ok"):
+        room = _rooms[code]
+        room_timing.after_move(room)
+        room_timing.decorate(room, result["move"])
     _finish_action(code, result)
     return result
 
@@ -2265,6 +2338,7 @@ def luzhanqi_setup(code: str, user_id: int, action: str, a=None, b=None, name=No
         lzq.confirm_setup(gs, color)
     else:
         return {"ok": False, "error": "未知的布阵操作"}
+    room_timing.schedule(room)
     _touch_activity(room)
     return {"ok": True, "color": color}
 
@@ -2291,53 +2365,35 @@ def uttt_make_move(code: str, user_id: int, board, cell, revision) -> dict:
     return result
 
 
-def connect4_make_move(code: str, user_id: int, col: int) -> dict:
-    """重力四子棋落子。返回结果带 move / game_over，与五子棋同形。"""
-    result = _connect4_make_move(code, user_id, col)
+def connect4_make_move(code: str, user_id: int, col: int, action: str = "drop") -> dict:
+    """Drop or PopOut through one authoritative engine; only valid moves persist."""
+    result = _connect4_make_move(code, user_id, col, action)
+    if result.get("ok"):
+        gs = _rooms[code]["game_state"]
+        stone = C4_BLACK if gs["next"] == "black" else C4_WHITE
+        result["move"]["legal_actions"] = ([] if gs.get("winner") else
+            connect4_engine.legal_actions(gs["board"], stone, gs.get("popout", False)))
     _finish_action(code, result)
     return result
 
 
-def _connect4_make_move(code: str, user_id: int, col: int) -> dict:
-    """重力落子 + 四连检测 + 和棋判定。
-
-    **客户端只给列号**：落点行由重力决定，服务端是唯一权威——客户端自己按
-    「列内还有几个空位」推落点，一旦和棋盘状态差一格就会画错（飞行棋客户端
-    自己推路径画错是同一类教训）。落点行随 move 消息回给所有人。
-    """
+def _connect4_make_move(code: str, user_id: int, col: int, action: str = "drop") -> dict:
     room = _rooms.get(code)
     if not room or room["status"] != "playing" or room["game"] != "connect4":
         return {"ok": False, "error": "游戏未在进行中"}
-    gs = room["game_state"]
     color = _user_color(room, user_id)
     if not color:
         return {"ok": False, "error": "你不是游戏玩家"}
+    gs = room["game_state"]
     if gs["next"] != color:
         return {"ok": False, "error": "还没轮到你走"}
-    if not c4_is_valid_move(gs["board"], col):
+    if action == "drop" and type(col) is int and 0 <= col < 7 and not c4_is_valid_move(gs["board"], col):
         return {"ok": False, "error": "这一列已经满了"}
-    row = c4_drop(gs["board"], col, C4_BLACK if color == "black" else C4_WHITE)
-    gs["moves"].append({"x": col, "y": row, "color": color})
-    if c4_check_win(gs["board"], row, col):
-        _set_game_over(room, color, "four")
-        return {
-            "ok": True,
-            "move": {"x": col, "y": row, "color": color, "next": gs["next"]},
-            "game_over": {"winner": color, "reason": "four"},
-        }
-    if c4_is_board_full(gs["board"]):
-        _set_game_over(room, "draw", "draw")
-        return {
-            "ok": True,
-            "move": {"x": col, "y": row, "color": color, "next": gs["next"]},
-            "game_over": {"winner": "draw", "reason": "draw"},
-        }
-    gs["next"] = "white" if color == "black" else "black"
-    return {
-        "ok": True,
-        "move": {"x": col, "y": row, "color": color, "next": gs["next"]},
-        "game_over": None,
-    }
+    result = connect4_engine.apply_action(gs, C4_BLACK if color == "black" else C4_WHITE, col, action)
+    if result.get("ok") and result.get("game_over"):
+        _set_game_over(room, gs["winner"], gs["reason"])
+    return result
+
 
 
 def dots_make_move(
@@ -2717,6 +2773,9 @@ def mine_reveal_action(code: str, user_id: int, x: int, y: int) -> dict:
     if seat is None:
         return {"ok": False, "error": "你不是游戏玩家"}
     gs = room["game_state"]
+    first = (challenge_info(room) or {}).get("first_reveal")
+    if first and not gs.get("started") and (x, y) != (first["x"], first["y"]):
+        return {"ok": False, "error": "每日挑战请先翻开中央标记格"}
     result = mine_reveal(gs, x, y, seat)
     if result["ok"]:
         _mine_touch_time(gs, seat)
@@ -2766,6 +2825,8 @@ def mine_flag_action(code: str, user_id: int, x: int, y: int) -> dict:
     if seat is None:
         return {"ok": False, "error": "你不是游戏玩家"}
     gs = room["game_state"]
+    if room.get("challenge_date") and not gs.get("started"):
+        return {"ok": False, "error": "每日挑战请先翻开中央标记格"}
     result = mine_flag(gs, x, y, seat)
     if result.get("ok"):
         _touch_activity(room)
@@ -2859,6 +2920,63 @@ def _finalize_ludo_game(room: dict, game_over: dict):
 # ── UNO ──────────────────────────────────────────────────────
 
 
+def _reset_changed_uno_series(room: dict):
+    series = room.get("uno_series")
+    if not series or room.get("status") != "waiting":
+        return
+    roster = [p["id"] for p in room["players"]]
+    rules = uno_rules.normalize(room.get("uno_rules"))
+    if roster != series["user_ids"] or rules != series.get("rules"):
+        room.pop("uno_series", None)
+
+
+def _uno_series_view(room: dict) -> dict:
+    series = room.get("uno_series") or {}
+    return {"target": series.get("target", 500), "scores": dict(series.get("scores") or {}),
+            "user_ids": list(series.get("user_ids") or []),
+            "rounds": len(series.get("round_ids") or []),
+            "finished": bool(series.get("finished")), "winners": list(series.get("winners") or []),
+            "last_points": series.get("last_points", 0)}
+
+
+def _prepare_uno_series(room: dict, gs: dict):
+    if gs["rules"].get("score_target") != 500:
+        room.pop("uno_series", None)
+        return
+    _reset_changed_uno_series(room)
+    series = room.get("uno_series")
+    if (not series or series["finished"] or series["user_ids"] != gs["seat_uids"]
+            or series.get("rules") != gs["rules"]):
+        series = uno_series.create_series(gs["seat_uids"], gs["rules"]["teams"])
+        series["rules"] = dict(gs["rules"])
+        room["uno_series"] = series
+    gs["series"] = _uno_series_view(room)
+    gs["series_round_id"] = room.get("round", 0)
+
+
+def _settle_uno_series(room: dict, gs: dict):
+    if not room.get("uno_series") or gs["rules"].get("score_target") != 500:
+        return
+    room["uno_series"] = uno_series.add_round(room["uno_series"], gs, gs.get("series_round_id", room.get("round", 0)))
+    gs["series"] = _uno_series_view(room)
+
+
+def uno_arbitration_action(code: str, user_id: int, kind: str, target=None) -> dict:
+    room = _uno_room(code)
+    if not room:
+        return {"ok": False, "error": "游戏未在进行中"}
+    seat = _get_player_seat(room, user_id)
+    if seat is None:
+        return {"ok": False, "error": "你不是游戏玩家"}
+    if kind == "challenge_wild4":
+        result = uno_engine.challenge_draw4(room["game_state"], seat)
+    elif kind == "catch_uno":
+        result = uno_engine.catch_uno(room["game_state"], seat, target)
+    else:
+        return {"ok": False, "error": "没有这个UNO仲裁动作"}
+    return _uno_after_action(room, result)
+
+
 def _uno_room(code: str) -> dict | None:
     """取一个正在进行的 UNO 房间；不满足返回 None。"""
     room = _rooms.get(code)
@@ -2886,6 +3004,7 @@ def _finalize_uno_game(room: dict) -> list[dict]:
     """UNO 终局：算排名 → 房间回等待态 → 存排名供战绩快照。"""
     gs = room["game_state"]
     ranking = uno_compute_ranking(gs, _get_players_info(room))
+    _settle_uno_series(room, gs)
     _back_to_lobby(room)
     gs["ranking"] = ranking
     room["_uno_ranking"] = ranking
@@ -3094,6 +3213,7 @@ def _set_game_over(room: dict, winner: str, reason: str):
     _back_to_lobby(room)
     room["game_state"]["winner"] = winner
     room["game_state"]["reason"] = reason
+    room_timing.after_move(room)
     _touch_activity(room)
     if not _has_human_online(room):
         room["empty_since"] = _time.time()
@@ -3166,12 +3286,14 @@ def _start_dc_timer(code: str, user_id: int, loop: asyncio.AbstractEventLoop):
     _dc_tasks[key] = task
 
 
-# Callback set by ws.py to broadcast game_over on timeout
+# Callback set by ws.py to broadcast timeout updates.
+# 2048 传 (code, user_id, event)，event 捕获本局身份与此次公开载荷；
+# 其余游戏保留 (code, winner) 调用形式。
 _dc_timeout_callback = None
 
 
 def set_dc_timeout_callback(callback):
-    """Set async callback for when disconnect timeout fires."""
+    """Set async timeout callback; 2048 additionally passes its captured event."""
     global _dc_timeout_callback
     _dc_timeout_callback = callback
 
@@ -3238,10 +3360,36 @@ def _on_dc_timeout(code: str, user_id: int):
                     pass
         _touch_activity(room)
         return
+    if room["game"] == "2048":
+        # 各玩各的盘：超时只结束本人，全员结束才按完整排名结算。
+        gs = room["game_state"]
+        if user_id not in gs["game_over_flags"] or gs["game_over_flags"][user_id]:
+            return
+        _finish_2048_player(gs, user_id, "disconnect")
+        game_over = _maybe_finish_2048(room)
+        _touch_activity(room)
+        if _dc_timeout_callback:
+            # 在同步变更点捕获本次事件：多个超时可在回调执行前连续发生，
+            # 只有最后一次的事件携带终局；旧事件不得重新读取下一局状态。
+            event = {
+                "game_state": gs,
+                "move": {
+                    "type": "move2048", "user_id": user_id,
+                    "score": gs["scores"][user_id],
+                    "player_finished": gs["finish_reasons"][user_id],
+                    "leaderboard": g2048_leaderboard(gs),
+                },
+                "game_over": game_over,
+            }
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(_dc_timeout_callback(code, user_id, event))
+            except RuntimeError:
+                pass
+        return
     if room["game"] == "tetris":
         # 各玩各的盘：一人掉线超时只结束他自己，其余人继续玩。
-        # （2048 在这里走的是下面的通用分支 = 一人掉线整局结束，那条与其
-        #   「各玩各的」语义不符，属于已知的历史遗留；tetris 不跟着抄。）
         gs = room["game_state"]
         if not gs["game_over_flags"].get(user_id):
             tetris_finish_player(gs, user_id, "disconnect")
@@ -3372,7 +3520,7 @@ def room_to_dict(room: dict) -> dict:
             "is_host": p["id"] == room["host_id"],
             "connected": p["connected"],
             "is_bot": p.get("is_bot", False),
-            # 人机的 AI 难度档（仅海战棋，见 add_bot）
+            # 人机的 AI 难度档（全部支持人机的游戏，见 add_bot）
             "ai_difficulty": p.get("ai_difficulty"),
             # 断线重连剩余秒数（仅游戏中且已断线时有值）——客户端据此倒计时，
             # 不要在界面上写死 120：测试会把超时改成 5 秒，写死就对不上了。
@@ -3396,6 +3544,15 @@ def room_to_dict(room: dict) -> dict:
     settings = room_settings.items_for(room["game"], room)
     if settings:
         result["settings"] = settings
+    if room.get("challenge_date"):
+        result["challenge"] = challenge_info(room)
+    if room.get("practice"):
+        result["practice"] = True
+    if room["game"] in ("uno", "stasis"):
+        result["allow_spectators"] = bool(room.get("allow_spectators")) and not bool(room.get("practice"))
+        result["quick_phrases"] = quick_phrases_for(room["game"])
+    if room.get("uno_series"):
+        result["uno_series"] = _uno_series_view(room)
     return result
 
 
@@ -3475,3 +3632,42 @@ def stop_sweeper():
     if _sweeper_task and not _sweeper_task.done():
         _sweeper_task.cancel()
         _sweeper_task = None
+
+
+def xiangqi_undo_permission(room: dict, user_id: int) -> tuple[bool, str]:
+    if room.get("game") != "xiangqi" or room.get("status") != "playing":
+        return False, "象棋对局未在进行中"
+    if room["host_id"] != user_id:
+        return False, "只有房主可以悔棋"
+    if not room.get("xiangqi_allow_undo"):
+        return False, "本房未开启人机悔棋"
+    players = room["players"]
+    if len(players) != 2 or sum(bool(p.get("is_bot")) for p in players) != 1:
+        return False, "悔棋仅限双人人机局"
+    gs = room["game_state"]
+    if gs.get("winner") or gs.get("finished"):
+        return False, "对局已结束，无法悔棋"
+    if gs["next"] != gs["player_colors"].get(user_id):
+        return False, "请等人机走完后再悔棋"
+    if len(gs["moves"]) < 2:
+        return False, "双方各走一步后才能悔棋"
+    return True, "回退双方各一步，已消耗时间不退还"
+
+
+def xiangqi_undo_action(code: str, user_id: int) -> dict:
+    room = _rooms.get(code)
+    if room is None:
+        return {"ok": False, "error": "房间不存在"}
+    allowed, reason = xiangqi_undo_permission(room, user_id)
+    if not allowed:
+        return {"ok": False, "error": reason}
+    result = xiangqi_engine.undo_last_pair(room["game_state"], _user_color(room, user_id))
+    if result["ok"]:
+        # Queued/returning searches carry the old revision and must be discarded.
+        for key, task in list(_bot_tasks.items()):
+            if key[0] == code:
+                _bot_tasks.pop(key, None)
+                task.cancel()
+        room_timing.schedule(room)
+        _touch_activity(room)
+    return result

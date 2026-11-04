@@ -665,13 +665,14 @@ class TestRulesPick:
         room = _create_room(client, t1)
         preset = _setting(room, "preset")
         assert [p["value"] for p in preset["choices"]] == [
-            "classic", "party", "team", "no_mercy"]
+            "official", "classic", "party", "team", "no_mercy"]
         assert preset["value"] == "classic"
         assert preset["value_label"] == "经典"
         # 8 条房规各是一个独立项，顺序就是 `RULE_META` 的顺序
         assert [s["key"] for s in room["settings"]] == [
             "preset", "stack_mode", "draw_until_play", "must_play",
-            "jump_in", "seven_zero", "deck", "mercy", "teams"]
+            "jump_in", "seven_zero", "deck", "mercy", "teams",
+            "wild4_strict", "wild4_challenge", "uno_penalty", "score_target", "allow_spectators"]
         assert _setting_value(room, "jump_in") is False
 
     def test_preset_pick_is_broadcast_to_everyone(self, client):

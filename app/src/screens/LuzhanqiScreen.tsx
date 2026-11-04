@@ -22,7 +22,9 @@ import { getRoom, leaveRoom, Room } from '../api';
 import { useAuth } from '../auth';
 import { onConfirmLeave, useModalBackGuard } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
+import { SetupCountdown, observeCountdown, ObservedCountdown } from '../GameClock';
 import { RoomSocket, SocketMessage } from '../socket';
 import {
   LzqBattle, LzqView, PIECE_ORDER, battleText, pieceName, reasonText, sideName,
@@ -49,6 +51,8 @@ const WINNER_LABELS: Record<string, string> = {
 export default function LuzhanqiScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const [shellConnected, setShellConnected] = useState(false);
+  const [setupClock, setSetupClock] = useState<ObservedCountdown | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<LzqView | null>(null);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
@@ -77,7 +81,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
   const rows = game?.rows ?? 12;
   const cols = game?.cols ?? 5;
   const availW = winWidth - spacing.md * 2;
-  const availH = Math.max(200, winHeight - 330);
+  const availH = Math.max(200, winHeight - 400);
   const cellH = Math.min(availH / (rows + 0.5), BOARD_MAX_H / (rows + 0.5));
   const cellW = Math.min(availW / cols, cellH * 1.5);
   const layout: LzqLayout | null = useMemo(
@@ -126,7 +130,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
     socketRef.current = ws;
 
     const adopt = (g: LzqView) => {
-      setGame(g);
+      setGame(g); setSetupClock(g.setup_remaining_ms != null ? observeCountdown(g.setup_remaining_ms) : null);
       setSelected(null);
       setSwapSel(null);
       setBattleAt(null);
@@ -155,7 +159,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
     };
     const handleSetup = (msg: SocketMessage) => {
       const g = msg.game as LzqView;
-      if (g) { setGame(g); setSwapSel(null); }
+      if (g) { setGame(g); setSetupClock(g.setup_remaining_ms != null ? observeCountdown(g.setup_remaining_ms) : null); setSwapSel(null); }
     };
     const handleReady = (msg: SocketMessage) => {
       setGame((prev) => (prev ? { ...prev, ready: (msg.ready as Record<string, boolean>) ?? prev.ready } : prev));
@@ -234,6 +238,8 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
       setSwapSel(null);
     };
 
+    ws.on('luzhanqi_state', msg => { const next = msg.game as LzqView; if (next) { setGame(next); setSelected(null); setSwapSel(null); } });
+    ws.on('setup_left', msg => setSetupClock(typeof msg.remaining_ms === 'number' ? observeCountdown(msg.remaining_ms) : null));
     ws.on('sync', handleSync);
     ws.on('lobby', handleLobby);
     ws.on('game_start', handleGameStart);
@@ -246,7 +252,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
     ws.on('player_reconnected', handlePlayerReconnected);
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave]);
 
@@ -329,8 +335,8 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   // --- 派生显示 ---
   const opponent = room?.players.find((p) => p.id !== user?.id);
@@ -350,22 +356,24 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
     .filter((x) => x.n > 0);
 
   return (
-    <View style={styles.root}>
+    <GameShell game="luzhanqi" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={<View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.sm }}><Text style={{ color: colors.textSecondary }}>{turnText}</Text><Text style={{ color: colors.textSecondary }}>{game?.mode === 'hidden' ? game.reveal ? '暗棋（公开阵亡身份）' : '暗棋' : '明棋'}</Text>{inSetup && <SetupCountdown value={setupClock} />}</View>} style={styles.root} actions={<View style={styles.bottomBar}>
+        <TouchableOpacity
+          testID="lz-surrender"
+          style={[styles.ghostBtn, styles.flex1]}
+          onPress={() => setConfirm('surrender')}
+        >
+          <Text style={styles.ghostBtnText}>认输</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          testID="lz-leave"
+          style={[styles.ghostBtn, styles.flex1]}
+          onPress={() => setConfirm('leave')}
+        >
+          <Text style={styles.ghostBtnText}>退出房间</Text>
+        </TouchableOpacity>
+      </View>}>
       {/* 顶栏：身份 + 回合提示（左）／帮助 + 房号（右） */}
-      <View style={styles.topBar}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.turnText}>{turnText}</Text>
-          <Text style={styles.sideText}>
-            {sideName(myColor)}
-            {game?.mode === 'hidden'
-              ? (game.reveal ? ' · 暗棋（公开阵亡身份）' : ' · 暗棋')
-              : ' · 明棋'}
-            {opponent ? ` · 对 ${opponent.nickname || opponent.username}` : ''}
-          </Text>
-        </View>
-        <GameHelpButton game="luzhanqi" size={24} />
-        <Text style={styles.codeText}>#{code}</Text>
-      </View>
+
 
       {opponentDisconnected && dcLeft !== null && (
         <View style={styles.dcBar}>
@@ -476,22 +484,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
       </View>
 
       {/* 底部：认输 / 退出房间（危险操作，都要二次确认） */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity
-          testID="lz-surrender"
-          style={[styles.ghostBtn, styles.flex1]}
-          onPress={() => setConfirm('surrender')}
-        >
-          <Text style={styles.ghostBtnText}>认输</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          testID="lz-leave"
-          style={[styles.ghostBtn, styles.flex1]}
-          onPress={() => setConfirm('leave')}
-        >
-          <Text style={styles.ghostBtnText}>退出房间</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* 认输确认 */}
       <Modal visible={confirm === 'surrender'} transparent animationType="fade"
@@ -540,30 +533,12 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* 结算 */}
-      <Modal visible={showGameOver} transparent animationType="fade"
-        onRequestClose={handleBackToRoom}>
-        <View style={styles.modalMask}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>
-              {game?.winner ? WINNER_LABELS[game.winner] ?? '对局结束' : '对局结束'}
-            </Text>
-            <Text style={styles.modalBody}>
-              {reasonText(game?.reason)}
-              {game?.winner && game.winner !== 'draw' && game.winner !== myColor ? '（我方告负）' : ''}
-            </Text>
-            <View style={styles.modalBtns}>
-              <TouchableOpacity
-                testID="lz-back-room"
-                style={[styles.primaryBtn, styles.flex1]}
-                onPress={handleBackToRoom}
-              >
-                <Text style={styles.primaryBtnText}>返回房间</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      <GameResult visible={showGameOver} result={game?.winner ? WINNER_LABELS[game.winner] ?? '对局结束' : '对局结束'} reason={reasonText(game?.reason)} players={shellPlayers(room, user?.id, game)} roomButtonTestID="lz-back-room"
+        onBackToRoom={handleBackToRoom} onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+        {game?.truth_available && <><Text style={{ color: colors.textSecondary }}>终局亮牌（只读）</Text><ScrollView style={{ maxHeight: 280 }} contentContainerStyle={{ alignItems: 'center' }} testID="lz-truth-board"><LuzhanqiBoardView view={game} layout={makeLayout(game.topology, 40, 26, 13)} flipped={false} interactive={false} /></ScrollView></>}
+
+      </GameResult>
+    </GameShell>
   );
 }
 

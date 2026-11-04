@@ -39,7 +39,7 @@ tick（同深空休眠「引擎只认识 `dt_ms`」那条纪律）。抢出与 7
 import random
 from collections import Counter
 
-from app.game import uno_rules
+from app.game import uno_rules, uno_official
 
 # 牌面颜色（黑牌用 W，出牌后由出牌者指定四色之一）
 COLORS = ["R", "G", "B", "Y"]
@@ -361,8 +361,8 @@ def playable_cards(game: dict, seat: int | None) -> list[str]:
     # 摸过牌之后只能出**刚摸的那张**（标准规则：摸牌后若可出则可出，否则回合结束）
     if game["drawn_this_turn"] is not None:
         card = game["drawn_this_turn"]
-        return [card] if can_play_now(game, card) else []
-    return [c for c in hand if can_play_now(game, c)]
+        return [card] if can_play_now(game, card) and uno_official.wild4_allowed(game, seat, card) else []
+    return [c for c in hand if can_play_now(game, c) and uno_official.wild4_allowed(game, seat, c)]
 
 
 def jumpable_cards(game: dict, seat: int | None) -> list[str]:
@@ -461,6 +461,7 @@ def play(game: dict, seat: int, card: str, chosen_color: str | None = None,
     if err:
         return {"ok": False, "error": err}
 
+    evidence = uno_official.begin_play(game, seat, card)
     hand = game["hands"][seat]
     hand.remove(card)
     game["discard_pile"].append(card)
@@ -476,6 +477,8 @@ def play(game: dict, seat: int, card: str, chosen_color: str | None = None,
         # 任何牌**（真坑，回归见 TestJumpIn::test_jump_in_clears_a_pending_draw）。
         game["turn"] = seat
 
+    if not hand:
+        uno_official.finish_last_penalty(game, seat, card)
     if not hand and not _finish_emptied(game, seat):
         # 出完手牌且**真的打完了** → 经典档直接终局（牌面效果与回合移交都不再结算，
         # 局已经结束了，再推进回合只会让 game_over 时的 turn 是个没意义的值）；
@@ -483,6 +486,7 @@ def play(game: dict, seat: int, card: str, chosen_color: str | None = None,
         # 反过来，组队档接管了队友一半手牌时 `_finish_emptied` 返回 True，
         # 这一手**照常往下走**（牌面效果 + 移交回合），因为他接着打。
         _settle_turn(game)
+        uno_official.finish_play(game, evidence)
         return _play_result(game, seat, card, "empty", [], jump=jump)
 
     effect, skipped, swapped = _apply_effect(game, seat, card, target)
@@ -490,8 +494,10 @@ def play(game: dict, seat: int, card: str, chosen_color: str | None = None,
         # 「弃同色」可能一次把整手牌清空 —— 那也是出完手牌
         _finish_emptied(game, seat)
         _settle_turn(game)
+        uno_official.finish_play(game, evidence)
         return _play_result(game, seat, card, "empty", skipped,
                             target=swapped, jump=jump)
+    uno_official.finish_play(game, evidence)
     return _play_result(game, seat, card, effect, skipped, target=swapped, jump=jump)
 
 
@@ -684,6 +690,7 @@ def draw(game: dict, seat: int, auto: bool = False) -> dict:
             and playable_cards(game, seat):
         return {"ok": False, "error": "手里有能出的牌，必须先出"}
 
+    uno_official.close_windows(game)
     if game["pending_draw"] > 0:
         return _take_penalty(game, seat)
 
@@ -869,6 +876,7 @@ def snapshot(game: dict) -> dict:
     """
     return {
         "game": "uno",
+        "series": game.get("series"),
         "num_players": game["num_players"],
         "seat_uids": list(game["seat_uids"]),
         "rules": dict(game["rules"]),
@@ -902,6 +910,10 @@ def game_to_sync(game: dict, user_id: int) -> dict:
     hand = list(game["hands"].get(seat, [])) if seat is not None else []
     return {
         "game": "uno",
+        "series": game.get("series"),
+        "can_challenge_wild4": bool(uno_official.challenge_targets(game, seat)),
+        "wild4_challenge_targets": uno_official.challenge_targets(game, seat),
+        "catch_uno_targets": uno_official.catch_targets(game, seat),
         "num_players": game["num_players"],
         "seat_uids": list(game["seat_uids"]),
         # 座位 → 玩家身份色（顶层 theme.playerColors 的键）。跟着状态一起下发，
@@ -1441,3 +1453,10 @@ def _game_over_payload(game: dict) -> dict | None:
         return None
     return {"reason": game["reason"], "winner": game["winner"],
             "winner_team": game.get("winner_team")}
+
+def challenge_draw4(game: dict, seat: int) -> dict:
+    return uno_official.challenge_draw4(game, seat)
+
+
+def catch_uno(game: dict, seat: int, target: int) -> dict:
+    return uno_official.catch_uno(game, seat, target)

@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import random
 
+from app.game import luzhanqi_tracking
+
 ROWS = 12
 COLS = 5
 
@@ -351,7 +353,7 @@ def validate_layout(color: str, layout: dict) -> str | None:
 def fill_layout(gs: dict, color: str, layout: dict) -> None:
     for cell, piece in layout.items():
         r, c = cell
-        gs["board"][r][c] = {"c": color, "p": piece}
+        gs["board"][r][c] = {"c": color, "p": piece, "token": f"{color}:{r}:{c}"}
 
 
 def layout_of(gs: dict, color: str) -> dict:
@@ -491,7 +493,7 @@ def resolve_combat(attacker: str, defender: str) -> str:
 # ------------------------------------------------------------------ 对局状态
 
 
-def create_game(mode: str = "open", reveal: bool = True) -> dict:
+def create_game(mode: str = "open", reveal: bool = True, *, setup_timeout_seconds: int = 0) -> dict:
     """新开一局（形状与象棋 `create_game` 对齐，方便复用 room_manager 的通用路径）。"""
     return {
         "board": [[None] * COLS for _ in range(ROWS)],
@@ -504,6 +506,8 @@ def create_game(mode: str = "open", reveal: bool = True) -> dict:
         "last_move": None,
         "no_capture": 0,
         "phase": "setup",                       # setup → playing
+        "setup_remaining_ms": int(setup_timeout_seconds * 1000) if setup_timeout_seconds > 0 else None,
+        "_moved_tokens": [],
         "mode": mode if mode in MODES else "open",
         "reveal": bool(reveal),                 # 暗棋下阵亡是否公开身份
         "ready": {},                            # {颜色: 是否已确认布阵}
@@ -574,6 +578,8 @@ def make_move(gs: dict, frm, to) -> dict:
     if (tr, tc) not in piece_moves(gs["board"], fr, fc):
         return {"ok": False, "error": "这步棋不合规则"}
 
+    luzhanqi_tracking.ensure_tokens(gs["board"])
+    luzhanqi_tracking.mark_moved(gs, cell["token"])
     mover, piece = cell["c"], cell["p"]
     revealed_before = dict(gs.get("flag_revealed", {}))
     battle = _apply_move(gs, fr, fc, tr, tc, mover, piece)
@@ -607,7 +613,8 @@ def _apply_move(gs: dict, fr, fc, tr, tc, mover: str, piece: str) -> dict | None
         return None
     captured = target["p"]
     battle = {"at": [tr, tc], "attacker": mover, "attacker_piece": piece,
-              "defender": target["c"], "defender_piece": captured}
+              "defender": target["c"], "defender_piece": captured,
+              "attacker_token": gs["board"][fr][fc]["token"], "defender_token": target["token"]}
     gs["no_capture"] = 0
     if captured == JUNQI:
         gs["board"][tr][tc] = gs["board"][fr][fc]
@@ -729,7 +736,8 @@ def view_for(gs: dict, viewer_color: str) -> dict:
     mode = gs.get("mode", "open")
     reveal = bool(gs.get("reveal", True))
     revealed = gs.get("flag_revealed", {})
-    hide_other = mode == "hidden" or gs.get("phase") == "setup"
+    ended = bool(gs.get("finished") or gs.get("winner"))
+    hide_other = (mode == "hidden" or gs.get("phase") == "setup") and not ended
     cells = []
     for r in range(ROWS):
         row = []
@@ -740,11 +748,13 @@ def view_for(gs: dict, viewer_color: str) -> dict:
             elif hide_other and cell["c"] != viewer_color:
                 # 对手的棋子一律扣着；**唯一例外**是「司令阵亡后亮出的那面军旗」
                 show_flag = cell["p"] == JUNQI and revealed.get(cell["c"])
-                row.append({"c": cell["c"], "p": JUNQI if show_flag else None})
+                row.append({"c": cell["c"], "p": JUNQI if show_flag else None,
+                            **luzhanqi_tracking.public_identity(gs, cell, r, c)})
             else:
-                row.append({"c": cell["c"], "p": cell["p"]})
+                row.append({"c": cell["c"], "p": cell["p"],
+                            **luzhanqi_tracking.public_identity(gs, cell, r, c)})
         cells.append(row)
-    battles = [b for b in (mask_battle(x, viewer_color, mode, reveal)
+    battles = [b for b in (mask_battle(x, viewer_color, "open" if ended else mode, reveal)
                            for x in gs.get("battles", [])) if b]
     return {
         "rows": ROWS,
@@ -764,6 +774,9 @@ def view_for(gs: dict, viewer_color: str) -> dict:
         "ready": dict(gs.get("ready", {})),
         "alive": alive_counts(gs["board"], viewer_color),
         "battles": battles[-8:],
+        "battle_history": battles,
+        "setup_remaining_ms": gs.get("setup_remaining_ms"),
+        "truth_available": ended,
         "legal": legal_payload(gs, viewer_color),
         # 布阵阶段可选用的经典阵型（名字与顺序都由服务端给）
         "presets": presets_payload(),
@@ -793,3 +806,14 @@ def snapshot(gs: dict) -> dict:
         "winner": gs.get("winner"),
         "reason": gs.get("reason"),
     }
+
+
+def advance_setup(gs: dict, elapsed_ms: int) -> bool:
+    """Advance optional setup deadline; existing arrangements must stay legal."""
+    left = gs.get("setup_remaining_ms")
+    if gs.get("phase") == "setup" and left is not None and elapsed_ms >= left:
+        for color in (RED, BLACK):
+            error = validate_layout(color, layout_of(gs, color))
+            if error:
+                raise ValueError(error)
+    return luzhanqi_tracking.advance_setup(gs, elapsed_ms)

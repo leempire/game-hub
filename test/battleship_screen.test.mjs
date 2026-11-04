@@ -1,3 +1,4 @@
+import { installGameChrome } from './load_game_chrome.mjs';
 // node --test test/battleship_screen.test.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -49,7 +50,7 @@ function screen(os) {
   const room = { players: [{ id: 1, connected: true }, { id: 2, connected: true }] };
   const navigation = { addListener: () => () => {} };
   const rn = {
-    View: host('div'), Text: host('span'), TouchableOpacity: host('button'),
+    KeyboardAvoidingView: host('section'), View: host('div'), Text: host('span'), TouchableOpacity: host('button'),
     ScrollView: host('section'), Modal: ({ visible, children }) => visible ? children : null,
     StyleSheet: { create: styles => styles }, Platform: { OS: os },
     useWindowDimensions: () => ({ width: 390, height: 844 }),
@@ -71,6 +72,7 @@ function screen(os) {
     '../backGuard': { useModalBackGuard() {}, onConfirmLeave: () => () => {} },
     '../help': { GameHelpButton: () => null }, '../disconnect': { useDisconnectCountdown: () => 120 },
   };
+  installGameChrome(modules, ts);
   runInNewContext(code, { exports, require: name => {
     assert.ok(name in modules, `Unexpected dependency: ${name}`);
     return modules[name];

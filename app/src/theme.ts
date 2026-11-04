@@ -14,6 +14,8 @@ export const colors = {
   success: '#047857',       // emerald-700   白字 5.48 ｜ 文字 5.48 ✓
   bg: '#F9FAFB',
   card: '#FFFFFF',
+  surfaceMuted: '#F3F4F6', // 次级表面；textSecondary 对比度 6.87:1
+  disabled: '#E5E7EB',     // 禁用控件底色，文字仍用 textMuted，不单靠透明度
   border: '#E5E7EB',        // 仅作分隔线/装饰（1.24:1）—— 不可作为控件的唯一边界
   borderStrong: '#8A90A0',  // 输入框等控件的可见边界 3.19 ✓
   text: '#111827',          // 17.74 ✓
@@ -28,6 +30,21 @@ export const colors = {
   stoneBlack: '#1a1a1a',    // vs 木色 9.38 ✓
   stoneWhite: '#f5f5f5',    // vs 木色 1.70 ✗ —— 必须靠 stoneEdge 描边，见 GomokuScreen
   stoneEdge: '#6B4F0C',     // 白子描边，与棋盘线同色（4.12 ✓）
+};
+
+/** Existing game materials, centralized without changing their established contrast. */
+export const gameSurfaces = {
+  gomokuWin: '#C62828', // 木纹底 3.03:1、白子 5.16:1
+  paper: '#FAFAF8', // 点格棋桌面，textMuted 4.63:1
+  tileSlot: '#CDC1B4', tileFrame: '#BBADA0', // 2048 的装饰性凹槽与框体
+  ludoBoard: '#F1F1F1', ludoCream: '#F2ECCE', ludoApronEdge: '#222222',
+  historyMineRevealed: '#D4C29A', historyMineCover: '#B8B8B8', // 旧终局快照材质，非信息通道
+  ludoDangerEdge: '#7F1D1D', // 四色格上均≥3:1，仍配额外圆环
+  mineFlag: '#B91C1C', // 覆盖格 4.36:1、白色警示图形 6.47:1
+  mineQuestion: '#475569', mineRevealed: '#EDEFF2', mineLine: '#DDE1E6',
+  mineCover: '#CBD5E1', mineBevelLight: '#E4EAF1', mineBevelDark: '#9AA7B8',
+  stasisPanel: '#182436', stasisPanelEdge: '#2A3A52', stasisControl: '#152238',
+  selection: '#EEF2FF', // 浅色选中表面，状态另有primary描边
 };
 
 /**
@@ -483,6 +500,18 @@ export const radius = {
   lg: 16,
   xl: 24,
   full: 9999,
+};
+
+/** 卡片与弹窗的唯一阴影参数。颜色只用于装饰，不承担控件边界。 */
+export const shadow = {
+  card: {
+    shadowColor: colors.black, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
+  },
+  modal: {
+    shadowColor: colors.black, shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18, shadowRadius: 20, elevation: 8,
+  },
 };
 
 export const fontSize = {

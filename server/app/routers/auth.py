@@ -5,8 +5,9 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
+from app import ws
 from app.database import get_conn, row_to_user
 from app.security import (
     hash_password,
@@ -144,7 +145,8 @@ def update_nickname(req: NicknameRequest, user_id: int = Depends(get_current_use
 
 
 @router.post("/password")
-def change_password(req: PasswordRequest, user_id: int = Depends(get_current_user_id)):
+def change_password(req: PasswordRequest, background_tasks: BackgroundTasks,
+                    user_id: int = Depends(get_current_user_id)):
     conn = get_conn()
     try:
         row = conn.execute(
@@ -162,6 +164,7 @@ def change_password(req: PasswordRequest, user_id: int = Depends(get_current_use
             (pw_hash, salt, user_id),
         )
         conn.commit()
+        background_tasks.add_task(ws.kick_user, user_id, "密码已修改，请重新登录")
         return {"ok": True}
     finally:
         conn.close()

@@ -81,8 +81,9 @@ v9 把流程参数化成 **`Profile`（性格）**：开局铺几座塔、经济
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.stasis import (
     ACCEL, BED, BINDER, BUILDABLE, BUILD_COST, COPPER, CRYO, DIAMOND, DOOR,
     GOLD, PATCH_COST_BIO, PATCH_COST_MULT, REFINERY, REPAIR, SHIELD, SILVER,
@@ -239,7 +240,7 @@ def _rng_of(gs: dict, p: dict) -> random.Random:
 # ── 对外接口 ────────────────────────────────────────────────
 
 
-def decide(gs: dict, uid: int) -> dict | None:
+def decide(gs: dict, uid: int, difficulty="normal") -> dict | None:
     """返回一个动作描述，或 None 表示这轮什么都不做。
 
     返回形状（room_manager 层会把它翻译成引擎调用）：
@@ -266,12 +267,12 @@ def decide(gs: dict, uid: int) -> dict | None:
         # 就是「倒计时内躺下、攒钱、赶在鬼出来前把床升上去」。人机要是傻站到
         # 倒计时结束再开工，就等于白送对面 30 秒。
         if p["lying"]:
-            return _decide_playing(gs, uid, p)
+            return _decide_playing(gs, uid, p, difficulty)
         return _decide_run(gs, p)
 
     if gs["phase"] != "playing":
         return None
-    return _decide_playing(gs, uid, p)
+    return _decide_playing(gs, uid, p, difficulty)
 
 
 # ── 跑动阶段：抢舱室 ────────────────────────────────────────
@@ -384,10 +385,10 @@ def _best_room(gs: dict) -> str | None:
 # ── 对局阶段 ────────────────────────────────────────────────
 
 
-def _decide_playing(gs: dict, uid: int, p: dict) -> dict | None:
+def _decide_playing(gs: dict, uid: int, p: dict, difficulty="normal") -> dict | None:
     if not p["room"]:
         return None
-    prof = profile_of(gs, p)
+    prof = skill_profile(profile_of(gs, p), difficulty)
     room = room_of(gs, p["room"])
 
     # ① **先躺下**。躺着才产资源，站着产的是一秒一滴都没有 —— 不先躺下的话
@@ -762,3 +763,13 @@ def _count(room: dict, kind: str) -> int:
 
 def _turret_count(room: dict) -> int:
     return _count(room, TURRET)
+
+
+def skill_profile(profile: Profile, difficulty="normal") -> Profile:
+    """Skill changes execution and noise, preserving the independently assigned personality."""
+    level = normalize_difficulty(difficulty)
+    if level == "easy":
+        return replace(profile, skill=min(profile.skill, 0.65), noise=max(profile.noise, 0.35))
+    if level == "hard":
+        return replace(profile, skill=max(profile.skill, 1.0), noise=0.0)
+    return profile

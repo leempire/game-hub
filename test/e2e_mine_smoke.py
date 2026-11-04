@@ -65,7 +65,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
     ok(f'{username} 注册并自动登录')
 
 
@@ -198,7 +198,7 @@ def check_ranking_fields(page):
     """Verify game-over ranking modal has expected fields."""
     body = page.locator('body').inner_text()
     # Check for key ranking labels
-    assert '游戏结束' in body, f'未看到游戏结束弹窗: {body[:300]}'
+    assert '对局结束' in body, f'未看到游戏结束弹窗: {body[:300]}'
     assert '返回房间' in body, '未看到返回房间按钮'
     # Ranking should show alive/eliminated status
     has_alive = '存活' in body
@@ -362,7 +362,7 @@ def main():
             eliminated_page.wait_for_timeout(300)
             # Check for game over modal
             surv_text = survivor_page.locator('body').inner_text()
-            if '游戏结束' in surv_text:
+            if '对局结束' in surv_text:
                 game_over_shown = True
                 break
 
@@ -374,8 +374,8 @@ def main():
         # 11. Verify ranking panel
         surv_text = survivor_page.locator('body').inner_text()
         elim_text = eliminated_page.locator('body').inner_text()
-        assert '游戏结束' in surv_text, f'存活方未看到游戏结束弹窗: {surv_text[:300]}'
-        assert '游戏结束' in elim_text, f'淘汰方未看到游戏结束弹窗: {elim_text[:300]}'
+        assert '对局结束' in surv_text, f'存活方未看到游戏结束弹窗: {surv_text[:300]}'
+        assert '对局结束' in elim_text, f'淘汰方未看到游戏结束弹窗: {elim_text[:300]}'
 
         # Check ranking fields on both pages
         check_ranking_fields(survivor_page)

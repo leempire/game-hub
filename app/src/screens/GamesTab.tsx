@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal, TextInput,
-  KeyboardAvoidingView, Platform,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView,
 } from 'react-native';
+import { AppModal, FormInput } from '../ui';
 import { Ionicons } from '@expo/vector-icons';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth';
 import { createRoom, joinRoom, fetchMyStats, MyStats } from '../api';
 import { colors, spacing, radius, fontSize } from '../theme';
-import { useModalBackGuard } from '../backGuard';
 import { GameHelpButton } from '../help';
 import { CreateRoomModal } from '../roomForms';
 import {
@@ -23,6 +22,7 @@ interface Props {
 }
 
 export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props) {
+  const navigation = useNavigation<any>();
   const { token } = useAuth();
   const isFocused = useIsFocused();
   // 当前打开的是哪个游戏的「创建 / 加入」弹窗（null = 关着）。
@@ -82,9 +82,6 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
     setQuickPwd('');
     setQuickError(null);
   };
-  useModalBackGuard(picked !== null, closePicked);
-  useModalBackGuard(showJoinModal, closeJoin);
-  useModalBackGuard(showQuickCreate, closeQuickCreate);
 
   const handleQuickCreate = async () => {
     if (!token) return;
@@ -198,6 +195,11 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
           onJoin={() => setShowJoinModal(true)}
           onBrowse={onNavigateToRooms}
         />
+        <TouchableOpacity style={styles.competitionLink} onPress={() => navigation.navigate('Competition')} accessibilityRole="button">
+          <Ionicons name="podium-outline" size={20} color={colors.primary} />
+          <Text style={styles.competitionText}>每日挑战 · 排行榜</Text>
+          <Text style={styles.competitionText}>›</Text>
+        </TouchableOpacity>
         <RecentGames
           games={recent}
           onPick={(key) => {
@@ -258,99 +260,85 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
       />
 
       {/* 建房 / 加入（13 个游戏共用这一个弹窗） */}
-      <Modal visible={picked !== null} transparent animationType="fade" onRequestClose={closePicked}>
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <AppModal visible={picked !== null} onClose={closePicked}>
+        <Text style={styles.modalTitle}>{picked?.title}</Text>
+        {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
+        <TouchableOpacity
+          style={[styles.modalBtn, styles.modalBtnPrimary, creating && styles.modalBtnDisabled]}
+          onPress={handleCreateRoom}
+          disabled={creating}
         >
-          <View style={styles.modalCard}>
-            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>{picked?.title}</Text>
-              {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnPrimary, creating && styles.modalBtnDisabled]}
-                onPress={handleCreateRoom}
-                disabled={creating}
-              >
-                <Text style={styles.modalBtnPrimaryText}>
-                  {creating ? '创建中...' : '创建房间'}
-                </Text>
-              </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.modalBtn}
-                  onPress={() => {
-                    setPicked(null);
-                    setModalError(null);
-                    setShowJoinModal(true);
-                  }}
-                >
-                  <Text style={styles.modalBtnText}>加入房间</Text>
-                </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnSecondary]}
-                onPress={closePicked}
-              >
-                <Text style={styles.modalBtnSecondaryText}>取消</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+          <Text style={styles.modalBtnPrimaryText}>
+            {creating ? '创建中...' : '创建房间'}
+          </Text>
+        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.modalBtn}
+            onPress={() => {
+              setPicked(null);
+              setModalError(null);
+              setShowJoinModal(true);
+            }}
+          >
+            <Text style={styles.modalBtnText}>加入房间</Text>
+          </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.modalBtn, styles.modalBtnSecondary]}
+          onPress={closePicked}
+        >
+          <Text style={styles.modalBtnSecondaryText}>取消</Text>
+        </TouchableOpacity>
+      </AppModal>
 
       {/* Join room modal */}
-      <Modal visible={showJoinModal} transparent animationType="fade" onRequestClose={closeJoin}>
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <AppModal visible={showJoinModal} onClose={closeJoin}>
+        <Text style={styles.modalTitle}>加入房间</Text>
+        <FormInput
+          style={styles.modalInput}
+          label="房间号" value={joinCode}
+          onChangeText={setJoinCode}
+          placeholder="输入6位房间号"
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="characters"
+          maxLength={6}
+          returnKeyType="next"
+        />
+        <FormInput
+          style={styles.modalInput}
+          label="房间密码" value={joinPwd}
+          onChangeText={setJoinPwd}
+          placeholder="密码（如有）"
+          placeholderTextColor={colors.textFaint}
+          secureTextEntry
+          returnKeyType="go"
+          onSubmitEditing={() => void handleJoinRoom()}
+        />
+        {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
+        <TouchableOpacity
+          style={[styles.modalBtn, styles.modalBtnPrimary, joining && styles.modalBtnDisabled]}
+          onPress={handleJoinRoom}
+          disabled={joining}
         >
-          <View style={styles.modalCard}>
-            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>加入房间</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={joinCode}
-                onChangeText={setJoinCode}
-                placeholder="输入6位房间号"
-                placeholderTextColor={colors.textFaint}
-                autoCapitalize="characters"
-                maxLength={6}
-                returnKeyType="next"
-              />
-              <TextInput
-                style={styles.modalInput}
-                value={joinPwd}
-                onChangeText={setJoinPwd}
-                placeholder="密码（如有）"
-                placeholderTextColor={colors.textFaint}
-                secureTextEntry
-                returnKeyType="go"
-                onSubmitEditing={() => void handleJoinRoom()}
-              />
-              {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnPrimary, joining && styles.modalBtnDisabled]}
-                onPress={handleJoinRoom}
-                disabled={joining}
-              >
-                <Text style={styles.modalBtnPrimaryText}>
-                  {joining ? '加入中...' : '加入'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnSecondary]}
-                onPress={closeJoin}
-              >
-                <Text style={styles.modalBtnSecondaryText}>取消</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+          <Text style={styles.modalBtnPrimaryText}>
+            {joining ? '加入中...' : '加入'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.modalBtn, styles.modalBtnSecondary]}
+          onPress={closeJoin}
+        >
+          <Text style={styles.modalBtnSecondaryText}>取消</Text>
+        </TouchableOpacity>
+      </AppModal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  competitionLink: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, marginBottom: spacing.sm, backgroundColor: colors.card,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.borderStrong },
+  competitionText: { color: colors.primary, fontSize: fontSize.md, fontWeight: '600' },
   container: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: spacing.md, paddingBottom: spacing.xxl },
   category: { marginBottom: spacing.md },
@@ -382,7 +370,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  gameCardDisabled: { opacity: 0.6 },
   cardIconWrap: {
     width: 56,
     height: 56,
@@ -406,10 +393,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: radius.full,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.bg,
   },
-  cardBadgeComingSoon: { backgroundColor: colors.textMuted },
-  cardBadgeText: { color: colors.white, fontSize: fontSize.xs, fontWeight: '600' },
+  cardBadgeText: { color: colors.textSecondary, fontSize: fontSize.xs, fontWeight: '600' },
   noResult: { alignItems: 'center', paddingVertical: spacing.xxl },
   noResultText: { fontSize: fontSize.md, color: colors.textSecondary, marginTop: spacing.sm },
   noResultBtn: {
@@ -422,21 +408,6 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
   },
   noResultBtnText: { fontSize: fontSize.sm, color: colors.text, fontWeight: '600' },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 340,
-    maxHeight: '90%',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-  },
   modalTitle: {
     fontSize: fontSize.lg,
     fontWeight: '700',
@@ -469,7 +440,6 @@ const styles = StyleSheet.create({
   modalBtnSecondary: { borderColor: 'transparent' },
   modalBtnSecondaryText: { fontSize: fontSize.md, color: colors.textMuted },
   modalBtnDisabled: { opacity: 0.5 },
-  modalScroll: { flexGrow: 0, flexShrink: 1 },
   modalError: {
     fontSize: fontSize.sm,
     color: colors.danger,

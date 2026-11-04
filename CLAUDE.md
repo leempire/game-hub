@@ -51,10 +51,11 @@ app/                    # Expo 客户端（RN + Web）
 ├── app.json            # version/versionCode（与 server/config/config.json 双写）
 ├── assets/             # 图标 PNG；assets/svg/ 为矢量源稿
 └── src/
-    ├── navigation.tsx  # 路由栈：Auth → MainTabs(游戏/房间/社交/我的) → Room → 各对局屏 → Admin
+    ├── navigation.tsx  # 路由栈：Auth → MainTabs(游戏/房间/我的) → Room → 各对局屏 → Admin
     ├── backGuard.tsx   # 返回操作统一体系（见下文，改动前必读注释）
     ├── help.tsx        # 游戏规则帮助系统（GAME_HELP 内容库 + GameHelpButton）
     ├── icons.tsx       # react-native-svg 矢量图标组件
+    ├── games.tsx       # 客户端游戏目录：名称、简介、分类与图标入口的唯一来源
     ├── api.ts          # HTTP 客户端（注册/登录/房间/历史/版本检查）
     ├── socket.ts       # 房间 WS 客户端
     ├── auth.tsx        # 登录态 Context
@@ -68,7 +69,7 @@ app/                    # Expo 客户端（RN + Web）
     │                   #     + LuzhanqiBoardView.tsx、stasisRules.ts + StasisBoard.tsx
     │                   #     + StasisPanels.tsx + stasisArt.tsx + StasisShots.tsx
     │                   # 每款游戏的文件职责与实现约定见其 docs/游戏设计/<游戏>/设计.md
-    └── screens/        # AuthScreen/GamesTab/RoomsTab/SocialTab/ProfileTab/RoomScreen/
+    └── screens/        # AuthScreen/GamesTab/RoomsTab/ProfileTab/RoomScreen/
                         # 各对局屏（Gomoku/Mine/Reversi/Battleship/Dots/Ludo/Game2048/
                         # Xiangqi/ConnectFour/Tetris/Uno/Stasis/Luzhanqi/Spider）
                         # + HistoryScreen/AdminScreen
@@ -82,8 +83,11 @@ server/
     ├── database.py     # SQLite 建表/users/战绩落库（save_game_record）
     ├── persistence.py  # 房间实时落盘 + 启动恢复（热重启，见「热重启」）
     ├── security.py     # JWT + 密码哈希
+    ├── spectating.py   # UNO/深空独立只读WS、用户绑定许可与服务端公开字段白名单
+    ├── practice.py     # 四款私人练习，统计/榜单/历史排除 practice=1
     ├── room_manager.py # 房间生命周期：创建/加入/准备/开始/断线保座(120s)/对局结束回调
     ├── room_settings.py# 房间级玩法设置的**唯一注册表**（下发统一的 room.settings）
+    ├── room_timing.py  # 棋钟/军棋布阵截止任务：单调时间差，纯引擎只收 dt_ms
     ├── ws.py           # WS 路由与消息分发（各游戏 move/胜负广播/认输/断线判负）
     ├── game/           # **各游戏的纯引擎与人机 AI**（无 IO、不碰 asyncio）
     │   ├── <游戏>.py   # 引擎：五子棋/扫雷/翻转棋/海战棋/点格棋/飞行棋/2048/象棋/
@@ -209,19 +213,20 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   **点「返回房间」提示房间不存在**）。改为只标记离线 + 记 `empty_since`，重连即取消。
 - **掉线只在游戏中存在**：`playing` 才有 120s 保座；等待房（含刚打完一局的房）掉线
   只标离线，界面不显示（`RoomScreen` 的「断线」胶囊有 `room.status === 'playing'` 守卫）。
-- **GC 只有一条规则**：没有真人在线的房间——`waiting` 记 `empty_since` 并由
+- **空房回收**：没有真人在线的房间——`waiting` 记 `empty_since` 并由
   `WAITING_EMPTY_TTL=60s` 回收，`playing` 由 `ROOM_IDLE_TTL=1800s` 回收
-  （`_sweeper_loop` 每 60s 跑）。显式退出/被移出导致「连真人成员都没有了」时才立即销毁。
+  （`_sweeper_loop` 每 60s 跑）。等待房另有 30 分钟无活动回收；进行中的房间只按全员
+  离线时长回收。显式退出/被移出导致「连真人成员都没有了」时才立即销毁。
 - **一个人可以同时在多个房间**（v1.7 起）：不再有「只能在一个等待房」的限制；
   房间按 (房间, 玩家) 维度管理连接与回收，没人管的等待房由 sweeper 回收。
 - **终局要把真人非房主的 `ready` 复位**（v1.7）：`_back_to_lobby()` 里统一复位。
   房主本来就不用准备，人机自动准备，两者都不参与复位。
 - **落盘的 `finished` 房要在 `restore_rooms` 里丢掉**：它是永远回收不掉的僵尸房。
-- **房间列表**：`get_all_rooms` 返回全部 waiting/playing 房间（等待房必然有真人）；
+- **房间列表**：`get_all_rooms` 返回全部 playing 房间与有真人在线的 waiting 房间；
   `join_room` 的判断顺序是 **① 已是本房成员 → 直接放行**（覆盖游戏中重连 / 结束后重进 /
   等待房重进）→ ② `playing` → 抛「游戏已开始」→ ③ 密码/满员。**①必须在②之前**。
   前端点房间卡片必须走 `joinRoom` 接口再导航，不能直接跳房间页。
-- **结算流转**：结算弹窗只有「返回房间」按钮，**没有「再来一局」**。续开新局统一回
+- **结算流转**：结算统一使用 `GameResult`，提供「返回房间 / 查看战绩」。续开新局统一回
   房间大厅由房主点「开始游戏」（rematch 协议已删干净）。
 - **人机（bot）**：房主在等待大厅 `add_bot` → 合成玩家（负 id、`is_bot=True`、自动
   ready、无 WS 连接但视为在线）入座 → 轮到 bot 时 `asyncio` 延迟 0.8~1.2s 调
@@ -234,7 +239,9 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
 
 ### 服务端 tick（当前只有深空休眠）
 
-其余游戏都是请求-响应模型。深空休眠绕不开时间（单位持续移动、门血持续下降、
+其余游戏主体都是请求-响应模型；棋钟/军棋布阵使用 `room_timing` 的独立截止任务，
+不增加全局模拟 tick。剩余毫秒持久化，服务停机不扣时，玩家断线仍扣棋钟；
+每五秒关键帧及正常停机保存，异常掉电最多回退五秒。深空休眠绕不开时间（单位持续移动、门血持续下降、
 炮塔持续开火），是全项目**唯一**一个服务端 tick。通用约定（细节与论证见
 `docs/游戏设计/深空休眠/设计.md` §2 / §10）：
 
@@ -258,6 +265,13 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   回归：`test_stasis_send.py`。**别在 tick 路径上再写 `await ws.send_json`。**
 - 将来做炸弹人/贪吃蛇这类需要 tick 的游戏，可以复用这套骨架；能不用 tick 的
   （如俄罗斯方块的「客户端攒动作、服务端重放」）仍然优先不用。
+
+### 公共对局与表单组件
+
+- 十五个对局屏使用 `GameShell` / `GameResult`，玩家昵称、身份、回合与连接状态统一呈现。各屏保留 Socket、规则载荷、手势和离开确认。
+- 结算回房用 `navigation.popTo("Room", {code})`，覆盖深链进入而导航栈里没有房间的情况；查看战绩先完成同样的保座返回，再进入 History。
+- 房间页的 REST 自愈、WS sync 与 game_start 共用一次入局门闩，聚焦重置；导航回调存在 ref 中，不能因 wrapper 内联函数变化重建 Socket。深链先完成入房再连 WS，REST 返回不得覆盖之后到达的权威状态。
+- 表单使用 `ui.tsx` 的 `AppModal` / `FormInput` / `Card`。`AppModal` 自带返回保护、键盘避让和可滚动容器，调用方不重复注册同一弹窗。阴影统一 `theme.shadow`，遮罩统一 `colors.overlay`。
 
 ### 返回操作（backGuard.tsx）
 
@@ -416,7 +430,7 @@ curl -s http://127.0.0.1:50541/api/app/version
 - **react-navigation linking**：开启后浏览器 history 与路由双向同步；程序化导航先改路由
   状态再调 history.go，popstate 时 `getRouteName()` 已是新路由——backGuard 靠包装 history
   方法区分程序化/用户返回。linking 的 replaceState 会冲掉自定义 pushState 条目；
-  `getCurrentRoute()` 返回叶子路由名（Tab 页是 Games/Rooms/Social/Profile，不是 MainTabs）。
+  `getCurrentRoute()` 返回叶子路由名（Tab 页是 Games/Rooms/Profile，不是 MainTabs）。
 - **新增对局屏必须同时补三处深链**：`App.tsx` 的 `LINKING.config.screens` path、
   `app/src/deepLink.ts` 的 `ROUTE_BY_PATH`、以及 `navigation.tsx` 的 Stack.Screen。
   漏了不会报错，只会表现为「刷新页面回主页 / 分享链接打不开」。
@@ -479,9 +493,9 @@ curl -s http://127.0.0.1:50541/api/app/version
   不再刷新，于是自己那一格一直显示「掉线」。座位号另存 ref 给回调读。
 - **人机回合要说「思考中」**：服务端留了 0.8-1.2s 思考延迟，只写「等待对方…」用户会以为
   卡了。对手 `is_bot` 时文案改成 `XX 思考中…`。
-- **游戏名散在七处、没有单一来源，改名必须一起改**：`GamesTab`、`navigation.tsx`、
-  `RoomScreen`、`RoomsTab`、`HistoryScreen.GAME_LABELS`、`docs/使用指南.md`、
-  `docs/接口协议.md`。改名前先 `grep -rn "<旧名>"`。命名约定：**游戏名就是游戏本身**
+- **客户端游戏名统一取自 `app/src/games.tsx`**：主页、导航标题、房间页、房间列表与
+  战绩页共用目录，不再各抄名称映射。改名时同步 `docs/使用指南.md`、
+  `docs/接口协议.md` 与对应游戏文档，并用 `rg "<旧名>"` 检查遗漏。命名约定：**游戏名就是游戏本身**
   （`UNO 卡牌`，不是「UNO 牌类」；`2048 竞速`，不是「2048 对战」）。
 - **主页一句话说明写「这游戏是什么」，不写「这版改了什么」**。徽标只放**人数 + 玩法**，
   不写「可人机」。

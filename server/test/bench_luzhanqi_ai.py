@@ -54,7 +54,9 @@ def _mover(kind: str, gs: dict, side: str, budget: float, rng: random.Random):
         return lambda: rng.choice(L.all_moves(gs["board"], side) or [None])
     if kind == "v1":
         return lambda: OLD.best_move(L.view_for(gs, side), time_budget=budget)
-    return lambda: AI.best_move(L.view_for(gs, side), time_budget=budget)
+    return lambda: AI.best_move(L.view_for(gs, side), time_budget=budget,
+                                difficulty=kind if kind in ("easy", "normal", "hard") else "normal",
+                                rng=rng)
 
 
 def play(red_kind: str, black_kind: str, mode: str, reveal: bool, seed: int,

@@ -45,10 +45,9 @@ export function snapshotAtStep(snap: any, step: number): any {
     const size = snap.board_size || 8;
     const board = emptyBoard(size, size);
     // 初始四子（与 server/app/game/reversi.py 的 INITIAL_STONES 一致）
-    if (size === 8) {
-      board[3][3] = 2; board[4][4] = 2;
-      board[4][3] = 1; board[3][4] = 1;
-    }
+    const middle = Math.floor(size / 2);
+    board[middle - 1][middle - 1] = 2; board[middle][middle] = 2;
+    board[middle][middle - 1] = 1; board[middle - 1][middle] = 1;
     for (const m of moves.slice(0, n)) {
       const stone = m.color === 'black' ? 1 : 2;
       if (board[m.y]?.[m.x] === undefined) continue;
@@ -65,7 +64,10 @@ export function snapshotAtStep(snap: any, step: number): any {
     const cols = snap.cols || 7;
     const board = emptyBoard(rows, cols);
     for (const m of moves.slice(0, n)) {
-      if (board[m.y]?.[m.x] !== undefined) {
+      if (m.action === 'pop' && board[rows - 1]?.[m.x] !== undefined) {
+        for (let row = rows - 1; row > 0; row--) board[row][m.x] = board[row - 1][m.x];
+        board[0][m.x] = 0;
+      } else if (board[m.y]?.[m.x] !== undefined) {
         board[m.y][m.x] = m.color === 'black' ? 1 : 2;
       }
     }

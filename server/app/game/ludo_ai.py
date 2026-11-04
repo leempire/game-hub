@@ -18,6 +18,8 @@ gs: game state dict from ludo.create_game(); valid when phase == "move".
 算成 old+dice 会低估收益、也算错落点危不危险。
 """
 
+import random
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.ludo import (
     PIECES_PER_PLAYER,
     RING,
@@ -25,7 +27,7 @@ from app.game.ludo import (
     FINISH_PROGRESS,
     get_global_position,
     resolve_landing,
-    enemy_stacks_at,
+    enemy_stacks_at, same_team,
 )
 
 W_CAPTURE = 120.0
@@ -37,7 +39,7 @@ W_PROGRESS = 0.6
 W_DANGER = 18.0
 
 
-def best_move(gs: dict) -> int | None:
+def best_move(gs: dict, difficulty="normal", rng=None) -> int | None:
     """Pick the piece to move for the current seat. Returns piece_id or None."""
     movable = gs.get("movable_pieces") or []
     if not movable or gs.get("phase") != "move":
@@ -46,8 +48,12 @@ def best_move(gs: dict) -> int | None:
     dice = gs["dice_value"]
     if dice is None:
         return None
+    level = normalize_difficulty(difficulty)
+    if level == "easy":
+        return (rng or random).choice(movable)
     scored = [
-        (_score_piece(gs, seat, pid, dice), pid)
+        (_score_piece(gs, seat, pid, dice) + (_hard_safety(gs, seat, pid, dice)
+                                          if level == "hard" else 0), pid)
         for pid in movable
     ]
     # 同分时选下标小的，保证行为可复现（测试友好）
@@ -72,7 +78,7 @@ def _score_piece(gs: dict, seat: int, pid: int, dice: int) -> float:
     score += new * W_PROGRESS
 
     # 撞机只发生在赛道
-    if 0 <= new <= RING_END:
+    if gs.get("rules", {}).get("capture", True) and 0 <= new <= RING_END:
         gpos = get_global_position(seat, new)
         captured = _pieces_at_global(gs, seat, gpos)
         if captured:
@@ -91,7 +97,7 @@ def _destination(gs: dict, seat: int, old: int, dice: int) -> int:
     """
     if old == -1:
         return 0
-    landed = _walk_end(old, dice)
+    landed = _walk_end(old, dice, gs.get("rules", {}).get("exact_finish", True))
     if landed == FINISH_PROGRESS:
         return landed
     final, _path, _segments = resolve_landing(gs, seat, landed)
@@ -100,9 +106,11 @@ def _destination(gs: dict, seat: int, old: int, dice: int) -> int:
     return final
 
 
-def _walk_end(old: int, dice: int) -> int:
+def _walk_end(old: int, dice: int, exact_finish: bool = True) -> int:
     """掷骰子走完的落点（超出终点按规则折返）。"""
     new = old + dice
+    if not exact_finish:
+        return min(new, FINISH_PROGRESS)
     if new > FINISH_PROGRESS:
         return FINISH_PROGRESS - (new - FINISH_PROGRESS)
     return new
@@ -112,7 +120,7 @@ def _pieces_at_global(gs: dict, seat: int, gpos: int) -> list[tuple[int, int]]:
     """返回 (seat, progress) 列表：落在全局格 gpos 上的对手飞机。"""
     hits = []
     for other_seat, other in gs["players"].items():
-        if other_seat == seat or other.get("finished"):
+        if same_team(gs, seat, other_seat) or other.get("finished"):
             continue
         for opid in range(PIECES_PER_PLAYER):
             op = other["pieces"][opid]
@@ -129,7 +137,7 @@ def _threat_count(gs: dict, seat: int, gpos: int) -> int:
     """
     threats = 0
     for other_seat, other in gs["players"].items():
-        if other_seat == seat or other.get("finished"):
+        if same_team(gs, seat, other_seat) or other.get("finished"):
             continue
         for opid in range(PIECES_PER_PLAYER):
             op = other["pieces"][opid]
@@ -140,3 +148,24 @@ def _threat_count(gs: dict, seat: int, gpos: int) -> int:
             if 1 <= gap <= 6 and op + gap <= RING_END:
                 threats += 1
     return threats
+
+
+def _hard_safety(gs: dict, seat: int, pid: int, dice: int) -> float:
+    """Account for opponents' forced jumps/flights over all six public dice outcomes."""
+    destination = _destination(gs, seat, gs["players"][seat]["pieces"][pid], dice)
+    if not gs.get("rules", {}).get("capture", True) or not 0 <= destination <= RING_END:
+        return 0.0
+    target = get_global_position(seat, destination)
+    danger = 0
+    for other_seat, other in gs["players"].items():
+        if same_team(gs, seat, other_seat) or other.get("finished"):
+            continue
+        for progress in other["pieces"]:
+            if progress < 0 or progress >= FINISH_PROGRESS:
+                continue
+            for roll in range(1, 7):
+                landed = _destination(gs, other_seat, progress, roll)
+                if 0 <= landed <= RING_END and get_global_position(other_seat, landed) == target:
+                    danger += 1
+    # Replace the normal straight-distance estimate with full landing simulation.
+    return W_DANGER * _threat_count(gs, seat, target) - 30.0 * danger

@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { getRoom, leaveRoom, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
-import {
+import { gameSurfaces, shadow,
   colors, spacing, radius, fontSize, lastMoveMark, lastMoveMarkEdge,
   gomokuHintWin, gomokuHintBlock,
 } from '../theme';
@@ -15,16 +15,21 @@ import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
+import { observeClock, ClockPayload, ObservedClock } from '../GameClock';
 
 interface GameState {
   board_size: number;
+  clock?: ObservedClock | null;
+  forbidden?: boolean;
+  legal: number[][];
   board: number[][];
   moves: Array<{ x: number; y: number; color: string }>;
   next: 'black' | 'white';
   your_color: 'black' | 'white';
   winner: null | 'black' | 'white' | 'draw';
-  reason: null | 'five' | 'resign' | 'surrender' | 'disconnect' | 'draw';
+  reason: string | null;
 }
 
 interface Props {
@@ -50,13 +55,14 @@ const STONE_MAP: Record<number, string> = { 1: 'black', 2: 'white' };
 const WINNER_LABELS: Record<string, string> = { black: '黑棋胜', white: '白棋胜', draw: '和棋' };
 
 const REASON_LABELS: Record<string, string> = {
+  timeout: '超时判负', no_legal_moves: '无合法着法',
   five: '五连', resign: '认输', surrender: '认输', disconnect: '断线判负', draw: '和棋',
 };
 
 // 胜利五连的环。金色 #FFD700 在木色棋盘上只有 1.32:1、在白子上 1.29:1——
 // 白棋赢的那一局等于没高亮。深红在所有三种背景（木色 3.03 / 黑子 3.10 /
 // 白子 5.16）上都过 3:1，见 docs/移动端体验设计方法论.md 第 9 节。
-const WIN_RING = '#C62828';
+const WIN_RING = gameSurfaces.gomokuWin;
 
 // 脉冲循环次数上限。WCAG 2.2.2：自动播放且持续超过 5 秒的运动必须能暂停/停止；
 // 这里用「限次」代替「加暂停按钮」——脉冲本来就只是把注意力拉过来，3 轮足够。
@@ -91,7 +97,7 @@ function findWinningFive(
       for (let i = 1; i <= 4; i++) {
         const nx = lx + dx * i * sign;
         const ny = ly + dy * i * sign;
-        if (nx < 0 || nx >= BOARD_SIZE || ny < 0 || ny >= BOARD_SIZE) break;
+        if (nx < 0 || nx >= board.length || ny < 0 || ny >= board.length) break;
         if (board[ny][nx] !== color) break;
         if (sign === 1) line.push({ x: nx, y: ny });
         else line.unshift({ x: nx, y: ny });
@@ -113,7 +119,7 @@ function winsAtPoint(board: number[][], x: number, y: number, color: number): bo
       for (let i = 1; i <= 4; i++) {
         const nx = x + dx * i * sign;
         const ny = y + dy * i * sign;
-        if (nx < 0 || nx >= BOARD_SIZE || ny < 0 || ny >= BOARD_SIZE) break;
+        if (nx < 0 || nx >= board.length || ny < 0 || ny >= board.length) break;
         if (board[ny][nx] !== color) break;
         count += 1;
       }
@@ -126,8 +132,8 @@ function winsAtPoint(board: number[][], x: number, y: number, color: number): bo
 /** 全部空点里，「color 落在这里就立刻连成五」的那些。 */
 function winningPoints(board: number[][], color: number): Coord[] {
   const out: Coord[] = [];
-  for (let y = 0; y < BOARD_SIZE; y++) {
-    for (let x = 0; x < BOARD_SIZE; x++) {
+  for (let y = 0; y < board.length; y++) {
+    for (let x = 0; x < board.length; x++) {
       if (board[y][x] !== 0) continue;
       if (winsAtPoint(board, x, y, color)) out.push({ x, y });
     }
@@ -136,11 +142,11 @@ function winningPoints(board: number[][], color: number): Coord[] {
 }
 
 // 触摸坐标 → 交叉点，超出棋盘范围返回 null
-function computeIntersection(lx: number, ly: number, cs: number): Coord | null {
-  if (lx < 0 || ly < 0 || lx >= cs * BOARD_SIZE || ly >= cs * BOARD_SIZE) return null;
+function computeIntersection(lx: number, ly: number, cs: number, size: number): Coord | null {
+  if (lx < 0 || ly < 0 || lx >= cs * size || ly >= cs * size) return null;
   return {
-    x: Math.max(0, Math.min(BOARD_SIZE - 1, Math.floor(lx / cs))),
-    y: Math.max(0, Math.min(BOARD_SIZE - 1, Math.floor(ly / cs))),
+    x: Math.max(0, Math.min(size - 1, Math.floor(lx / cs))),
+    y: Math.max(0, Math.min(size - 1, Math.floor(ly / cs))),
   };
 }
 
@@ -206,9 +212,9 @@ function MagnifierView({ aimX, aimY, touchX, touchY, cellSize, game, boardPixelS
   const aimCY = (aimY + 0.5) * cellSize;
   const boardR = half / mag; // 可视范围（棋盘像素）
   const minIX = Math.max(0, Math.floor((aimCX - boardR) / cellSize));
-  const maxIX = Math.min(BOARD_SIZE - 1, Math.ceil((aimCX + boardR) / cellSize));
+  const maxIX = Math.min(game.board_size - 1, Math.ceil((aimCX + boardR) / cellSize));
   const minIY = Math.max(0, Math.floor((aimCY - boardR) / cellSize));
-  const maxIY = Math.min(BOARD_SIZE - 1, Math.ceil((aimCY + boardR) / cellSize));
+  const maxIY = Math.min(game.board_size - 1, Math.ceil((aimCY + boardR) / cellSize));
   const toMX = (bx: number) => (bx - aimCX) * mag + half;
   const toMY = (by: number) => (by - aimCY) * mag + half;
 
@@ -266,7 +272,8 @@ function MagnifierView({ aimX, aimY, touchX, touchY, cellSize, game, boardPixelS
 
 export default function GomokuScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
-  const { width: winWidth } = useWindowDimensions();
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<GameState | null>(null);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
@@ -304,9 +311,10 @@ export default function GomokuScreen({ code, onLeave }: Props) {
   useModalBackGuard(confirm !== null, () => setConfirm(null));
 
   // 尺寸计算
-  const boardEdge = Math.min(winWidth - 12, 560);
-  const cellSize = Math.floor(boardEdge / BOARD_SIZE);
-  const boardPixelSize = cellSize * BOARD_SIZE;
+  const boardSize = game?.board_size ?? BOARD_SIZE;
+  const boardEdge = Math.max(180, Math.min(winWidth - 32, winHeight - 330 - (game?.clock ? 44 : 0), 560));
+  const cellSize = Math.floor(boardEdge / boardSize);
+  const boardPixelSize = cellSize * boardSize;
 
   // refs for PanResponder（避免闭包陈旧值）
   const cellSizeRef = useRef(cellSize);
@@ -473,11 +481,12 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     if (!game || game.winner || !isMyTurn) return empty;
     const mine = game.your_color === 'black' ? 1 : 2;
     const theirs = mine === 1 ? 2 : 1;
-    const win = winningPoints(game.board, mine);
+    const allowed = new Set((game.legal || []).map(([x, y]) => `${x},${y}`));
+    const win = winningPoints(game.board, mine).filter(point => allowed.has(`${point.x},${point.y}`));
     const taken = new Set(win.map((p) => `${p.x},${p.y}`));
     return {
       winPoints: win,
-      blockPoints: winningPoints(game.board, theirs).filter((p) => !taken.has(`${p.x},${p.y}`)),
+      blockPoints: winningPoints(game.board, theirs).filter((p) => allowed.has(`${p.x},${p.y}`) && !taken.has(`${p.x},${p.y}`)),
     };
   }, [game, isMyTurn]);
 
@@ -515,7 +524,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
       if (roomData) setRoom(roomData);
       if (msg.game) {
         const g = msg.game as GameState;
-        setGame(g);
+        setGame({ ...g, clock: observeClock(g.clock) });
         if (g.winner) setShowGameOver(true);
       }
       if (roomData) {
@@ -533,7 +542,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     };
     const handleGameStart = (msg: SocketMessage) => {
       const g = msg.game as GameState;
-      if (g) { setGame(g); setShowGameOver(false); gameOverShownRef.current = false; }
+      if (g) { setGame({ ...g, clock: observeClock(g.clock) }); setShowGameOver(false); gameOverShownRef.current = false; }
     };
     const handleMove = (msg: SocketMessage) => {
       setGame((prev) => {
@@ -544,7 +553,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
         const next = msg.next as 'black' | 'white';
         const newBoard = prev.board.map((row) => [...row]);
         newBoard[y][x] = color === 'black' ? 1 : 2;
-        return { ...prev, board: newBoard, moves: [...prev.moves, { x, y, color }], next };
+        return { ...prev, clock: msg.clock ? observeClock(msg.clock as ClockPayload) : prev.clock, board: newBoard, moves: [...prev.moves, { x, y, color }], next, legal: (msg.legal as number[][]) ?? prev.legal };
       });
     };
     const handleGameOver = (msg: SocketMessage) => {
@@ -566,6 +575,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     const handleRoomClosed = () => { notify('房间已解散'); ws.close(); onLeave(); };
     const handleError = (msg: SocketMessage) => { notify('提示', msg.message as string); };
 
+    ws.on('clock_update', msg => setGame(previous => previous ? { ...previous, clock: observeClock(msg.clock as ClockPayload) } : previous));
     ws.on('sync', handleSync);
     ws.on('lobby', handleLobby);
     ws.on('game_start', handleGameStart);
@@ -575,7 +585,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     ws.on('player_reconnected', handlePlayerReconnected);
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave]);
 
@@ -595,6 +605,9 @@ export default function GomokuScreen({ code, onLeave }: Props) {
       return;
     }
     if (game.next !== game.your_color) return;
+    if (!(game.legal || []).some(([lx, ly]) => lx === x && ly === y)) {
+      setPendingMove(null); notify('这里不能落子', game.forbidden ? '禁手规则下该位置不可落子' : '请选择可落子位置'); return;
+    }
     if (pendingMove && pendingMove.x === x && pendingMove.y === y) {
       setPendingMove(null);
       if (Platform.OS !== 'web') Vibration.vibrate(10);
@@ -635,7 +648,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
       const cur = dragRef.current;
       if (!cur) return;
       const pt = toBoard(lx, ly);
-      const ix = computeIntersection(pt.x, pt.y, cellSizeRef.current);
+      const ix = computeIntersection(pt.x, pt.y, cellSizeRef.current, gameRef.current?.board_size ?? BOARD_SIZE);
       const next: DragState = {
         ...cur,
         touchX: lx,
@@ -653,7 +666,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     const armMagnifier = (lx: number, ly: number) => {
       if (!isMyTurnRef.current || gameRef.current?.winner) return;
       const pt = toBoard(lx, ly);
-      const ix = computeIntersection(pt.x, pt.y, cellSizeRef.current);
+      const ix = computeIntersection(pt.x, pt.y, cellSizeRef.current, gameRef.current?.board_size ?? BOARD_SIZE);
       if (!ix || gameRef.current?.board[ix.y][ix.x] !== 0) return;
       const ds: DragState = {
         aimX: ix.x, aimY: ix.y, touchX: lx, touchY: ly, magnifierVisible: false,
@@ -771,7 +784,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
           // 拖动过 → 只当平移查看，不落子
           if (pan.moved) return;
           const pt = toBoard(e.nativeEvent.locationX ?? 0, e.nativeEvent.locationY ?? 0);
-          const ix = computeIntersection(pt.x, pt.y, cellSizeRef.current);
+          const ix = computeIntersection(pt.x, pt.y, cellSizeRef.current, gameRef.current?.board_size ?? BOARD_SIZE);
           const g = gameRef.current;
           if (ix && g && isMyTurnRef.current && !g.winner && g.board[ix.y][ix.x] === 0) {
             handleCellPressRef.current(ix.x, ix.y);
@@ -815,8 +828,8 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   // 预览只在「轮到自己 + 局面没变」时有效：回合交接、任何一方落子、终局都清掉，
   // 否则上一手的预览子会留在盘上，看起来像多了一颗棋
@@ -835,29 +848,24 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     return '等待对方...';
   })();
 
-  const myColorLabel = game ? (game.your_color === 'black' ? '黑棋' : '白棋') : '';
-  const myColorIconColor = game ? (game.your_color === 'black' ? colors.stoneBlack : colors.stoneEdge) : colors.textFaint;
 
   // 预览（非放大镜模式下也显示半透明子）
   // 预览子：拖动中跟随放大镜准星，松手后停在待确认的位置上等第二次点击。
   const previewCoord = drag ? { x: drag.aimX, y: drag.aimY } : pendingMove;
 
   return (
-    <View style={styles.container}>
+    <GameShell clock={game?.clock} game="gomoku" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={turnText} style={styles.container} actions={<View style={styles.bottomBar}>
+        {game && !game.winner && (
+          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
+            <Text style={styles.surrenderBtnText}>认输</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
+          <Text style={styles.leaveBtnText}>退出</Text>
+        </TouchableOpacity>
+      </View>}>
       {/* 顶栏 */}
-      <View style={styles.topBar}>
-        <View style={styles.topLeft}>
-          {game && <Ionicons name="ellipse" size={16} color={myColorIconColor} />}
-          <Text style={styles.myColor}>{myColorLabel}</Text>
-          <Animated.Text style={[styles.turnHint, isMyTurn && styles.turnActive, { opacity: isMyTurn ? turnPulse : 1 }]}>
-            {turnText}
-          </Animated.Text>
-        </View>
-        <View style={styles.topRight}>
-          <GameHelpButton game="gomoku" size={24} />
-          <Text style={styles.roomCode}>#{code}</Text>
-        </View>
-      </View>
+
 
       {opponentDisconnected && (
         <View style={styles.banner}>
@@ -898,23 +906,24 @@ export default function GomokuScreen({ code, onLeave }: Props) {
             ]}
           >
             {/* 网格线 */}
-            {Array.from({ length: BOARD_SIZE }).map((_, i) => (
+            {Array.from({ length: boardSize }).map((_, i) => (
               <React.Fragment key={`lines-${i}`}>
-                <View style={[styles.hLine, { top: cellSize * (i + 0.5), left: cellSize * 0.5, width: cellSize * (BOARD_SIZE - 1) }]} />
-                <View style={[styles.vLine, { left: cellSize * (i + 0.5), top: cellSize * 0.5, height: cellSize * (BOARD_SIZE - 1) }]} />
+                <View style={[styles.hLine, { top: cellSize * (i + 0.5), left: cellSize * 0.5, width: cellSize * (boardSize - 1) }]} />
+                <View style={[styles.vLine, { left: cellSize * (i + 0.5), top: cellSize * 0.5, height: cellSize * (boardSize - 1) }]} />
               </React.Fragment>
             ))}
             {/* 星位 */}
-            {[3, 7, 11].flatMap((r) =>
-              [3, 7, 11].map((c) => (
+            {[Math.floor(boardSize / 4), Math.floor(boardSize / 2), boardSize - 1 - Math.floor(boardSize / 4)].flatMap((r) =>
+              [Math.floor(boardSize / 4), Math.floor(boardSize / 2), boardSize - 1 - Math.floor(boardSize / 4)].map((c) => (
                 <View key={`star-${r}-${c}`} style={[styles.starDot, { left: cellSize * (c + 0.5) - 3, top: cellSize * (r + 0.5) - 3 }]} />
               ))
             )}
             {/* E2E 可发现性：225 个带 tabindex 的 cell（无手势处理，仅供测试定位） */}
-            {Array.from({ length: BOARD_SIZE }).map((_, y) =>
-              Array.from({ length: BOARD_SIZE }).map((_, x) => (
+            {Array.from({ length: boardSize }).map((_, y) =>
+              Array.from({ length: boardSize }).map((_, x) => (
                 <View
                   key={`cell-${x}-${y}`}
+                  testID={`gomoku-cell-${x}-${y}`}
                   tabIndex={0}
                   style={[styles.cell, { left: cellSize * x, top: cellSize * y, width: cellSize, height: cellSize }]}
                 />
@@ -1103,16 +1112,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
       )}
 
       {/* 底部操作栏 */}
-      <View style={styles.bottomBar}>
-        {game && !game.winner && (
-          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
-            <Text style={styles.surrenderBtnText}>认输</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
-          <Text style={styles.leaveBtnText}>退出</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* 确认弹窗 */}
       <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
@@ -1137,23 +1137,11 @@ export default function GomokuScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* 结算弹窗 */}
-      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>对局结束</Text>
-            {game && (
-              <>
-                <Text style={styles.modalResult}>{WINNER_LABELS[game.winner || ''] || game.winner}</Text>
-                {game.reason && <Text style={styles.modalReason}>{REASON_LABELS[game.reason] || game.reason}</Text>}
-              </>
-            )}
-            <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleBackToRoom}>
-              <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      <GameResult visible={showGameOver} result={WINNER_LABELS[game?.winner || ''] || '对局结束'} reason={game?.reason ? REASON_LABELS[game.reason] || game.reason : ''} players={shellPlayers(room, user?.id, game)}
+        onBackToRoom={handleBackToRoom} onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+
+      </GameResult>
+    </GameShell>
   );
 }
 
@@ -1175,8 +1163,7 @@ const styles = StyleSheet.create({
   // 棋盘外层：阴影/圆角，同时是复位按钮的定位参照（复位按钮在视口之上、不在手势层里）
   boardArea: {
     position: 'relative', marginTop: spacing.md,
-    borderRadius: 12, shadowColor: colors.black, shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18, shadowRadius: 6, elevation: 3,
+    borderRadius: 12, ...shadow.card,
   },
   // 手势视口：尺寸固定、不参与 transform；overflow:hidden 让缩放后的内容不溢出到
   // 顶栏/按钮上。Web 端必须 touch-action:none，否则捏合会被浏览器当成页面缩放抢走。
@@ -1237,12 +1224,11 @@ const styles = StyleSheet.create({
   stone: { borderRadius: 9999 },
   stoneAnchor: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   stoneBlack: {
-    backgroundColor: colors.stoneBlack, shadowColor: colors.black,
-    shadowOffset: { width: 1, height: 1 }, shadowOpacity: 0.4, shadowRadius: 2, elevation: 3,
+    backgroundColor: colors.stoneBlack, ...shadow.card,
   },
   stoneWhite: {
     backgroundColor: colors.stoneWhite, borderWidth: 1, borderColor: colors.stoneEdge,
-    shadowColor: colors.black, shadowOffset: { width: 1, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+    ...shadow.card,
   },
   winRing: { position: 'absolute', borderWidth: 3, borderColor: WIN_RING },
   // 最近一步标记：黄点 + 深墨描边（与翻转棋/点格棋/象棋共用一套，见 theme.ts）。
@@ -1276,7 +1262,7 @@ const styles = StyleSheet.create({
   // 放大镜
   magnifier: {
     position: 'absolute', overflow: 'hidden',
-    shadowColor: colors.black, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 5,
+    ...shadow.card,
   },
   magVLine: { position: 'absolute', width: 1, top: 0, height: MAG_SIZE, backgroundColor: colors.boardLine },
   magHLine: { position: 'absolute', height: 1, left: 0, width: MAG_SIZE, backgroundColor: colors.boardLine },

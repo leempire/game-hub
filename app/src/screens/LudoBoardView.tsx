@@ -6,7 +6,7 @@ import React from 'react';
 import { View, StyleSheet, Animated } from 'react-native';
 import Svg, { Circle, Rect, Path, Line, Polygon, G } from 'react-native-svg';
 import { PlaneGlyph } from '../icons';
-import { ludoColors } from '../theme';
+import { ludoColors, colors, gameSurfaces, withAlpha } from '../theme';
 import {
   GRID_UNITS, TRACK, HOME, CENTER_PARK, ARROWS, CORNER_CUTS,
   cellRect, cellCenter, unitOf, apronRect, apronSlotPixel, piecePixel,
@@ -14,21 +14,21 @@ import {
 } from '../ludoBoard';
 
 const PLAYER_COLORS = ludoColors;
-const PIECE_EDGE = 'rgba(0,0,0,0.6)';  // 静态棋子描边（黄子靠它成形）
-const PIECE_ACTIVE = '#111827';        // 可动棋子的深墨环
+const PIECE_EDGE = withAlpha(colors.black, 0.6);  // 静态棋子描边（黄子靠它成形）
+const PIECE_ACTIVE = colors.text;        // 可动棋子的深墨环
 // 棋盘：基地留白、赛道只涂色不画格线、格心一个奶油圆（标准飞行棋的观感）。
 // 数值取自 tmp/飞行棋.md 的视觉规格。
-const BOARD_BG = '#F1F1F1';       // 棋盘底 / 基地空地
-const CREAM = '#F2ECCE';          // 赛道与航道的格心圆
+const BOARD_BG = gameSurfaces.ludoBoard;       // 棋盘底 / 基地空地
+const CREAM = gameSurfaces.ludoCream;          // 赛道与航道的格心圆
 // 格心圆的深色描边：亮黄格（#F2D024）压在浅灰底上只有 1.35:1，格子的边界
 // 全靠这圈描边成形——标准棋盘的奶油圆本来就有细描边。
-const CREAM_EDGE = 'rgba(0,0,0,0.38)';
-const APRON_EDGE = '#222222';     // 停机坪黑框
-const ARROW_INK = '#1F2937';      // 虚线捷径的深墨垫底（对四色 3.7~11.7:1）
+const CREAM_EDGE = withAlpha(colors.black, 0.38);
+const APRON_EDGE = gameSurfaces.ludoApronEdge;     // 停机坪黑框
+const ARROW_INK = colors.text;      // 虚线捷径的深墨垫底（对四色 3.7~11.7:1）
 // 危险格（对手 1~6 步内能踩到）：半透明红罩 + 红环。红环 vs 四色赛道格
 // 3.0~5.6:1，且「多一圈」本身是形状通道。
-const DANGER_FILL = 'rgba(220,38,38,0.22)';
-const DANGER_EDGE = '#7F1D1D';    // 深红，压在四色格上都 ≥3:1
+const DANGER_FILL = withAlpha(colors.danger, 0.22);
+const DANGER_EDGE = gameSurfaces.ludoDangerEdge;    // 深红，压在四色格上都 ≥3:1
 
 // ── 棋子位置换算 ──────────────────────────────────────
 // 几何表在 ../ludoBoard（15×15 逻辑格 + 十字环赛道，纯函数、可单测）。
@@ -88,7 +88,7 @@ export default function LudoBoard({
   const u = edge / GRID_UNITS;   // 一个「单位」的像素边长（内圈格 = 1 单位）
   const players = gameState.players || {};
   const seats = Object.keys(players).map((s) => parseInt(s, 10));
-  const colorOf = (seat: number) => PLAYER_COLORS[players[String(seat)]?.color] || '#999';
+  const colorOf = (seat: number) => PLAYER_COLORS[players[String(seat)]?.color] || colors.borderStrong;
   // 棋盘是**固定美术**：4 个基地/4 条航道/中央四色三角永远都在，2 人局也一样——
   // 赛道本来就画满 4 色循环，只画参赛的两色会让半个棋盘空白得像没渲染出来。
   // 座位色优先取对局状态（万一服务端改了配色也跟得上），该座位没人时退回固定色表。
@@ -183,7 +183,7 @@ export default function LudoBoard({
           return (
             <G key={`t${i}`}>
               <Rect testID={`ludo-cell-${i}`} x={rect.x} y={rect.y} width={rect.w} height={rect.h}
-                fill={PLAYER_COLORS[trackColorKey(i)] || '#999'} />
+                fill={PLAYER_COLORS[trackColorKey(i)] || colors.borderStrong} />
               <Circle cx={cx} cy={cy} r={rad}
                 fill={CREAM} stroke={CREAM_EDGE} strokeWidth={Math.max(0.6, u * 0.035)} />
               {/* 危险格：对手 1~6 步内能踩到。半透明红罩 + 格心圆外套一圈红环——
@@ -229,8 +229,8 @@ export default function LudoBoard({
           const [afterHalf, beforeHalf] = CUT_HALVES[k % 4];
           return (
             <G key={`cut${k}`}>
-              <Polygon points={TRI_HALF[afterHalf]} fill={PLAYER_COLORS[trackColorKey(ai)] || '#999'} />
-              <Polygon points={TRI_HALF[beforeHalf]} fill={PLAYER_COLORS[trackColorKey(bi)] || '#999'} />
+              <Polygon points={TRI_HALF[afterHalf]} fill={PLAYER_COLORS[trackColorKey(ai)] || colors.borderStrong} />
+              <Polygon points={TRI_HALF[beforeHalf]} fill={PLAYER_COLORS[trackColorKey(bi)] || colors.borderStrong} />
             </G>
           );
         })}
@@ -290,7 +290,7 @@ export default function LudoBoard({
             `${tipX - ux * head - nx * head * 0.75},${tipY - uy * head - ny * head * 0.75}`,
           ].join(' ');
           const dash = `${u * 0.26} ${u * 0.18}`;
-          const line = PLAYER_COLORS[color] || '#999';
+          const line = PLAYER_COLORS[color] || colors.borderStrong;
           // 四条虚线一色一条、各归一个座位，**只有自己颜色的那条能飞**（见
           // ludo.py::is_arrow）。所以给自己那条的起点套一圈靶环，一眼能认出
           // 哪条是自己的——光看颜色要先把「箭头色 = 座位色」这层映射想一遍。
@@ -335,7 +335,7 @@ export default function LudoBoard({
                 const [cx, cy] = apronSlotPixel(seat, k, edge);
                 return (
                   <Circle key={`s${k}`} cx={cx} cy={cy} r={ap.size * 0.16}
-                    fill="#FFFFFF" stroke={APRON_EDGE} strokeWidth={Math.max(1, u * 0.05)} />
+                    fill={colors.white} stroke={APRON_EDGE} strokeWidth={Math.max(1, u * 0.05)} />
                 );
               })}
             </G>
@@ -359,6 +359,6 @@ const styles = StyleSheet.create({
   halo: {
     position: 'absolute',
     backgroundColor: 'rgba(17,24,39,0.30)',
-    borderWidth: 2.5, borderColor: '#FFFFFF',
+    borderWidth: 2.5, borderColor: colors.white,
   },
 });

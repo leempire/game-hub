@@ -86,6 +86,8 @@ function mount(game = initial()) {
     '../api': { getRoom: async () => null },
     '../socket': { RoomSocket }, '../theme': theme,
     '../utils': {}, '../help': {}, '../tetris': tetris,
+    '../GameShell': { default: () => null, GameResult: () => null },
+    '../gamePlayers': { shellPlayers: () => [] },
     '../backGuard': { useModalBackGuard() {}, onConfirmLeave() {},
       useWebKeys: (handler) => { keys = handler; } },
   };

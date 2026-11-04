@@ -54,7 +54,7 @@ MAX_TICKS = (st.RUN_MS + st.STALL_CAP_MS) // TICK_MS + 600
 # ── 把 AI 的动作描述翻译成引擎调用 ─────────────────────────────
 
 
-def _apply(gs: dict, uid: int, act: dict | None) -> None:
+def _apply(gs: dict, uid: int, act: dict | None, strict: bool = False) -> None:
     """执行一个动作。**被拒就咽下去**（风格化策略会不断试到买得起为止）。"""
     if not act:
         return
@@ -73,7 +73,8 @@ def _apply(gs: dict, uid: int, act: dict | None) -> None:
         elif kind == "patch":
             st.patch(gs, uid, act.get("target_uid"), gate=act.get("gate"))
     except (ValueError, KeyError):
-        pass
+        if strict:
+            raise
 
 
 def _cell_of(pos) -> tuple[int, int]:
@@ -302,7 +303,7 @@ def decide(gs: dict, uid: int, style: str) -> dict | None:
 
 
 def play(style: str, n_players: int, seed: int, map_id: str = "dorm",
-         difficulty: str = st.DEFAULT_DIFFICULTY) -> dict:
+         difficulty: str = st.DEFAULT_DIFFICULTY, ai_difficulty: str = "normal", strict=False) -> dict:
     uids = list(range(1, n_players + 1))
     gs = st.create_game(uids, seed=seed, map_id=map_id, difficulty=difficulty)
     rng = gs["rng"]
@@ -312,7 +313,13 @@ def play(style: str, n_players: int, seed: int, map_id: str = "dorm",
         tick += 1
         if gs["phase"] == "run" or tick % DECIDE_EVERY == 0:
             for uid in uids:
-                _apply(gs, uid, decide(gs, uid, style))
+                if style == "balanced" or style.startswith("ai-"):
+                    if style.startswith("ai-"):
+                        gs["players"][uid]["ai_profile"] = style[3:]
+                    action = ai.decide(gs, uid, ai_difficulty)
+                else:
+                    action = decide(gs, uid, style)
+                _apply(gs, uid, action, strict=strict)
     return {
         "reason": gs["reason"] or "timeout",
         "ms": gs["clock_ms"],

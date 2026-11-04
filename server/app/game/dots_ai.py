@@ -15,6 +15,9 @@ The heuristic approach produces solid play within ~100ms.
 """
 
 import copy
+import random
+from functools import lru_cache
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.dots import (
     get_legal_edges,
     apply_move,
@@ -26,7 +29,7 @@ from app.game.dots import (
 )
 
 
-def best_move(gs: dict) -> tuple[str, int, int] | None:
+def best_move(gs: dict, difficulty="normal", rng=None) -> tuple[str, int, int] | None:
     """Choose the best edge for the current player.
 
     Returns (orient, y, x) or None if no legal edges remain.
@@ -34,6 +37,11 @@ def best_move(gs: dict) -> tuple[str, int, int] | None:
     legal = get_legal_edges(gs)
     if not legal:
         return None
+    level = normalize_difficulty(difficulty)
+    if level == "easy":
+        return (rng or random).choice(legal)
+    if level == "hard" and len(legal) <= 12:
+        return _solve_endgame(gs, legal)
     player = gs["next"]
     # Phase 1: complete any boxes (greedy — always take free points)
     completions = _find_completing_edges(gs, legal)
@@ -206,3 +214,43 @@ def _simulate_opponent_gain(
                 changed = True
                 break
     return total_gain
+
+
+def _solve_endgame(gs: dict, legal: list) -> tuple[str, int, int]:
+    """Exact remaining-box minimax; extra turns keep the same score perspective.
+
+    An occupancy mask is sufficient: claimed boxes cannot touch an unplayed edge.
+    Twelve edges bound the cache to 4096 states and avoid a wall-clock dependency.
+    """
+    adjacent = []
+    for edge in legal:
+        boxes = []
+        for y, x in _adjacent_boxes(*edge):
+            if not (0 <= y < gs["rows"] and 0 <= x < gs["cols"]):
+                continue
+            sides = {( "h", y, x), ("h", y + 1, x),
+                     ("v", y, x), ("v", y, x + 1)}
+            mask = sum(1 << i for i, e in enumerate(legal) if e in sides)
+            boxes.append(mask)
+        adjacent.append(boxes)
+    full = (1 << len(legal)) - 1
+
+    @lru_cache(None)
+    def solve(mask):
+        if mask == full:
+            return 0, None
+        best, choice = -999, None
+        for i in range(len(legal)):
+            bit = 1 << i
+            if mask & bit:
+                continue
+            after = mask | bit
+            gain = sum(after & box == box for box in adjacent[i])
+            future, _ = solve(after)
+            score = gain + future if gain else -future
+            if score > best:
+                best, choice = score, i
+        return best, choice
+
+    _, choice = solve(0)
+    return legal[choice]

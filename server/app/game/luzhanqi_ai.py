@@ -27,6 +27,7 @@ from __future__ import annotations
 import random
 import time
 
+from app.game.ai_difficulty import normalize_difficulty
 from app.game.luzhanqi import (
     CAMP_CELLS, COLS, DILEI, GONGBING, HQ_CELLS, IMMOBILE, JUNQI,
     JUNZHANG, LIANZHANG, LVZHANG, NEIGHBORS, PAIZHANG, PIECE_COUNTS, RANKS,
@@ -85,10 +86,13 @@ def _dead_enemy_ranks(view: dict, color: str) -> dict:
     那是对的（经典暗棋里玩家确实只知道「谁出局」）。
     """
     dead: dict[str, int] = {}
-    for battle in view.get("battles", []):
+    for battle in view.get("battle_history", view.get("battles", [])):
         for key, side in (("attacker_piece", "attacker"), ("defender_piece", "defender")):
             # 只有「对手那一枚」的阵亡才算；我自己的损失不影响对手的候选池
-            if battle.get(side) == other(color) and battle.get(key):
+            died = battle.get("outcome") in (
+                ("attacker_dies", "both_die") if side == "attacker" else ("defender_dies", "both_die")
+            )
+            if died and battle.get(side) == other(color) and battle.get(key):
                 dead[battle[key]] = dead.get(battle[key], 0) + 1
     return dead
 
@@ -119,6 +123,8 @@ def _beliefs(board, color: str, view: dict) -> dict:
                 options.discard(DILEI)      # 地雷不能动，只会在最后两排
             if (r, c) not in HQ_CELLS:
                 options.discard(JUNQI)      # 军旗只在大本营，也不动
+            if cell.get("moved"):
+                options -= {DILEI, JUNQI}
             cands[(r, c)] = options
 
     # ③ 刚走过路的棋子：两个「不动」的兵种都要从它的候选里去掉
@@ -128,25 +134,23 @@ def _beliefs(board, color: str, view: dict) -> dict:
         if to in cands:
             cands[to] = cands[to] - {DILEI, JUNQI}
 
-    # ① / ② 用交战结果收窄。**只对「打完之后对手那枚还留在原地」的格子生效** ——
-    # 那个格子现在仍然是未知敌子，是同一枚的概率很高；阵亡的棋子所在格已经空了
-    # 或被我方占了，本来就不在 cands 里。
-    for battle in view.get("battles", []):
-        at = tuple(battle.get("at", ()))
-        if at not in cands:
-            continue
-        i_attacked = battle.get("attacker") == color
-        mine = battle.get("attacker_piece") if i_attacked else battle.get("defender_piece")
-        if mine is None:
-            continue
+    # Combat constraints belong to the surviving physical token, never to
+    # the square that another piece may occupy several turns later.
+    token_positions = {board[r][c].get("token"): (r, c) for r, c in cands
+                       if board[r][c].get("token")}
+    for battle in view.get("battle_history", view.get("battles", [])):
         outcome = battle.get("outcome")
-        if i_attacked:
-            rel = {"defender_dies": -1, "attacker_dies": 1, "both_die": 0}.get(outcome)
+        if outcome == "attacker_dies" and battle.get("defender") == enemy:
+            survivor = battle.get("defender_token")
+            mine = battle.get("attacker_piece")
+        elif outcome == "defender_dies" and battle.get("attacker") == enemy:
+            survivor = battle.get("attacker_token")
+            mine = battle.get("defender_piece")
         else:
-            rel = {"attacker_dies": 1, "defender_dies": -1, "both_die": 0}.get(outcome)
-        if rel is None:
             continue
-        cands[at] = _narrow_by_relation(cands[at], mine, rel)
+        at = token_positions.get(survivor)
+        if at is not None and mine is not None:
+            cands[at] = _narrow_by_relation(cands[at], mine, +1)
 
     # 兵种级收窄：把「已经全灭的兵种」从每个格子里剔掉
     dead = _dead_enemy_ranks(view, color)
@@ -488,7 +492,7 @@ def _score_move(board, frm, to, piece, color, target, beliefs, enemy_hits, rng) 
     return score + rng.random() * 0.4            # 打散同分着法，别每局都走同一步
 
 
-def best_move(view: dict, time_budget: float = _TIME_BUDGET):
+def best_move(view: dict, time_budget: float | None = None, difficulty="normal", rng=None):
     """给视图里那一方算一步棋，返回 ``((fr,fc),(tr,tc))`` 或 ``None``。"""
     legal = view.get("legal") or []
     color = view.get("your_color") or ""
@@ -497,8 +501,14 @@ def best_move(view: dict, time_budget: float = _TIME_BUDGET):
     board = [list(row) for row in view.get("cells") or []]
     if len(board) != ROWS:
         return None
+    level = normalize_difficulty(difficulty)
+    rng = rng or random.Random()
+    if level == "easy":
+        m = rng.choice(legal)
+        return ((int(m[0]), int(m[1])), (int(m[2]), int(m[3])))
+    if time_budget is None:
+        time_budget = _TIME_BUDGET if level == "normal" else 0.9
     deadline = time.monotonic() + time_budget
-    rng = random.Random()
     hidden = view.get("mode", "open") == "hidden"
 
     # 能吃军旗就直接赢（两种模式共用；搜索里也有这条，但先拦一下省时间）
@@ -537,5 +547,5 @@ def best_move(view: dict, time_budget: float = _TIME_BUDGET):
     scored.sort(key=lambda x: -x[0])
     best = scored[0][0]
     near = [s for s in scored[:max(1, min(_TOP_K, len(scored)))] if best - s[0] <= 2.0]
-    _, frm, to = near[rng.randrange(len(near))]
+    _, frm, to = scored[0] if level == "hard" else near[rng.randrange(len(near))]
     return frm, to

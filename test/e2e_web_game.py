@@ -35,7 +35,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
     ok(f'{username} 注册并自动登录，底部4Tab可见')
 
 
@@ -181,7 +181,7 @@ def main():
         pb = ctx_b.new_page()
         pb.set_default_timeout(15000)
         pb.goto(BASE)
-        pb.get_by_text('社交', exact=True).last.wait_for(timeout=30000)
+        pb.get_by_text('我的', exact=True).last.wait_for(timeout=30000)
         goto_tab(pb, '房间')
         pb.get_by_text('加入', exact=True).first.click()
         pb.get_by_placeholder('输入6位房间号').fill(code)

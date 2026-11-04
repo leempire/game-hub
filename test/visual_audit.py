@@ -155,11 +155,11 @@ def main():
         pg.get_by_placeholder('6-32位').fill('test123456')
         pg.get_by_placeholder('再次输入密码').fill('test123456')
         pg.get_by_text('注 册', exact=True).click()
-        pg.get_by_text('社交', exact=True).last.wait_for(timeout=30000)
+        pg.get_by_text('我的', exact=True).last.wait_for(timeout=30000)
         audit_tabbar(pg)
         audit_page(pg, 'games')
 
-        for tab, name in (('房间', 'rooms'), ('社交', 'social'), ('我的', 'profile')):
+        for tab, name in (('房间', 'rooms'), ('我的', 'profile')):
             pg.get_by_text(tab, exact=True).last.click()
             pg.wait_for_timeout(900)
             audit_page(pg, name)
@@ -185,6 +185,12 @@ def main():
         pg.get_by_text('UNO 卡牌', exact=True).first.click()
         pg.get_by_text('创建房间', exact=True).click()
         pg.get_by_text('房间号', exact=True).wait_for(timeout=15000)
+        # 首次进入 UNO 会先显示教学；审计并真实跳过，再继续大厅设置。
+        pg.locator('[data-testid="game-intro"]').wait_for(timeout=8000)
+        pg.wait_for_timeout(350)
+        audit_page(pg, 'game_intro')
+        pg.locator('[data-testid="guide-skip"]').click()
+        pg.locator('[data-testid="game-intro"]').wait_for(state='hidden')
         audit_page(pg, 'room')
         pg.locator('[data-testid="room-settings-row"]').click()
         pg.locator('[data-testid="room-settings-sheet"]').wait_for(timeout=8000)
@@ -215,7 +221,7 @@ def main():
         pa.get_by_placeholder('3-20位字母数字下划线').fill(admin_user)
         pa.get_by_placeholder('请输入密码').fill(admin_pass)
         pa.get_by_text('登 录', exact=True).click()
-        pa.get_by_text('社交', exact=True).last.wait_for(timeout=30000)
+        pa.get_by_text('我的', exact=True).last.wait_for(timeout=30000)
         pa.get_by_text('我的', exact=True).last.click()
         pa.wait_for_timeout(800)
         pa.get_by_text('用户管理', exact=True).first.click()

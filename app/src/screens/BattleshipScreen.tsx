@@ -12,19 +12,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { getRoom, leaveRoom, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
-import {
+import { gameSurfaces, shadow,
   colors, spacing, radius, fontSize,
   playerColors, battleshipShipColors, battleshipWater, withAlpha,
 } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 import { useDisconnectCountdown } from '../disconnect';
 
 // 命中/击沉标记：都压在深蓝棋盘上，提亮到 ≥4:1（原 #EF4444 只有 3.06:1）
-const HIT_MARK = '#FBBF24';
-const HIT_SUNK = '#F87171';
+const HIT_MARK = battleshipShipColors[4];
+const HIT_SUNK = battleshipShipColors[5];
 
 // 动画一律只动 transform/opacity（GPU 合成）；Web 端不支持 native driver 要降级
 const NATIVE_DRIVER = Platform.OS !== 'web';
@@ -588,6 +589,7 @@ function ShipPanel({
 export default function BattleshipScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const { width: winWidth } = useWindowDimensions();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<GameSync | null>(null);
   // **棋盘边长与舰队来自这一局的载荷**（v13）：6×6 / 10×10 / 12×12 共用这一份渲染。
@@ -887,7 +889,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
     ws.on('player_reconnected', handlePlayerReconnected);
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave]);
 
@@ -1087,12 +1089,11 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   // --- Derived state ---
   const isMyTurn = game ? game.your_color === game.next && !game.winner : false;
-  const myColorLabel = game ? (game.your_color === 'blue' ? '蓝方' : '红方') : '';
   const turnText = (() => {
     if (!game || game.winner) return '';
     if (game.phase === 'placing') return '布阵阶段';
@@ -1105,7 +1106,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
     return '等待对方...';
   })();
 
-  const showPlacement = phase === 'placing';
+  const showPlacement = !!game && phase === 'placing';
   const showBattle = phase === 'battle' || phase === 'finished';
 
   // 雷达标记：只画在攻击面板上（那是自己打出去的信息面板）
@@ -1123,20 +1124,18 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
   })();
 
   return (
-    <View style={styles.container}>
+    <GameShell game="battleship" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={turnText} style={styles.container} actions={<View style={styles.bottomBar}>
+        {game && !game.winner && game.phase === 'battle' && (
+          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
+            <Text style={styles.surrenderBtnText}>认输</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
+          <Text style={styles.leaveBtnText}>退出</Text>
+        </TouchableOpacity>
+      </View>}>
       {/* Top bar */}
-      <View style={styles.topBar}>
-        <View style={styles.topLeft}>
-          <Ionicons name="ellipse" size={16}
-            color={game?.your_color === 'blue' ? playerColors.blue : playerColors.red} />
-          <Text style={styles.myColor}>{myColorLabel}</Text>
-          <Text style={[styles.turnHint, isMyTurn && styles.turnActive]}>{turnText}</Text>
-        </View>
-        <View style={styles.topRight}>
-          <GameHelpButton game="battleship" size={24} />
-          <Text style={styles.roomCode}>#{code}</Text>
-        </View>
-      </View>
+
 
       {/* Disconnected banner */}
       {opponentDisconnected && (
@@ -1206,16 +1205,7 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
       </ScrollView>
 
       {/* Bottom bar */}
-      <View style={styles.bottomBar}>
-        {game && !game.winner && game.phase === 'battle' && (
-          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
-            <Text style={styles.surrenderBtnText}>认输</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
-          <Text style={styles.leaveBtnText}>退出</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* Confirm modal */}
       <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
@@ -1255,29 +1245,11 @@ export default function BattleshipScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>对局结束</Text>
-            {game && (
-              <>
-                <Text style={styles.modalResult}>
-                  {WINNER_LABELS[game.winner || ''] || game.winner}
-                </Text>
-                {game.reason && (
-                  <Text style={styles.modalReason}>
-                    {REASON_LABELS[game.reason] || game.reason}
-                  </Text>
-                )}
-              </>
-            )}
-            <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleBackToRoom}>
-              <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      <GameResult visible={showGameOver} result={WINNER_LABELS[game?.winner || ''] || '对局结束'} reason={game?.reason ? REASON_LABELS[game.reason] || game.reason : ''} players={shellPlayers(room, user?.id, game)}
+        onBackToRoom={handleBackToRoom} onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+
+      </GameResult>
+    </GameShell>
   );
 }
 
@@ -1728,7 +1700,7 @@ function CellContent({
       return (
         <View style={[styles.cellFill, {
           width: innerSize, height: innerSize,
-          backgroundColor: SHIP_COLORS[cellVal] || '#888',
+          backgroundColor: SHIP_COLORS[cellVal] || colors.textMuted,
           borderRadius: 3,
         }]} />
       );
@@ -1803,7 +1775,7 @@ function CellContent({
           }]}>
           {hasShip && <View style={[styles.shipUnder, {
             width: innerSize * 0.5, height: innerSize * 0.5,
-            backgroundColor: SHIP_COLORS[cellVal] || '#888',
+            backgroundColor: SHIP_COLORS[cellVal] || colors.textMuted,
           }]} />}
         </View>
       );
@@ -1818,7 +1790,7 @@ function CellContent({
       return (
         <View style={[styles.cellFill, {
           width: innerSize, height: innerSize,
-          backgroundColor: SHIP_COLORS[cellVal] || '#888',
+          backgroundColor: SHIP_COLORS[cellVal] || colors.textMuted,
           borderRadius: 3,
         }]} />
       );
@@ -1864,7 +1836,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4, paddingHorizontal: 8,
     backgroundColor: colors.card, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.borderStrong,
   },
-  shipItemSelected: { borderColor: colors.primary, backgroundColor: '#EEF2FF' },
+  shipItemSelected: { borderColor: colors.primary, backgroundColor: gameSurfaces.selection },
   shipItemPressed: { opacity: 0.6 },
   shipItemDragging: { borderColor: colors.primary, backgroundColor: colors.bg },
   shipPreview: { borderRadius: 3 },
@@ -1922,8 +1894,7 @@ const styles = StyleSheet.create({
   gridBoard: {
     position: 'relative', backgroundColor: battleshipWater,
     borderRadius: 8, overflow: 'hidden',
-    shadowColor: colors.black, shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2, shadowRadius: 4, elevation: 3,
+    ...shadow.card,
   },
   gLine: { position: 'absolute', height: 1, backgroundColor: 'rgba(255,255,255,0.15)' },
   gLineV: { position: 'absolute', width: 1, backgroundColor: 'rgba(255,255,255,0.15)' },
@@ -1941,7 +1912,7 @@ const styles = StyleSheet.create({
   shipUnder: { borderRadius: 99 },
   lastPing: {
     position: 'absolute', width: 8, height: 8, borderRadius: 4,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
   },
   // Placement actions
   placementActions: {
