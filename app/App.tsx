@@ -16,8 +16,9 @@ const LINKING = {
   config: {
     screens: {
       Auth: 'auth',
-      MainTabs: { screens: { Games: '', Rooms: 'rooms', Profile: 'profile' } },
+      MainTabs: { screens: { Games: '', Rooms: 'rooms', Social: 'social', Profile: 'profile' } },
       Room: 'room/:code',
+      Chat: { path: 'chat/:userId', parse: { userId: Number } },
       Watch: 'watch/:code',
       Spider: 'spider/:code',
       Gomoku: 'gomoku/:code',

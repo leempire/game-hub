@@ -8,7 +8,7 @@ import threading
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 
-from app import participants, competition_records
+from app import participants, competition_records, social_schema
 
 
 _db_path: str = "data/gamehub.db"
@@ -125,6 +125,7 @@ def _create_tables(conn: sqlite3.Connection):
     """)
     participants.create_schema(conn)
     competition_records.create_schema(conn)
+    social_schema.create_schema(conn)
 
 
 def seed_admin(username: str, password_hash: str, salt: str):

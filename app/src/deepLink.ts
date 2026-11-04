@@ -15,7 +15,7 @@ import * as Linking from 'expo-linking';
 
 export interface PendingRoute {
   screen: string;
-  params: Record<string, string>;
+  params: Record<string, string | number>;
 }
 
 /** 路径第一段 → 路由名。顺序无关，但必须与 `navigation.tsx` 的 Stack.Screen 对应。 */
@@ -64,6 +64,11 @@ function parseUrl(url: string | null | undefined): PendingRoute | null {
 
   if (segments.length !== 2) return null;
 
+  if (segments[0] === 'chat') {
+    const userId = Number(segments[1]);
+    return /^\d+$/.test(segments[1]) && Number.isSafeInteger(userId) && userId > 0
+      ? { screen: 'Chat', params: { userId } } : null;
+  }
   const screen = ROUTE_BY_PATH[segments[0]];
   if (!screen) return null;
   return { screen, params: { code: segments[1].toUpperCase() } };
@@ -99,7 +104,8 @@ export function takePendingRoute(): Promise<PendingRoute | null> {
 
 /** A room's startup link is already fulfilled once its game is on top. */
 export function destinationAlreadyOpen(target: PendingRoute,
-  current: { name?: string; params?: Record<string, string> } | undefined): boolean {
+  current: { name?: string; params?: Record<string, string | number> } | undefined): boolean {
+  if (target.screen === 'Chat') return current?.name === 'Chat' && current.params?.userId === target.params.userId;
   if (!current || current.params?.code !== target.params.code) return false;
   if (current.name === target.screen) return true;
   return target.screen === 'Room' && !!current.name && current.name !== 'Watch'

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text, StyleSheet } from 'react-native';
@@ -28,6 +28,10 @@ import TetrisScreen from './screens/TetrisScreen';
 import UnoScreen from './screens/UnoScreen';
 import StasisScreen from './screens/StasisScreen';
 import ProfileTab from './screens/ProfileTab';
+import SocialTab from './screens/SocialTab';
+import ChatScreen from './screens/ChatScreen';
+import { getSocialSummary } from './contacts';
+import useForegroundPolling from './useForegroundPolling';
 import AdminScreen from './screens/AdminScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import CompetitionScreen from './screens/CompetitionScreen';
@@ -62,11 +66,13 @@ export type RootStackParamList = {
   Competition: undefined;
   SharedReplay: { token: string };
   Watch: { code: string };
+  Chat: { userId: number };
 };
 
 export type TabParamList = {
   Games: undefined;
   Rooms: undefined;
+  Social: undefined;
   Profile: undefined;
 };
 
@@ -79,6 +85,7 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   const iconMap: Record<string, { name: keyof typeof Ionicons.glyphMap; filled: keyof typeof Ionicons.glyphMap }> = {
     Games: { name: 'game-controller-outline', filled: 'game-controller' },
     Rooms: { name: 'home-outline', filled: 'home' },
+    Social: { name: 'people-outline', filled: 'people' },
     Profile: { name: 'person-outline', filled: 'person' },
   };
   const entry = iconMap[label];
@@ -166,6 +173,17 @@ export function navigateToTabs(): void {
 
 // Inner tabs navigator - needs access to navigation
 function MainTabs() {
+  const { token } = useAuth();
+  const [badge, setBadge] = useState<{ token: string | null; count: number; stale: boolean }>({ token: null, count: 0, stale: false });
+  useForegroundPolling(`social-badge:${token}`, async valid => {
+    if (!token) return;
+    const summary = await getSocialSummary(token);
+    if (valid()) setBadge({ token, count: summary.unread_total + summary.incoming_total, stale: false });
+  }, () => {
+    // Retain the last known count on transient errors; the social page supplies retry UI.
+    setBadge(value => ({ token, count: value.token === token ? value.count : 0, stale: true }));
+  }, 5000);
+  const unread = badge.token === token ? badge.count : 0;
   const insets = useSafeAreaInsets();
   useExitBackGuard(useIsFocused());
   return (
@@ -198,6 +216,9 @@ function MainTabs() {
         component={RoomsTabWrapper}
         options={{ title: '房间' }}
       />
+      <Tab.Screen name="Social" component={SocialTab}
+        options={{ title: '社交', tabBarBadge: unread ? (unread > 99 ? '99+' : unread) : undefined,
+          tabBarAccessibilityLabel: badge.stale ? '社交，未读数量暂未更新' : `社交${unread ? `，${unread}条未读或好友申请` : ''}` }} />
       <Tab.Screen
         name="Profile"
         component={ProfileTabWrapper}
@@ -536,6 +557,8 @@ export default function AppNavigation() {
             component={AdminScreen}
             options={{ headerShown: true, title: '用户管理', headerStyle: { backgroundColor: colors.card } }}
           />
+          <Stack.Screen name="Chat" component={ChatScreen}
+            options={{ headerShown: true, title: '好友聊天', headerStyle: { backgroundColor: colors.card } }} />
           <Stack.Screen name="Watch" component={SpectatorScreen}
             options={{ headerShown: true, title: '只读观战', headerStyle: { backgroundColor: colors.card } }} />
           <Stack.Screen name="Competition" component={CompetitionScreen}
