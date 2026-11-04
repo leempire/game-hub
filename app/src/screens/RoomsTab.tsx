@@ -15,12 +15,13 @@ import { gameShort, gameIonicon, type GameKey } from '../games';
 
 interface Props {
   onNavigateToRoom: (code: string) => void;
+  onNavigateToWatch: (code: string) => void;
 }
 
 /** 轮询间隔。3 秒太频繁：房间列表不是实时对战消息，5 秒足够看出新房间。 */
 const POLL_MS = 5000;
 
-export default function RoomsTab({ onNavigateToRoom }: Props) {
+export default function RoomsTab({ onNavigateToRoom, onNavigateToWatch }: Props) {
   const { token, user } = useAuth();
   const isFocused = useIsFocused();
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -246,6 +247,7 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
               const isMember = !!user && room.players.some((p) => p.id === user.id);
               const full = room.players.length >= room.max_players;
               const canJoin = isMember || (room.status === 'waiting' && !full);
+              const canWatch = !!room.allow_spectators && !room.practice;
               const pending = pendingCode === room.code;
               const host = room.players.find((p) => p.is_host) ?? room.players[0];
               const names = room.players
@@ -253,15 +255,14 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
                 .join(' · ');
               const summary = settingsSummary(room.settings ?? []);
               const statusText = room.status === 'playing'
-                ? (isMember ? '对局中 · 可重连' : '对局中 · 仅重连')
+                ? (isMember ? '对局中 · 可重连' : canWatch ? '对局中 · 可观战' : '对局中 · 仅重连')
                 : full ? '已满' : '等待中';
               const statusColor = room.status === 'playing'
                 ? colors.warning
                 : full ? colors.textMuted : colors.accent;
               return (
+                <View key={room.code} style={[styles.roomCard, !canJoin && !canWatch && styles.roomCardDim]}>
                 <TouchableOpacity
-                  key={room.code}
-                  style={[styles.roomCard, !canJoin && styles.roomCardDim]}
                   onPress={() => handleRoomPress(room)}
                   activeOpacity={0.8}
                   accessibilityRole="button"
@@ -312,6 +313,14 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
                     </View>
                   )}
                 </TouchableOpacity>
+                {canWatch && <TouchableOpacity testID={`watch-room-${room.code}`} accessibilityRole="button"
+                  accessibilityLabel={`观战 ${room.name}`} disabled={!!pendingCode}
+                  style={[styles.watchButton, !!pendingCode && styles.roomCardDim]}
+                  onPress={() => onNavigateToWatch(room.code)}>
+                  <Ionicons name="eye-outline" size={18} color={colors.primary} />
+                  <Text style={styles.watchText}>只读观战</Text>
+                </TouchableOpacity>}
+                </View>
               );
             })
           )}
@@ -347,6 +356,9 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
 }
 
 const styles = StyleSheet.create({
+  watchButton: { minHeight: 48, marginTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  watchText: { color: colors.primary, fontSize: fontSize.md, fontWeight: '600' },
   container: { flex: 1, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row',

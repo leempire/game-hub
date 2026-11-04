@@ -32,6 +32,7 @@ import AdminScreen from './screens/AdminScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import CompetitionScreen from './screens/CompetitionScreen';
 import SharedReplayScreen from './screens/SharedReplayScreen';
+import SpectatorScreen from './screens/SpectatorScreen';
 // 对局页标题也取目录表（`games.tsx`）—— 标题写第二遍就是「改名漏一处」的来源
 import { gameTitle } from './games';
 import { colors } from './theme';
@@ -60,6 +61,7 @@ export type RootStackParamList = {
   History: undefined;
   Competition: undefined;
   SharedReplay: { token: string };
+  Watch: { code: string };
 };
 
 export type TabParamList = {
@@ -221,7 +223,8 @@ function GamesTabWrapper() {
 function RoomsTabWrapper() {
   const nav = useNavigation<any>();
   return (
-    <RoomsTab onNavigateToRoom={(code: string) => nav.navigate('Room', { code })} />
+    <RoomsTab onNavigateToRoom={(code: string) => nav.navigate('Room', { code })}
+      onNavigateToWatch={(code: string) => nav.navigate('Watch', { code })} />
   );
 }
 
@@ -533,6 +536,8 @@ export default function AppNavigation() {
             component={AdminScreen}
             options={{ headerShown: true, title: '用户管理', headerStyle: { backgroundColor: colors.card } }}
           />
+          <Stack.Screen name="Watch" component={SpectatorScreen}
+            options={{ headerShown: true, title: '只读观战', headerStyle: { backgroundColor: colors.card } }} />
           <Stack.Screen name="Competition" component={CompetitionScreen}
             options={{ headerShown: true, title: '挑战与排行榜', headerStyle: { backgroundColor: colors.card } }} />
           <Stack.Screen

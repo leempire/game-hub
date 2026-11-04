@@ -15,6 +15,7 @@
 // 视觉（v1.9 联网调研后重做）：深色毡面牌桌 + 对手座位扇形牌背 + 中央弃牌堆
 // 套一圈**当前颜色的实心环** + 自己手牌扇形重叠（可出的牌抬高 + 双环）。
 // 设计依据见 docs/游戏设计/UNO/设计.md「界面构成」与「交互设计」两节。
+import QuickChatControls from '../QuickChatControls';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Platform, Animated, Easing,
@@ -201,6 +202,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
   const [pressed, setPressed] = useState<number | null>(null);
 
   const socketRef = useRef<RoomSocket | null>(null);
+  const getChatSocket = useCallback(() => socketRef.current, [code]);
   const skipRemoveRef = useRef(false);
   const gameOverShownRef = useRef(false);
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -594,6 +596,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
 
   return (
     <GameShell game="uno" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.container} actions={iAmOut && !showGameOver ? null : <View style={styles.actions}>
+          <QuickChatControls token={token} code={code} phrases={room?.quick_phrases} getSocket={getChatSocket} enabled={shellConnected && !iAmOut && !game?.finished} />
           {game?.can_challenge_wild4 && <TouchableOpacity style={styles.actBtn} testID="uno-challenge-wild4"
             disabled={!shellConnected} onPress={() => socketRef.current?.unoChallengeWild4()}>
             <Text style={styles.actBtnText}>质疑 +4</Text>

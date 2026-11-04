@@ -303,6 +303,21 @@ def _clock_setting():
                    blurb="双方各自拥有整局用时，轮到行动时扣时；归零判负。")
 
 
+def _allow_spectators(room, value):
+    if room.get("practice") and value:
+        raise ValueError("私人练习不开放观战")
+    # Epochs revoke old grants even if spectators miss a fast off/on change.
+    if room.get("allow_spectators", False) != value:
+        room["watch_generation"] = room.get("watch_generation", 0) + 1
+    room["allow_spectators"] = value
+
+
+def _spectator_setting():
+    return Setting(key="allow_spectators", label="允许观战", kind=KIND_TOGGLE,
+                   store="allow_spectators", default=False, apply=_allow_spectators,
+                   blurb="房主可在开局前开放只读观战；观战不占座，不显示UNO手牌，密码房仍需密码。")
+
+
 _GAMES: dict[str, list[Setting]] = {
     "minesweeper": _mine_settings(),
     "luzhanqi": [*_luzhanqi_settings(), Setting(
@@ -311,10 +326,10 @@ _GAMES: dict[str, list[Setting]] = {
         choices=({"value": 0, "label": "不限时"}, {"value": 30, "label": "30秒"}, {"value": 60, "label": "60秒"},
                  {"value": 120, "label": "120秒"}),
         blurb="时间到后自动确认当前合法阵型，保留已经完成的布阵。")],
-    "stasis": _stasis_settings(),
+    "stasis": [*_stasis_settings(), _spectator_setting()],
     "battleship": _battleship_settings(),
     "tetris": _tetris_settings(),
-    "uno": [_uno_preset_setting(), *_uno_rule_settings()],
+    "uno": [_uno_preset_setting(), *_uno_rule_settings(), _spectator_setting()],
     "gomoku": [*_gomoku_settings(), _clock_setting()],
     "reversi": [_board_sizes("board_size", "reversi_size", 8, (6, 8, 10)), _clock_setting()],
     "dots": [_board_sizes("dots", "dots_count", 5, (4, 5, 6), "点阵")],

@@ -49,9 +49,10 @@ function harness() {
     'react-native': { View: host, Text: host, TouchableOpacity: host, ScrollView: host,
       ActivityIndicator: host, Modal: () => null, Platform: { OS: 'web' }, StyleSheet: { create: s => s } },
     '@expo/vector-icons': { Ionicons: host }, 'expo-clipboard': { setStringAsync: async () => {} },
-    '@react-navigation/native': { useFocusEffect: callback => {
+    '@react-navigation/native': { useNavigation: () => ({ replace() {} }), useFocusEffect: callback => {
       focusEffect = callback; useEffect(callback, [callback]);
     } },
+    '../GameIntro': { __esModule: true, default: () => null }, '../social': { createPractice: async () => ({ code: 'practice' }) },
     '../auth': { useAuth: () => ({ token: 'test', user: { id: 1 } }) },
     '../api': { getRoom: () => new Promise(resolve => requests.push(resolve)),
       joinRoom: () => new Promise(resolve => joins.push(resolve)), leaveRoom: async () => {} },

@@ -182,6 +182,8 @@ export interface Room {
   max_players: number;
   challenge?: { date: string; first_reveal?: { x: number; y: number } };
   practice?: boolean;
+  allow_spectators?: boolean;
+  quick_phrases?: { id: string; text: string }[];
   players: RoomPlayer[];
   /**
    * **本房间可调的全部设置**（v1.15）。没有可调项的游戏（五子棋等）不下发这个键。

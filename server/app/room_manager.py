@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from app import persistence
 from app import room_settings
+from app.quick_phrases import phrases_for as quick_phrases_for
 from app import room_timing
 from app.competition_rules import challenge_seed, challenge_info
 from app.game import spider, uttt, uttt_ai, xiangqi as xiangqi_engine
@@ -407,7 +408,7 @@ def get_all_rooms() -> list[dict]:
     """
     rooms = [
         r for r in _rooms.values()
-        if not r.get("challenge_date") and (
+        if not r.get("challenge_date") and not r.get("practice") and (
             r["status"] == "playing"
             or (r["status"] == "waiting" and _has_human_online(r)))
     ]
@@ -535,6 +536,8 @@ def join_room(code: str, user: dict, password: str | None) -> dict:
     room = _rooms.get(code)
     if not room:
         raise ValueError("__NOT_FOUND__")
+    if room.get("practice") and room.get("practice_owner_id", room["host_id"]) != user["id"]:
+        raise ValueError("这是私人练习房，不能加入")
     # 原玩家放行：游戏中重连、结束后重进、等待房重进都走这一条。
     # 必须先判「是否本房成员」再查 find_user_waiting_room——后者不区分房间，
     # 会把「凭房号回到自己所在的房」误判成「你已在房间中」。
@@ -3545,6 +3548,9 @@ def room_to_dict(room: dict) -> dict:
         result["challenge"] = challenge_info(room)
     if room.get("practice"):
         result["practice"] = True
+    if room["game"] in ("uno", "stasis"):
+        result["allow_spectators"] = bool(room.get("allow_spectators")) and not bool(room.get("practice"))
+        result["quick_phrases"] = quick_phrases_for(room["game"])
     if room.get("uno_series"):
         result["uno_series"] = _uno_series_view(room)
     return result

@@ -83,6 +83,8 @@ server/
     ├── database.py     # SQLite 建表/users/战绩落库（save_game_record）
     ├── persistence.py  # 房间实时落盘 + 启动恢复（热重启，见「热重启」）
     ├── security.py     # JWT + 密码哈希
+    ├── spectating.py   # UNO/深空独立只读WS、用户绑定许可与服务端公开字段白名单
+    ├── practice.py     # 四款私人练习，统计/榜单/历史排除 practice=1
     ├── room_manager.py # 房间生命周期：创建/加入/准备/开始/断线保座(120s)/对局结束回调
     ├── room_settings.py# 房间级玩法设置的**唯一注册表**（下发统一的 room.settings）
     ├── room_timing.py  # 棋钟/军棋布阵截止任务：单调时间差，纯引擎只收 dt_ms

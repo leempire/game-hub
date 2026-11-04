@@ -672,7 +672,7 @@ class TestRulesPick:
         assert [s["key"] for s in room["settings"]] == [
             "preset", "stack_mode", "draw_until_play", "must_play",
             "jump_in", "seven_zero", "deck", "mercy", "teams",
-            "wild4_strict", "wild4_challenge", "uno_penalty", "score_target"]
+            "wild4_strict", "wild4_challenge", "uno_penalty", "score_target", "allow_spectators"]
         assert _setting_value(room, "jump_in") is False
 
     def test_preset_pick_is_broadcast_to_everyone(self, client):

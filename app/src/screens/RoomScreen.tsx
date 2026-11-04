@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Platform, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../auth';
 import { getRoom, joinRoom, leaveRoom, Room, RoomPlayer } from '../api';
@@ -13,6 +13,8 @@ import { colors, spacing, radius, fontSize } from '../theme';
 import { notify } from '../utils';
 import { RoomSettingsRow, RoomSettingsSheet } from '../roomSettings';
 import { GameHelpButton } from '../help';
+import GameIntro from '../GameIntro';
+import { createPractice } from '../social';
 import type { GameKey } from '../games';
 // 游戏名的唯一来源（这一行以前是一串嵌套三元，与主页卡片各写一遍）
 import { gameTitle } from '../games';
@@ -25,6 +27,7 @@ interface Props {
 
 export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const { token, user } = useAuth();
+  const navigation = useNavigation<any>();
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -346,6 +349,11 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           </View>
         </TouchableOpacity>
 
+        <GameIntro game={room.game} userId={user?.id} practice={room.practice} onPractice={async () => {
+          if (!token) throw new Error('请先登录');
+          const result = await createPractice(token, room.game);
+          if (focusedRef.current) navigation.replace('Room', { code: result.code });
+        }} />
         {room.challenge && <View style={styles.finishedBanner}>
           <Text style={styles.finishedBannerText}>每日挑战 · {room.challenge.date}（UTC） · 固定单人房规
             {room.challenge.first_reveal ? ' · 首次请翻开正中央格子' : ''}</Text>

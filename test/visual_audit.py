@@ -185,6 +185,12 @@ def main():
         pg.get_by_text('UNO 卡牌', exact=True).first.click()
         pg.get_by_text('创建房间', exact=True).click()
         pg.get_by_text('房间号', exact=True).wait_for(timeout=15000)
+        # 首次进入 UNO 会先显示教学；审计并真实跳过，再继续大厅设置。
+        pg.locator('[data-testid="game-intro"]').wait_for(timeout=8000)
+        pg.wait_for_timeout(350)
+        audit_page(pg, 'game_intro')
+        pg.locator('[data-testid="guide-skip"]').click()
+        pg.locator('[data-testid="game-intro"]').wait_for(state='hidden')
         audit_page(pg, 'room')
         pg.locator('[data-testid="room-settings-row"]').click()
         pg.locator('[data-testid="room-settings-sheet"]').wait_for(timeout=8000)

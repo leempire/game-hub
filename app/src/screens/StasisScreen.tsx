@@ -49,6 +49,7 @@
 //
 // **判据不在这里算**：v6 起「能不能躺下」由服务端随 tick 下发
 // （`players[uid].lie`），客户端不再复刻（见 `canLie` 的注释）。
+import QuickChatControls from '../QuickChatControls';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Platform, Animated,
@@ -163,6 +164,7 @@ export default function StasisScreen({ code, onLeave }: Props) {
   const [following, setFollowing] = useState(true);
 
   const socketRef = useRef<RoomSocket | null>(null);
+  const getChatSocket = useCallback(() => socketRef.current, [code]);
   const skipRemoveRef = useRef(false);
   const gameOverShownRef = useRef(false);
   const playersRef = useRef<Room['players']>([]);
@@ -1344,6 +1346,7 @@ export default function StasisScreen({ code, onLeave }: Props) {
   return (
     <GameShell game="stasis" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.root}>
       {topBar}
+      <QuickChatControls token={token} code={code} phrases={room?.quick_phrases} getSocket={getChatSocket} enabled={shellConnected && myAlive && !game?.finished} />
 
       {/* 主视图：整张地图 + 相机 */}
       <View

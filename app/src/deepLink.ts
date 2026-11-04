@@ -21,6 +21,7 @@ export interface PendingRoute {
 /** 路径第一段 → 路由名。顺序无关，但必须与 `navigation.tsx` 的 Stack.Screen 对应。 */
 const ROUTE_BY_PATH: Record<string, string> = {
   room: 'Room',
+  watch: 'Watch',
   gomoku: 'Gomoku',
   reversi: 'Reversi',
   battleship: 'Battleship',

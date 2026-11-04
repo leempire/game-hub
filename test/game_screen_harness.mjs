@@ -72,6 +72,7 @@ export function mountGame(name, initial, { game = name.toLowerCase(), os = 'web'
     'react-native-svg': { __esModule: true, default: host('svg'), ...Object.fromEntries(['Circle', 'Rect', 'Line', 'Path', 'Polygon', 'G', 'Text', 'Defs', 'Ellipse', 'ClipPath', 'LinearGradient', 'Stop'].map(name => [name, host('g')])) },
     auth: { useAuth: () => ({ token: 'test', user: { id: 1 } }) },
     api: { getRoom: async () => room, leaveRoom: async () => {} }, socket: { RoomSocket },
+    QuickChatControls: { __esModule: true, default: () => null },
     help, backGuard: guards, disconnect: { useDisconnectCountdown: () => 120 },
     games: { gameTitle: value => value }, theme, utils: { notify: (...args) => notices.push(args) },
     icons: { PlaneGlyph: host('i'), DiceFace: host('i'), UnoColorBadge: host('i'), UnoSymbolGlyph: host('i') },

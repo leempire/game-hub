@@ -9,7 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.security import decode_token_ws
 from app.database import get_conn, row_to_user
-from app import room_manager as rm
+from app import room_manager as rm, spectating
 from app.game.minesweeper import game_to_sync as mine_game_to_sync
 from app.game.reversi import game_to_sync as reversi_game_to_sync
 from app.game.battleship import game_to_sync as bs_game_to_sync
@@ -1021,6 +1021,7 @@ async def kick_user(user_id: int, reason: str):
 
     关闭码 4001 = 未授权：客户端 `RoomSocket` 见到它不再重连。断开后照常走
     `ws_room` 的掉线流程（对局中的会起判负计时），和他自己掉线一样处理。"""
+    await spectating.kick_user(user_id, reason)
     for code, conns in list(_connections.items()):
         ws = conns.get(user_id)
         if ws is None:
