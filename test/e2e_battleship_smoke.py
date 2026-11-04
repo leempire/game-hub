@@ -11,6 +11,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
+from e2e_room_helpers import remember_guides
+
 BASE = 'http://localhost:50540'
 PWD = 'test123456'
 TS = int(time.time())
@@ -49,6 +51,7 @@ def register(page, username):
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
     page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
+    remember_guides(page)
 
 
 def main():

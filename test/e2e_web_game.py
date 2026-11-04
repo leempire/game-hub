@@ -36,27 +36,22 @@ def register(page, username):
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
     page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
-    ok(f'{username} 注册并自动登录，底部4Tab可见')
+    ok(f'{username} 注册并自动登录，游戏主页可见')
 
 
 def square_cells(page):
-    """返回棋盘 225 个交叉点的 bounding box，按 (y,x) 排序。
-    Web 上 TouchableOpacity 渲染为 div[tabindex]；棋盘格尺寸一致，用尺寸聚类过滤其他按钮。"""
-    btns = page.locator('div[tabindex]')
-    squares = []
-    for i in range(btns.count()):
-        try:
-            b = btns.nth(i).bounding_box()
-        except Exception:
-            continue
-        if b and abs(b['width'] - b['height']) < 2 and 8 < b['width'] < 80:
-            squares.append((round(b['y'], 1), round(b['x'], 1), round(b['width'])))
-    if not squares:
+    """Locate actual board cells; toolbar buttons and layout shifts are irrelevant."""
+    cells = page.locator('[data-testid^="gomoku-cell-"]')
+    if cells.count() != 225:
         return []
-    from collections import Counter
-    size, _ = Counter(s[2] for s in squares).most_common(1)[0]
-    cells = sorted(s for s in squares if s[2] == size)
-    return cells
+    result = []
+    for y in range(15):
+        for x in range(15):
+            box = page.locator(f'[data-testid="gomoku-cell-{x}-{y}"]').bounding_box()
+            if box is None:
+                return []
+            result.append((box['y'], box['x'], box['width']))
+    return result
 
 
 def click_cell(page, cells, x, y, confirm=True):
@@ -65,7 +60,11 @@ def click_cell(page, cells, x, y, confirm=True):
     落子是**二次确认**的：第一下只放半透明预览子，再点同一位置才真的落子。
     confirm=False 用于「只想放预览、不落子」的断言（比如检查预览子出现）。
     """
-    top, left, w = cells[y * 15 + x]
+    target = page.locator(f'[data-testid="gomoku-cell-{x}-{y}"]')
+    target.scroll_into_view_if_needed()
+    page.wait_for_timeout(200)
+    box = target.bounding_box()
+    top, left, w = box['y'], box['x'], box['width']
     page.mouse.click(left + w / 2, top + w / 2)
     page.wait_for_timeout(350)
     if confirm:
@@ -117,6 +116,8 @@ def main():
         pb.get_by_placeholder('输入6位房间号').fill(code)
         pb.get_by_text('加入', exact=True).last.click()
         pb.get_by_text('房间号', exact=True).wait_for(timeout=15000)
+        # 加入弹窗本身也有「房间号」标签；等待真实成员出现才算入房完成。
+        pb.get_by_text(UA, exact=True).wait_for(timeout=15000)
         assert UA in pb.locator('body').inner_text(), 'B 的房间页未显示 A'
         ok('B 输入房间号加入成功，双方互见')
 
@@ -153,7 +154,7 @@ def main():
         mark = pa.locator('[data-testid="gomoku-last-mark"]')
         assert mark.count() == 1, '终局后应恰好有一个最近一步标记'
         mb = mark.first.bounding_box()
-        cell77 = cells_a[7 * 15 + 7]
+        cell77 = square_cells(pa)[7 * 15 + 7]
         assert abs(mb['x'] + mb['width'] / 2 - (cell77[1] + cell77[2] / 2)) < 4, \
             '最近一步标记没落在最后一手 (7,7) 上'
         assert '黑棋胜' in pa.locator('body').inner_text(), 'A 未看到黑棋胜'

@@ -11,6 +11,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
+from e2e_room_helpers import assert_bots_ready
+
 BASE = 'http://localhost:50540'
 PWD = 'test123456'
 TS = int(time.time())
@@ -72,7 +74,7 @@ def main():
 
         # 验证人机自动准备
         body = pa.locator('body').inner_text()
-        assert '已准备' in body, '人机未自动准备'
+        assert_bots_ready(pa, code)
         ok('人机自动准备')
 
         # 开始游戏

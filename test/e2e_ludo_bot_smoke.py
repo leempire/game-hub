@@ -14,6 +14,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
+from e2e_room_helpers import assert_bots_ready
+
 BASE = 'http://localhost:50540'
 PWD = 'test123456'
 TS = int(time.time())
@@ -96,7 +98,7 @@ def main():
         pa.wait_for_timeout(1000)
         text = body(pa)
         assert '人机' in text, '未看到人机徽标'
-        assert '已准备' in text, '人机未自动准备'
+        assert_bots_ready(pa, code)
         ok('添加人机成功，人机自动准备')
 
         pa.get_by_text('开始游戏', exact=True).click()
