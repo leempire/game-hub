@@ -179,6 +179,8 @@ export interface Room {
   status: 'waiting' | 'playing';
   has_password: boolean;
   max_players: number;
+  challenge?: { date: string; first_reveal?: { x: number; y: number } };
+  practice?: boolean;
   players: RoomPlayer[];
   /**
    * **本房间可调的全部设置**（v1.15）。没有可调项的游戏（五子棋等）不下发这个键。

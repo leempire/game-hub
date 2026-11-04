@@ -346,6 +346,10 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           </View>
         </TouchableOpacity>
 
+        {room.challenge && <View style={styles.finishedBanner}>
+          <Text style={styles.finishedBannerText}>每日挑战 · {room.challenge.date}（UTC） · 固定单人房规
+            {room.challenge.first_reveal ? ' · 首次请翻开正中央格子' : ''}</Text>
+        </View>}
         {/* 上一局已结束提示：按已打完的局数判断，不再依赖第三种房间状态 */}
         {(room.round ?? 0) > 0 && (
           <View style={styles.finishedBanner}>
@@ -494,7 +498,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
       <RoomSettingsSheet
         visible={settingsOpen}
         items={settings}
-        editable={isHost && isLobbyStatus}
+        editable={isHost && isLobbyStatus && !room.challenge}
         onClose={() => setSettingsOpen(false)}
         onPick={(key, value) => socketRef.current?.roomSetting(key, value)}
       />

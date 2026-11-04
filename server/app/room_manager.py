@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from app import persistence
 from app import room_settings
+from app.competition_rules import challenge_seed, challenge_info
 from app.game import spider, uttt, uttt_ai
 from app.game import stasis as stasis_engine
 from app.game import stasis_ai
@@ -399,8 +400,9 @@ def get_all_rooms() -> list[dict]:
     """
     rooms = [
         r for r in _rooms.values()
-        if r["status"] == "playing"
-        or (r["status"] == "waiting" and _has_human_online(r))
+        if not r.get("challenge_date") and (
+            r["status"] == "playing"
+            or (r["status"] == "waiting" and _has_human_online(r)))
     ]
     rooms.sort(key=lambda r: r["created_at"], reverse=True)
     return rooms
@@ -534,6 +536,8 @@ def join_room(code: str, user: dict, password: str | None) -> dict:
                 room["host_id"] = user["id"]
             _touch_activity(room)
             return room
+    if room.get("challenge_date"):
+        raise ValueError("每日挑战为个人牌局，不能加入")
     if room["status"] == "playing":
         raise ValueError("游戏已开始")
     if room["password"] is not None and room["password"] != password:
@@ -991,7 +995,9 @@ def _start_minesweeper(room: dict) -> dict:
     """
     diff = room.get("difficulty", "intermediate")
     daily = bool(room.get("mine_daily"))
-    seed = int(datetime.now(timezone.utc).strftime("%Y%m%d")) if daily else None
+    seed = (challenge_seed("minesweeper", room["challenge_date"])
+            if room.get("challenge_date") else
+            int(datetime.now(timezone.utc).strftime("%Y%m%d")) if daily else None)
     num_players = len(room["players"])
     game_state = mine_create_game(diff, num_players, seed=seed, daily=daily)
     room["status"] = "playing"
@@ -1180,7 +1186,8 @@ def _start_tetris(room: dict) -> dict | None:
     players = room["players"]
     if not 1 <= len(players) <= 4:
         return None
-    seed = random.randint(0, 2**31 - 1)
+    seed = (challenge_seed("tetris", room["challenge_date"])
+            if room.get("challenge_date") else random.randint(0, 2**31 - 1))
     colors = ["blue", "red", "green", "yellow"]
     player_ids = [p["id"] for p in players]
     # 所有人同一个 seed → 方块序列完全一致（公平，与 2048 同种子出块同理）。
@@ -1213,7 +1220,8 @@ def _start_2048(room: dict) -> dict | None:
     players = room["players"]
     if not 1 <= len(players) <= 4:
         return None
-    seed = random.randint(0, 2**31 - 1)
+    seed = (challenge_seed("2048", room["challenge_date"])
+            if room.get("challenge_date") else random.randint(0, 2**31 - 1))
     colors = ["blue", "red", "green", "yellow"]
     gs = {
         "boards": {p["id"]: g2048_create_board() for p in players},
@@ -1303,6 +1311,8 @@ def set_room_setting(code: str, user_id: int, key: str, value) -> dict:
         raise ValueError("只有房主能改玩法设置")
     if room["status"] != "waiting":
         raise ValueError("对局已经开始，改不了玩法设置了")
+    if room.get("challenge_date"):
+        raise ValueError("每日挑战的玩法固定，不能修改")
     spec = room_settings.spec_for(room["game"], key)
     if spec is None:
         raise ValueError(f"这个房间没有「{key}」这项设置")
@@ -1771,7 +1781,7 @@ def _game2048_make_move(code: str, user_id: int, direction: str) -> dict:
     if not moved:
         # silent：往「走不动」的方向滑/点是 2048 的正常操作，不该弹错误提示
         return {"ok": False, "silent": True, "error": "无效移动"}
-    if len(gs["boards"]) == 1:
+    if len(gs["boards"]) == 1 and not room.get("challenge_date"):
         # 撤销栈只在单人局维护：多人局是「同种子竞速」，撤销会破坏可比性。
         # 只回滚盘面/分数/步数，**不回滚 RNG**——撤销后重新走子会拿到不同的新块，
         # 这是可接受的（单人局没有跨玩家公平性问题），也省下每步 625 个随机数的落盘。
@@ -1828,6 +1838,8 @@ def _game2048_undo(code: str, user_id: int) -> dict:
     room = _rooms.get(code)
     if not room or room["status"] != "playing" or room["game"] != "2048":
         return {"ok": False, "error": "游戏未在进行中"}
+    if room.get("challenge_date"):
+        return {"ok": False, "error": "每日挑战不支持撤销"}
     gs = room["game_state"]
     pid = user_id
     if pid not in gs["boards"]:
@@ -2718,6 +2730,9 @@ def mine_reveal_action(code: str, user_id: int, x: int, y: int) -> dict:
     if seat is None:
         return {"ok": False, "error": "你不是游戏玩家"}
     gs = room["game_state"]
+    first = (challenge_info(room) or {}).get("first_reveal")
+    if first and not gs.get("started") and (x, y) != (first["x"], first["y"]):
+        return {"ok": False, "error": "每日挑战请先翻开中央标记格"}
     result = mine_reveal(gs, x, y, seat)
     if result["ok"]:
         _mine_touch_time(gs, seat)
@@ -2767,6 +2782,8 @@ def mine_flag_action(code: str, user_id: int, x: int, y: int) -> dict:
     if seat is None:
         return {"ok": False, "error": "你不是游戏玩家"}
     gs = room["game_state"]
+    if room.get("challenge_date") and not gs.get("started"):
+        return {"ok": False, "error": "每日挑战请先翻开中央标记格"}
     result = mine_flag(gs, x, y, seat)
     if result.get("ok"):
         _touch_activity(room)
@@ -3425,6 +3442,10 @@ def room_to_dict(room: dict) -> dict:
     settings = room_settings.items_for(room["game"], room)
     if settings:
         result["settings"] = settings
+    if room.get("challenge_date"):
+        result["challenge"] = challenge_info(room)
+    if room.get("practice"):
+        result["practice"] = True
     return result
 
 

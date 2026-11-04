@@ -94,3 +94,13 @@ export function takePendingRoute(): Promise<PendingRoute | null> {
   consumed = true;
   return captured;
 }
+
+
+/** A room's startup link is already fulfilled once its game is on top. */
+export function destinationAlreadyOpen(target: PendingRoute,
+  current: { name?: string; params?: Record<string, string> } | undefined): boolean {
+  if (!current || current.params?.code !== target.params.code) return false;
+  if (current.name === target.screen) return true;
+  return target.screen === 'Room' && !!current.name && current.name !== 'Watch'
+    && Object.values(ROUTE_BY_PATH).includes(current.name);
+}

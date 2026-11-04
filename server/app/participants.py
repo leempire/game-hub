@@ -122,7 +122,9 @@ def write_participants(conn, record_id: int, players: list, results: list,
         if not isinstance(player, dict):
             continue
         uid = _legacy_identity(conn, player, room_code, seat)
-        bot = is_bot(player) or player.get("username") == f"bot_{room_code}"
+        supplied_uid = player.get("user_id", player.get("id"))
+        has_identity = isinstance(supplied_uid, int) and not isinstance(supplied_uid, bool)
+        bot = is_bot(player) or (not has_identity and player.get("username") == f"bot_{room_code}")
         has_bots = has_bots or bot
         if uid is None:
             continue  # Deleted/unknown historical accounts must not block migration.

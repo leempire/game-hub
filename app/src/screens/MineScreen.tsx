@@ -628,6 +628,8 @@ export default function MineScreen({ code, onLeave }: Props) {
     const cell = grid[y][x];
     const isRevealed = cell.value !== null;
     const isMine = cell.value === -1;
+    const first = room?.challenge?.first_reveal;
+    const firstTarget = !game?.started && first?.x === x && first?.y === y;
     const bgColor = isRevealed
       ? (isMine ? MINE_CELL : gameSurfaces.mineRevealed)
       : colors.card;
@@ -647,6 +649,7 @@ export default function MineScreen({ code, onLeave }: Props) {
             borderRadius: 2,
           },
           !isRevealed && styles.cellUnrevealed,
+          firstTarget && { borderWidth: 3, borderColor: colors.primary },
         ]}
         // 已翻开的数字格要保持可点（chord），所以只按淘汰禁用
         disabled={isEliminated}
@@ -660,7 +663,7 @@ export default function MineScreen({ code, onLeave }: Props) {
           : undefined}
         activeOpacity={isRevealed ? 1 : 0.7}
       >
-        {renderCellContent(cell, isRevealed)}
+        {firstTarget ? <Text style={{ color: colors.primary, fontWeight: '700' }}>首翻</Text> : renderCellContent(cell, isRevealed)}
       </TouchableOpacity>
     );
   };
@@ -731,6 +734,9 @@ export default function MineScreen({ code, onLeave }: Props) {
           </TouchableOpacity>
         )}
       </View>}>
+      {room?.challenge && <Text style={{ color: colors.textSecondary, textAlign: 'center', padding: spacing.xs }}>
+        每日挑战 · {room.challenge.date}（UTC）{!game?.started ? ' · 请先翻开标有「首翻」的中央格' : ''}
+      </Text>}
       {/* Top info bar */}
       <View style={styles.topBar}>
         <View style={styles.topLeft}>

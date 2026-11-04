@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { AppModal, FormInput } from '../ui';
 import { Ionicons } from '@expo/vector-icons';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth';
 import { createRoom, joinRoom, fetchMyStats, MyStats } from '../api';
 import { colors, spacing, radius, fontSize } from '../theme';
@@ -22,6 +22,7 @@ interface Props {
 }
 
 export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props) {
+  const navigation = useNavigation<any>();
   const { token } = useAuth();
   const isFocused = useIsFocused();
   // 当前打开的是哪个游戏的「创建 / 加入」弹窗（null = 关着）。
@@ -194,6 +195,11 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
           onJoin={() => setShowJoinModal(true)}
           onBrowse={onNavigateToRooms}
         />
+        <TouchableOpacity style={styles.competitionLink} onPress={() => navigation.navigate('Competition')} accessibilityRole="button">
+          <Ionicons name="podium-outline" size={20} color={colors.primary} />
+          <Text style={styles.competitionText}>每日挑战 · 排行榜</Text>
+          <Text style={styles.competitionText}>›</Text>
+        </TouchableOpacity>
         <RecentGames
           games={recent}
           onPick={(key) => {
@@ -329,6 +335,10 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
 }
 
 const styles = StyleSheet.create({
+  competitionLink: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingHorizontal: spacing.md, marginBottom: spacing.sm, backgroundColor: colors.card,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.borderStrong },
+  competitionText: { color: colors.primary, fontSize: fontSize.md, fontWeight: '600' },
   container: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: spacing.md, paddingBottom: spacing.xxl },
   category: { marginBottom: spacing.md },

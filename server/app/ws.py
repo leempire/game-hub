@@ -353,6 +353,8 @@ async def _handle_start(code: str, user_id: int):
     if room["game"] == "minesweeper":
         players_info = rm._get_players_info(room)
         sync_game = mine_game_to_sync(gs, players_info)
+        if room.get("challenge_date"):
+            sync_game["challenge"] = rm.challenge_info(room)
         await _broadcast(code, {
             "type": "game_start",
             "game": sync_game,
@@ -1051,6 +1053,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = lzq.game_to_sync(room["game_state"], user_id)
         else:
             game_info = _game_state_for_sync(room["game_state"], user_id)
+    if game_info is not None and room.get("challenge_date"):
+        game_info["challenge"] = rm.challenge_info(room)
     # in_game：这个人在本局里还算不算「在局玩家」。房间页只对在局玩家自动跳对局页——
     # 扫雷/飞行棋/2048 的玩家出局后仍留在房间里，不加这个判断他们一点「退出」
     # 就会被 sync 弹回对局页（点了没反应、页面闪一下还在原处）。
@@ -1443,7 +1447,8 @@ async def _broadcast_tetris_start(code: str, room: dict, gs: dict):
         if ws:
             await _send_ws(ws, {
                 "type": "game_start",
-                "game": tetris_game_to_sync(gs, pid),
+                "game": {**tetris_game_to_sync(gs, pid),
+                         **({"challenge": rm.challenge_info(room)} if room.get("challenge_date") else {})},
             })
 
 
@@ -1454,6 +1459,8 @@ async def _broadcast_2048_start(code: str, room: dict, gs: dict):
         ws = conns.get(pid)
         if ws:
             sync_game = g2048_game_to_sync(gs, pid)
+            if room.get("challenge_date"):
+                sync_game["challenge"] = rm.challenge_info(room)
             await _send_ws(ws, {
                 "type": "game_start",
                 "game": sync_game,

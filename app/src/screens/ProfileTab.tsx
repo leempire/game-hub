@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { AppModal, FormInput } from '../ui';
 import { Ionicons } from '@expo/vector-icons';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth';
 import { updateNickname, changePassword, fetchMyStats, MyStats } from '../api';
 import { colors, spacing, radius, fontSize, shadow } from '../theme';
@@ -21,6 +21,7 @@ interface Props {
 }
 
 export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: Props) {
+  const navigation = useNavigation<any>();
   const { token, user, logout, updateUser } = useAuth();
   const [showNickname, setShowNickname] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -205,6 +206,10 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
 
       {/* Actions */}
       <View style={styles.actions}>
+        <TouchableOpacity style={styles.actionItem} onPress={() => navigation.navigate('Competition')}>
+          <Ionicons name="podium-outline" size={20} color={colors.text} style={styles.actionIcon} />
+          <Text style={styles.actionText}>每日挑战与排行榜</Text><Text style={styles.actionArrow}>›</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.actionItem} onPress={onNavigateToHistory}>
           <Ionicons name="time-outline" size={20} color={colors.text} style={styles.actionIcon} />
           <Text style={styles.actionText}>历史战绩</Text>

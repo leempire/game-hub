@@ -30,6 +30,8 @@ import StasisScreen from './screens/StasisScreen';
 import ProfileTab from './screens/ProfileTab';
 import AdminScreen from './screens/AdminScreen';
 import HistoryScreen from './screens/HistoryScreen';
+import CompetitionScreen from './screens/CompetitionScreen';
+import SharedReplayScreen from './screens/SharedReplayScreen';
 // 对局页标题也取目录表（`games.tsx`）—— 标题写第二遍就是「改名漏一处」的来源
 import { gameTitle } from './games';
 import { colors } from './theme';
@@ -56,6 +58,8 @@ export type RootStackParamList = {
   Stasis: { code: string };
   Admin: undefined;
   History: undefined;
+  Competition: undefined;
+  SharedReplay: { token: string };
 };
 
 export type TabParamList = {
@@ -529,6 +533,8 @@ export default function AppNavigation() {
             component={AdminScreen}
             options={{ headerShown: true, title: '用户管理', headerStyle: { backgroundColor: colors.card } }}
           />
+          <Stack.Screen name="Competition" component={CompetitionScreen}
+            options={{ headerShown: true, title: '挑战与排行榜', headerStyle: { backgroundColor: colors.card } }} />
           <Stack.Screen
             name="History"
             component={HistoryScreen}
@@ -536,6 +542,8 @@ export default function AppNavigation() {
           />
         </>
       )}
+      <Stack.Screen name="SharedReplay" component={SharedReplayScreen}
+        options={{ headerShown: true, title: '分享回放', headerStyle: { backgroundColor: colors.card } }} />
     </Stack.Navigator>
   );
 }

@@ -5,6 +5,7 @@ import {
   ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import RecordShareActions from '../RecordShareActions';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
@@ -173,6 +174,7 @@ export default function HistoryScreen() {
                   ))}
                 </View>
                 <BoardSnapshot rec={rec} />
+                <RecordShareActions token={token} recordId={rec.id} />
               </View>
             )}
           </TouchableOpacity>
@@ -197,7 +199,7 @@ export default function HistoryScreen() {
 }
 
 // Inline board snapshot renderer
-function BoardSnapshot({ rec }: { rec: GameRecord }) {
+export function BoardSnapshot({ rec }: { rec: GameRecord }) {
   const { width } = useWindowDimensions();
   const snap = rec.snapshot;
   // 棋类逐步回放：总手数来自服务端快照里的 moves（老战绩没有 → 0，不显示控制条）

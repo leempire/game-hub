@@ -539,12 +539,13 @@ export default function Game2048Screen({ code, onLeave }: Props) {
       notify('提示', '多人对局不支持撤销');
       return;
     }
+    if (room?.challenge) { notify('提示', '每日挑战不支持撤销'); return; }
     if (!game.undo_available) {
       notify('提示', '还没有可以撤销的步数');
       return;
     }
     socketRef.current?.undo2048();
-  }, [game]);
+  }, [game, room?.challenge]);
 
   const sendMove = useCallback((direction: string) => {
     if (!game || game.winner || game.game_over) return;
@@ -705,7 +706,7 @@ export default function Game2048Screen({ code, onLeave }: Props) {
   return (
     <GameShell game="2048" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.container} actions={<View style={styles.bottomBar}>
         {/* 撤销只在单人局出现：多人局由服务端拒绝，客户端也不展示入口 */}
-        {game && !game.winner && game.player_count === 1 && (
+        {game && !game.winner && game.player_count === 1 && !room?.challenge && (
           <TouchableOpacity style={styles.undoBtn} onPress={undoMove} testID="g2048-undo">
             <Ionicons name="arrow-undo-outline" size={18} color={colors.text} />
             <Text style={styles.undoBtnText}>撤销</Text>

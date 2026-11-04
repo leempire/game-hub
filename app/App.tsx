@@ -6,7 +6,7 @@ import { AuthProvider, useAuth } from './src/auth';
 import AppNavigation, { setNavigationRef } from './src/navigation';
 import { ToastHost } from './src/toast';
 import { initBackGuard } from './src/backGuard';
-import { takePendingRoute } from './src/deepLink';
+import { takePendingRoute, destinationAlreadyOpen } from './src/deepLink';
 
 // Web 端浏览器地址栏与路由同步（返回键语义依赖 history）。
 // **每个 Stack.Screen 都要有 path**：漏一个，刷新 / 分享链接就落回主页
@@ -34,6 +34,8 @@ const LINKING = {
       Uno: 'uno/:code',
       Stasis: 'stasis/:code',
       History: 'history',
+      Competition: 'competition',
+      SharedReplay: 'replay/:token',
       Admin: 'admin',
     },
   },
@@ -59,7 +61,7 @@ function DeepLinkResume({ navRef }: { navRef: React.MutableRefObject<any> }) {
           return;
         }
         const cur = nav.getCurrentRoute();
-        if (cur?.name === target.screen && cur?.params?.code === target.params.code) return;
+        if (destinationAlreadyOpen(target, cur)) return;
         nav.navigate(target.screen, target.params);
       };
       tryNavigate();

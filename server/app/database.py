@@ -8,7 +8,7 @@ import threading
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 
-from app import participants
+from app import participants, competition_records
 
 
 _db_path: str = "data/gamehub.db"
@@ -124,6 +124,7 @@ def _create_tables(conn: sqlite3.Connection):
         )
     """)
     participants.create_schema(conn)
+    competition_records.create_schema(conn)
 
 
 def seed_admin(username: str, password_hash: str, salt: str):
@@ -193,6 +194,9 @@ def save_game_record(room: dict):
     snapshot = _build_snapshot(room)
     started_at = room.get("game_started_at", room.get("created_at", _now_iso()))
     ended_at = _now_iso()
+    # The final room snapshot can be persisted before this callback. Derive
+    # the key from the already persisted round start, rather than relying on
+    # a newly injected field surviving a crash immediately after the INSERT.
     round_start = room.get("game_started_at")
     stable_key = (hashlib.sha256(json.dumps(
         [room["code"], room["game"], round_start], separators=(",", ":"),
@@ -225,6 +229,7 @@ def save_game_record(room: dict):
             )
             conn.execute("""UPDATE game_records SET has_bots = ?, participants_indexed = 1
                             WHERE id = ?""", (int(has_bots), cursor.lastrowid))
+            competition_records.enrich_record(conn, cursor.lastrowid, room)
         conn.commit()
     finally:
         conn.close()
