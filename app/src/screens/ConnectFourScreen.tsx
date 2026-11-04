@@ -28,7 +28,8 @@ import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 
 // --- Types ---
 
@@ -60,7 +61,6 @@ const BOARD_MAX = 460;
 const DROP_MS = 160;                 // 落子动画：落点从顶上滑到落点行
 const WIN_LEN = 4;
 
-const COLOR_LABELS: Record<string, string> = { black: '黑方', white: '白方' };
 const WINNER_LABELS: Record<string, string> = {
   black: '黑方胜', white: '白方胜', draw: '和棋',
 };
@@ -140,6 +140,7 @@ function Disc({
 export default function ConnectFourScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<Connect4State | null>(null);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
@@ -167,7 +168,7 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
   const rows = game?.rows ?? 6;
   const cols = game?.cols ?? 7;
   const availW = winWidth - spacing.md * 2;
-  const availH = winHeight - 250;
+  const availH = winHeight - 320;
   const cell = Math.max(26, Math.min(
     availW / (cols + 0.7), Math.max(availH, 240) / (rows + 0.7), BOARD_MAX / (cols + 0.7),
   ));
@@ -374,7 +375,7 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
     ws.on('player_reconnected', handlePlayerReconnected);
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave, playDrop]);
 
@@ -407,8 +408,8 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   // --- 渲染 ---
   if (!game) {
@@ -547,21 +548,20 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
   }
 
   return (
-    <View style={styles.container}>
+    <GameShell game="connect4" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={turnText} style={styles.container} actions={<View style={styles.bottomBar}>
+        {!game.winner && (
+          <TouchableOpacity style={styles.surrenderBtn} onPress={() => setConfirm('surrender')}>
+            <Ionicons name="flag-outline" size={16} color={colors.white} />
+            <Text style={styles.surrenderBtnText}> 认输</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
+          <Ionicons name="exit-outline" size={16} color={colors.textSecondary} />
+          <Text style={styles.leaveBtnText}> 退出</Text>
+        </TouchableOpacity>
+      </View>}>
       {/* 顶栏：我方颜色 / 回合提示 / 帮助 / 房号 */}
-      <View style={styles.topBar}>
-        <View style={styles.topLeft}>
-          <View style={[styles.colorDot, {
-            backgroundColor: myColor === 'black' ? connect4Black : connect4White,
-            borderWidth: 1.5,
-            borderColor: connect4DiscEdge,
-          }]} />
-          <Text style={styles.myColor}>{COLOR_LABELS[myColor] || ''}</Text>
-          <Text style={[styles.turnHint, isMyTurn && styles.turnActive]}>{turnText}</Text>
-        </View>
-        <GameHelpButton game="connect4" size={24} />
-        <Text style={styles.roomCode}>#{code}</Text>
-      </View>
+
 
       {opponentDisconnected && (
         <View style={styles.banner}>
@@ -605,18 +605,7 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
       )}
 
       {/* 操作栏 */}
-      <View style={styles.bottomBar}>
-        {!game.winner && (
-          <TouchableOpacity style={styles.surrenderBtn} onPress={() => setConfirm('surrender')}>
-            <Ionicons name="flag-outline" size={16} color={colors.white} />
-            <Text style={styles.surrenderBtnText}> 认输</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
-          <Ionicons name="exit-outline" size={16} color={colors.textSecondary} />
-          <Text style={styles.leaveBtnText}> 退出</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* 认输 / 退出确认 */}
       <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
@@ -654,27 +643,11 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* 结算 */}
-      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>对局结束</Text>
-            <Text style={styles.modalResult}>{WINNER_LABELS[game.winner || ''] || '—'}</Text>
-            {!!game.reason && (
-              <Text style={styles.modalReason}>{REASON_LABELS[game.reason] || game.reason}</Text>
-            )}
-            <Text style={styles.modalReason}>
-              {boardFull ? '棋盘已满，共 42 步' : `共 ${game.moves.length} 步`}
-            </Text>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnPrimary]}
-              onPress={handleBackToRoom}
-            >
-              <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      <GameResult visible={showGameOver} result={WINNER_LABELS[game?.winner || ''] || '对局结束'} reason={game?.reason ? REASON_LABELS[game.reason] || game.reason : ''} players={shellPlayers(room, user?.id, game)}
+        onBackToRoom={handleBackToRoom} onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+        <Text style={styles.modalReason}>共 {game?.moves.length ?? 0} 步</Text>
+      </GameResult>
+    </GameShell>
   );
 }
 
@@ -723,7 +696,7 @@ const styles = StyleSheet.create({
   },
   hintChipWin: { backgroundColor: connect4WinHint },
   hintChipBlock: { backgroundColor: connect4BlockHint },
-  hintChipText: { fontSize: 11, fontWeight: '800', color: '#111827' },
+  hintChipText: { fontSize: 11, fontWeight: '800', color: colors.text },
 
   legend: {
     flexDirection: 'row', justifyContent: 'center', gap: spacing.md,
@@ -753,7 +726,7 @@ const styles = StyleSheet.create({
   leaveBtnText: { color: colors.textSecondary, fontSize: fontSize.md, fontWeight: '600' },
 
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    flex: 1, backgroundColor: colors.overlay,
     alignItems: 'center', justifyContent: 'center', padding: spacing.lg,
   },
   modalCard: {

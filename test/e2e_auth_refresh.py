@@ -41,7 +41,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
 
 
 def set_role(username, role):
@@ -106,7 +106,7 @@ def main():
         page.get_by_placeholder('3-20位字母数字下划线').fill(UA)
         page.get_by_placeholder('请输入密码').fill(NEW_PWD)
         page.get_by_text('登 录', exact=True).click()
-        page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+        page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
         ok('用新密码重新登录成功')
 
         # 新会话仍是管理员（角色没被改密码流程弄丢）

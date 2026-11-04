@@ -48,7 +48,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
 
 
 def main():
@@ -129,8 +129,12 @@ def main():
         ok('双方完成布阵')
 
         # 等待进入战斗阶段
-        pa.get_by_text('攻击面板', exact=True).wait_for(timeout=15000)
-        pb.get_by_text('攻击面板', exact=True).wait_for(timeout=15000)
+        try:
+            pa.get_by_text('攻击面板', exact=True).wait_for(timeout=15000)
+            pb.get_by_text('攻击面板', exact=True).wait_for(timeout=15000)
+        except Exception as error:
+            pa.screenshot(path='/tmp/gamehub-battleship-transition.png')
+            raise AssertionError(f'布阵未进入战斗：{errors}; 页面：{pa.locator("body").inner_text()[:1500]}') from error
         ok('双方进入战斗阶段，看到攻击面板')
 
         # 验证回合提示

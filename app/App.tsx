@@ -16,7 +16,7 @@ const LINKING = {
   config: {
     screens: {
       Auth: 'auth',
-      MainTabs: { screens: { Games: '', Rooms: 'rooms', Social: 'social', Profile: 'profile' } },
+      MainTabs: { screens: { Games: '', Rooms: 'rooms', Profile: 'profile' } },
       Room: 'room/:code',
       Spider: 'spider/:code',
       Gomoku: 'gomoku/:code',

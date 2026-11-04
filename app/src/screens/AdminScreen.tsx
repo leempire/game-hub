@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../auth';
 import { adminListUsers, adminSetBanned, adminSetRole, User } from '../api';
-import { colors, spacing, radius, fontSize } from '../theme';
+import { colors, spacing, radius, fontSize, shadow } from '../theme';
 import { notify } from '../utils';
 
 const PAGE_SIZE = 20;
@@ -217,11 +217,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     marginBottom: spacing.sm,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
+    ...shadow.card,
   },
   userRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   userInfo: { flex: 1 },

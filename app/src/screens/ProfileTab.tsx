@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Modal, Linking, KeyboardAvoidingView, Platform,
+  Linking,
 } from 'react-native';
+import { AppModal, FormInput } from '../ui';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { useAuth } from '../auth';
 import { updateNickname, changePassword, fetchMyStats, MyStats } from '../api';
-import { colors, spacing, radius, fontSize } from '../theme';
+import { colors, spacing, radius, fontSize, shadow } from '../theme';
 import { notify, formatDate } from '../utils';
 import { isNative, isMobileWeb } from '../platform';
 import { checkLatestVersion, downloadAndInstallApk, getCurrentVersion, VersionInfo } from '../appUpdate';
-import { useModalBackGuard } from '../backGuard';
 import { ProfileStatsCard } from '../profileStats';
 import { API_BASE } from '../config';
 
@@ -38,10 +38,6 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
   const [stats, setStats] = useState<MyStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const isFocused = useIsFocused();
-  useModalBackGuard(showNickname, () => { if (!submitting) setShowNickname(false); });
-  useModalBackGuard(showPassword, () => { if (!submitting) setShowPassword(false); });
-  useModalBackGuard(showLogout, () => setShowLogout(false));
-  useModalBackGuard(!!updateInfo, () => { if (!downloading) setUpdateInfo(null); });
   const autoCheckedRef = useRef(false);
 
   // 战绩卡：回到「我的」时刷新一次（打完一局回来就能看到新数字）
@@ -267,154 +263,123 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
       </View>
 
       {/* Nickname modal */}
-      <Modal visible={showNickname} transparent animationType="fade" onRequestClose={closeNickname}>
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <AppModal visible={showNickname} onClose={closeNickname}>
+        <Text style={styles.modalTitle}>修改昵称</Text>
+        <FormInput
+          style={styles.modalInput}
+          label="昵称" value={newNickname}
+          onChangeText={setNewNickname}
+          placeholder="输入新昵称（留空清除）"
+          maxLength={16}
+          placeholderTextColor={colors.textFaint}
+          returnKeyType="done"
+          onSubmitEditing={() => void handleNickname()}
+        />
+        {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
+        <TouchableOpacity
+          style={[styles.modalBtn, styles.modalBtnPrimary, submitting && styles.modalBtnDisabled]}
+          onPress={handleNickname}
+          disabled={submitting}
         >
-          <View style={styles.modalCard}>
-            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>修改昵称</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={newNickname}
-                onChangeText={setNewNickname}
-                placeholder="输入新昵称（留空清除）"
-                maxLength={16}
-                placeholderTextColor={colors.textFaint}
-                returnKeyType="done"
-                onSubmitEditing={() => void handleNickname()}
-              />
-              {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnPrimary, submitting && styles.modalBtnDisabled]}
-                onPress={handleNickname}
-                disabled={submitting}
-              >
-                <Text style={styles.modalBtnPrimaryText}>{submitting ? '保存中...' : '保存'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnSecondary, submitting && styles.modalBtnDisabled]}
-                onPress={closeNickname}
-                disabled={submitting}
-              >
-                <Text style={styles.modalBtnSecondaryText}>取消</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+          <Text style={styles.modalBtnPrimaryText}>{submitting ? '保存中...' : '保存'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.modalBtn, styles.modalBtnSecondary, submitting && styles.modalBtnDisabled]}
+          onPress={closeNickname}
+          disabled={submitting}
+        >
+          <Text style={styles.modalBtnSecondaryText}>取消</Text>
+        </TouchableOpacity>
+      </AppModal>
 
       {/* Password modal */}
-      <Modal visible={showPassword} transparent animationType="fade" onRequestClose={closePassword}>
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <AppModal visible={showPassword} onClose={closePassword}>
+        <Text style={styles.modalTitle}>修改密码</Text>
+        <FormInput
+          style={styles.modalInput}
+          label="当前密码" value={oldPwd}
+          onChangeText={setOldPwd}
+          placeholder="当前密码"
+          placeholderTextColor={colors.textFaint}
+          secureTextEntry
+          autoComplete="current-password"
+          textContentType="password"
+        />
+        <FormInput
+          style={styles.modalInput}
+          label="新密码" value={newPwd}
+          onChangeText={setNewPwd}
+          placeholder="新密码（至少6位）"
+          maxLength={32}
+          placeholderTextColor={colors.textFaint}
+          secureTextEntry
+          autoComplete="new-password"
+          textContentType="newPassword"
+          returnKeyType="go"
+          onSubmitEditing={() => void handlePassword()}
+        />
+        {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
+        <TouchableOpacity
+          style={[styles.modalBtn, styles.modalBtnPrimary, submitting && styles.modalBtnDisabled]}
+          onPress={handlePassword}
+          disabled={submitting}
         >
-          <View style={styles.modalCard}>
-            <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalTitle}>修改密码</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={oldPwd}
-                onChangeText={setOldPwd}
-                placeholder="当前密码"
-                placeholderTextColor={colors.textFaint}
-                secureTextEntry
-                autoComplete="current-password"
-                textContentType="password"
-              />
-              <TextInput
-                style={styles.modalInput}
-                value={newPwd}
-                onChangeText={setNewPwd}
-                placeholder="新密码（至少6位）"
-                maxLength={32}
-                placeholderTextColor={colors.textFaint}
-                secureTextEntry
-                autoComplete="new-password"
-                textContentType="newPassword"
-                returnKeyType="go"
-                onSubmitEditing={() => void handlePassword()}
-              />
-              {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnPrimary, submitting && styles.modalBtnDisabled]}
-                onPress={handlePassword}
-                disabled={submitting}
-              >
-                <Text style={styles.modalBtnPrimaryText}>{submitting ? '修改中...' : '修改'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnSecondary, submitting && styles.modalBtnDisabled]}
-                onPress={closePassword}
-                disabled={submitting}
-              >
-                <Text style={styles.modalBtnSecondaryText}>取消</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+          <Text style={styles.modalBtnPrimaryText}>{submitting ? '修改中...' : '修改'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.modalBtn, styles.modalBtnSecondary, submitting && styles.modalBtnDisabled]}
+          onPress={closePassword}
+          disabled={submitting}
+        >
+          <Text style={styles.modalBtnSecondaryText}>取消</Text>
+        </TouchableOpacity>
+      </AppModal>
 
       {/* Update confirm modal */}
-      <Modal
-        visible={!!updateInfo}
-        transparent
-        animationType="fade"
-        onRequestClose={() => { if (!downloading) setUpdateInfo(null); }}
+      <AppModal visible={!!updateInfo} onClose={() => { if (!downloading) setUpdateInfo(null); }}>
+      <Text style={styles.modalTitle}>发现新版本</Text>
+      <Text style={styles.updateVersionText}>
+        v{updateInfo?.version_name}
+      </Text>
+      <Text style={styles.updateTip}>
+        当前版本 v{getCurrentVersion().versionName}，是否立即下载安装？
+      </Text>
+      {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
+      <TouchableOpacity
+        style={[styles.modalBtn, styles.modalBtnPrimary, downloading && styles.modalBtnDisabled]}
+        onPress={handleDownloadUpdate}
+        disabled={downloading}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>发现新版本</Text>
-            <Text style={styles.updateVersionText}>
-              v{updateInfo?.version_name}
-            </Text>
-            <Text style={styles.updateTip}>
-              当前版本 v{getCurrentVersion().versionName}，是否立即下载安装？
-            </Text>
-            {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnPrimary, downloading && styles.modalBtnDisabled]}
-              onPress={handleDownloadUpdate}
-              disabled={downloading}
-            >
-              <Text style={styles.modalBtnPrimaryText}>
-                {downloading ? '下载中...' : '立即下载'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnSecondary, downloading && styles.modalBtnDisabled]}
-              onPress={() => setUpdateInfo(null)}
-              disabled={downloading}
-            >
-              <Text style={styles.modalBtnSecondaryText}>稍后再说</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        <Text style={styles.modalBtnPrimaryText}>
+          {downloading ? '下载中...' : '立即下载'}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.modalBtn, styles.modalBtnSecondary, downloading && styles.modalBtnDisabled]}
+        onPress={() => setUpdateInfo(null)}
+        disabled={downloading}
+      >
+        <Text style={styles.modalBtnSecondaryText}>稍后再说</Text>
+      </TouchableOpacity>
+          </AppModal>
 
       {/* Logout confirm modal */}
-      <Modal visible={showLogout} transparent animationType="fade" onRequestClose={() => setShowLogout(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>退出登录</Text>
-            <Text style={styles.updateTip}>退出后需要重新输入密码才能继续游戏。</Text>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnDanger]}
-              onPress={handleLogout}
-            >
-              <Text style={styles.modalBtnPrimaryText}>退出登录</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnSecondary]}
-              onPress={() => setShowLogout(false)}
-            >
-              <Text style={styles.modalBtnSecondaryText}>取消</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <AppModal visible={showLogout} onClose={() => setShowLogout(false)}>
+      <Text style={styles.modalTitle}>退出登录</Text>
+      <Text style={styles.updateTip}>退出后需要重新输入密码才能继续游戏。</Text>
+      <TouchableOpacity
+        style={[styles.modalBtn, styles.modalBtnDanger]}
+        onPress={handleLogout}
+      >
+        <Text style={styles.modalBtnPrimaryText}>退出登录</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.modalBtn, styles.modalBtnSecondary]}
+        onPress={() => setShowLogout(false)}
+      >
+        <Text style={styles.modalBtnSecondaryText}>取消</Text>
+      </TouchableOpacity>
+          </AppModal>
     </ScrollView>
   );
 }
@@ -442,11 +407,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 400,
     marginBottom: spacing.lg,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+    ...shadow.card,
   },
   displayName: { fontSize: fontSize.xl, fontWeight: '800', color: colors.text },
   username: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
@@ -465,11 +426,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     overflow: 'hidden',
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+    ...shadow.card,
   },
   actionItem: {
     flexDirection: 'row',
@@ -484,14 +441,6 @@ const styles = StyleSheet.create({
   actionText: { flex: 1, fontSize: fontSize.md, color: colors.text, fontWeight: '500' },
   logoutText: { color: colors.danger },
   actionArrow: { fontSize: fontSize.xl, color: colors.textFaint },
-  // Modal
-  modalOverlay: {
-    flex: 1, backgroundColor: colors.overlay, justifyContent: 'center', alignItems: 'center', padding: spacing.md,
-  },
-  modalCard: {
-    width: '100%', maxWidth: 360, maxHeight: '90%',
-    backgroundColor: colors.card, borderRadius: radius.xl, padding: spacing.lg,
-  },
   modalTitle: {
     fontSize: fontSize.xl, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: spacing.md,
   },
@@ -504,7 +453,6 @@ const styles = StyleSheet.create({
   modalBtnPrimary: { backgroundColor: colors.primary },
   modalBtnDanger: { backgroundColor: colors.danger },
   modalBtnDisabled: { opacity: 0.5 },
-  modalScroll: { flexGrow: 0, flexShrink: 1 },
   modalError: {
     fontSize: fontSize.sm, color: colors.danger, textAlign: 'center',
     marginBottom: spacing.sm, lineHeight: 20,

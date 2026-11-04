@@ -6,7 +6,7 @@ import { gameTitle } from './games';
 import type { GameKey } from './games';
 import { GameHelpButton } from './help';
 import { AppModal } from './ui';
-import { colors, fontSize, radius, spacing } from './theme';
+import { colors, fontSize, radius, shadow, spacing } from './theme';
 
 export interface ShellPlayer {
   id: number;
@@ -33,16 +33,16 @@ export interface GameShellProps {
   compact?: boolean;
 }
 
-export function GamePlayers({ players = [] }: { players?: ShellPlayer[] }) {
+export function GamePlayers({ players = [], stacked = false }: { players?: ShellPlayer[]; stacked?: boolean }) {
   if (!players.length) return null;
   return <View style={styles.players} testID="game-players">
     {players.map(player => <View key={player.id} testID={`game-player-${player.id}`}
-      style={[styles.player, player.active && styles.playerActive]}>
+      style={[styles.player, stacked && styles.playerStacked, player.active && styles.playerActive]}>
       <View style={[styles.avatar, player.color ? { borderColor: player.color } : null]}>
         <Text style={styles.avatarText}>{player.name.slice(0, 1) || '?'}</Text>
       </View>
       <View style={styles.playerInfo}>
-        <Text numberOfLines={1} style={styles.playerName}>{player.name}{player.isMe ? '（我）' : ''}</Text>
+        <Text numberOfLines={stacked ? 2 : 1} style={styles.playerName}>{player.name}{player.isMe ? '（我）' : ''}</Text>
         <Text numberOfLines={1} style={styles.playerDetail}>
           {[player.identity, player.isBot ? '人机' : null, player.active ? '行动中' : null,
             player.connected === false && !player.isBot ? '离线' : null, player.detail].filter(Boolean).join(' · ')}
@@ -56,17 +56,19 @@ export default function GameShell({ game, code, connected, players, status, acti
   compact = false }: GameShellProps) {
   return <View style={[styles.shell, style]} testID={`game-shell-${game}`}>
     <View style={[styles.header, compact && styles.compact]}>
-      <Text numberOfLines={1} style={styles.title}>{gameTitle(game)}</Text>
+      <Text numberOfLines={1} style={styles.title}>{gameTitle(game)}{compact && players?.length
+        ? ` · ${players.map(player => player.name).join(' · ')}` : ''}</Text>
       <Text style={styles.code}>#{code}</Text>
       <Text accessibilityLiveRegion="polite" style={[styles.connection, !connected && styles.offline]}>
         {connected ? '已连接' : '重连中…'}
       </Text>
       <GameHelpButton game={game} size={28} />
     </View>
-    <GamePlayers players={players} />
+    {!compact && <GamePlayers players={players} />}
     {status != null && <View style={styles.status}>{typeof status === 'string'
       ? <Text style={styles.statusText}>{status}</Text> : status}</View>}
-    <View style={styles.content}>{children}</View>
+    <View style={[styles.content, style,
+      ['gomoku', 'xiangqi', 'reversi', 'luzhanqi', 'connect4'].includes(game) && styles.tabletop]}>{children}</View>
     {actions != null && <View style={styles.actions}>{actions}</View>}
   </View>;
 }
@@ -80,18 +82,19 @@ interface GameResultProps {
   children?: React.ReactNode;
   onBackToRoom: () => void;
   onViewHistory: () => void;
+  roomButtonTestID?: string;
 }
 
 /** One result layout for ranked, cooperative and two-player games; no automatic rematch. */
 export function GameResult({ visible, title = '对局结束', result, reason, players, children,
-  onBackToRoom, onViewHistory }: GameResultProps) {
+  onBackToRoom, onViewHistory, roomButtonTestID = 'game-result-room' }: GameResultProps) {
   return <AppModal visible={visible} onClose={onBackToRoom} testID="game-result">
     <Text accessibilityRole="header" style={styles.resultTitle}>{title}</Text>
     <Text style={styles.result}>{result}</Text>
     {!!reason && <Text style={styles.reason}>{reason}</Text>}
-    <GamePlayers players={players} />
+    <GamePlayers players={players} stacked />
     {children}
-    <TouchableOpacity accessibilityRole="button" testID="game-result-room"
+    <TouchableOpacity accessibilityRole="button" testID={roomButtonTestID}
       style={[styles.button, styles.primary]} onPress={onBackToRoom}>
       <Text style={styles.primaryText}>返回房间</Text>
     </TouchableOpacity>
@@ -106,28 +109,31 @@ export function GameResult({ visible, title = '对局结束', result, reason, pl
 const styles = StyleSheet.create({
   shell: { flex: 1, minHeight: 0, backgroundColor: colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.card,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.xs, minHeight: 44 },
+    alignSelf: 'stretch', paddingHorizontal: spacing.md, paddingVertical: spacing.xs, minHeight: 44 },
   compact: { paddingVertical: 0 },
   title: { flex: 1, fontSize: fontSize.md, color: colors.text, fontWeight: '700' },
   code: { fontSize: fontSize.xs, color: colors.textMuted },
   connection: { fontSize: fontSize.xs, color: colors.success },
   offline: { color: colors.warning, fontWeight: '700' },
-  players: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, paddingHorizontal: spacing.sm,
+  players: { alignSelf: 'stretch', flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs, backgroundColor: colors.card },
   player: { flex: 1, minWidth: '30%', flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
     borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
     paddingHorizontal: spacing.xs, paddingVertical: spacing.xs },
   playerActive: { borderColor: colors.primary, borderWidth: 2, backgroundColor: colors.surfaceMuted },
+  playerStacked: { minWidth: '100%' },
   avatar: { width: 28, height: 28, borderRadius: radius.full, backgroundColor: colors.surfaceMuted,
     borderWidth: 2, borderColor: colors.borderStrong, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: fontSize.sm, color: colors.text, fontWeight: '700' },
   playerInfo: { flex: 1, minWidth: 0 },
   playerName: { fontSize: fontSize.xs, color: colors.text, fontWeight: '700' },
   playerDetail: { fontSize: fontSize.xs, color: colors.textSecondary },
-  status: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  status: { alignSelf: 'stretch', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   statusText: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },
-  content: { flex: 1, minHeight: 0 },
-  actions: { padding: spacing.sm, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
+  content: { flex: 1, minHeight: 0, alignSelf: 'stretch' },
+  tabletop: { margin: spacing.sm, borderRadius: radius.lg, backgroundColor: colors.surfaceMuted,
+    borderWidth: 1, borderColor: colors.border, ...shadow.card },
+  actions: { alignSelf: 'stretch', backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.border },
   resultTitle: { fontSize: fontSize.xl, fontWeight: '800', color: colors.text, textAlign: 'center' },
   result: { fontSize: fontSize.xxl, fontWeight: '800', color: colors.primary, textAlign: 'center' },
   reason: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },

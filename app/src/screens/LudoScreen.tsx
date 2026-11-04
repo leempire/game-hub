@@ -10,10 +10,11 @@ import Svg, { Circle, Rect, Path, Line, Polygon, G } from 'react-native-svg';
 import { useAuth } from '../auth';
 import { RoomSocket } from '../socket';
 import { onConfirmLeave, useModalBackGuard } from '../backGuard';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 import { DiceFace } from '../icons';
 import LudoBoard, { PieceAnim, pieceCenters } from './LudoBoardView';
-import { colors, spacing, radius, fontSize, ludoColors } from '../theme';
+import { gameSurfaces, colors, spacing, radius, fontSize, ludoColors } from '../theme';
 import { notify } from '../utils';
 import {
   GRID_UNITS, RING, RING_END, PLAYER_OFFSETS, PIECES_PER_PLAYER,
@@ -26,15 +27,15 @@ const PLAYER_COLORS = ludoColors;
 // 棋盘/棋子的「可见边界」。金色 #FFD700 曾经用作可动高亮，但它在米色棋盘上只有
 // 1.31:1、在黄子上 1.41:1——两头都看不见。改成深墨后对四家棋色都 ≥3.1:1。
 const PIECE_EDGE = 'rgba(0,0,0,0.6)';  // 静态棋子描边（黄子靠它成形）
-const PIECE_ACTIVE = '#111827';   // 可动棋子的深墨环
+const PIECE_ACTIVE = colors.text;   // 可动棋子的深墨环
 // 棋盘：基地留白、赛道只涂色不画格线、格心一个奶油圆（标准飞行棋的观感）。
 // 数值取自 tmp/飞行棋.md 的视觉规格。
-const BOARD_BG = '#F1F1F1';       // 棋盘底 / 基地空地
-const CREAM = '#F2ECCE';          // 赛道与航道的格心圆
+const BOARD_BG = gameSurfaces.ludoBoard;       // 棋盘底 / 基地空地
+const CREAM = gameSurfaces.ludoCream;          // 赛道与航道的格心圆
 // 格心圆的深色描边：亮黄格（#F2D024）压在浅灰底上只有 1.35:1，格子的边界
 // 全靠这圈描边成形——标准棋盘的奶油圆本来就有细描边。
 const CREAM_EDGE = 'rgba(0,0,0,0.38)';
-const APRON_EDGE = '#222222';     // 停机坪黑框
+const APRON_EDGE = gameSurfaces.ludoApronEdge;     // 停机坪黑框
 // 原生端用原生驱动；RNW 不支持，必须降级（项目既有写法）
 const NATIVE_DRIVER = Platform.OS !== 'web';
 const CAPTURE_MS = 260;
@@ -55,7 +56,7 @@ const DICE_SETTLE_GAP_MS = 120;
 const DICE_TIMEOUT_MS = 2500;
 // 骰面描边：落定深墨 / 起转主题色——这既是视觉反馈，也是「动画在转」的
 // 可观测信号（E2E 靠它断言），别改成纯装饰性的颜色
-const DIE_EDGE = '#111827';
+const DIE_EDGE = colors.text;
 
 interface Props {
   code: string;
@@ -80,10 +81,11 @@ interface RankingEntry {
 
 // ── Main component ────────────────────────────────────
 export default function LudoScreen({ code, onLeave }: Props) {
-  const { token } = useAuth();
-  const navigation = useNavigation();
+  const { token, user } = useAuth();
+  const navigation = useNavigation<any>();
 
   const [gameState, setGameState] = useState<any>(null);
+  const [shellConnected, setShellConnected] = useState(false);
   const [roomPlayers, setRoomPlayers] = useState<any[]>([]);
   const [mySeat, setMySeat] = useState<number>(-1);
   const [movable, setMovable] = useState<number[]>([]);
@@ -545,7 +547,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
       setTimeout(() => setMessage(''), 2000);
     });
 
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
     return () => {
       ws.close();
       // 别让上一轮的闭包在 effect 重建后还被骰子落定回调捞起来
@@ -644,8 +646,8 @@ export default function LudoScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
 
   if (!gameState && roomPlayers.length === 0) {
@@ -658,7 +660,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
   }
 
   return (
-    <View style={styles.container}>
+    <GameShell game="ludo" code={code} connected={shellConnected} players={shellPlayers({ game: 'ludo', players: roomPlayers }, user?.id, gameState)} style={styles.container}>
       {/* Board：格子尺寸按可用空间推导，小屏也能整盘放下 */}
       <View
         style={styles.boardContainer}
@@ -690,7 +692,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
             onPress={() => setLbOpen((v) => !v)}
           >
             <Ionicons name="podium-outline" size={14} color={colors.primary} />
-            <View style={[styles.colorDot, { backgroundColor: PLAYER_COLORS[myColor] || '#999' }]} />
+            <View style={[styles.colorDot, { backgroundColor: PLAYER_COLORS[myColor] || colors.textMuted }]} />
             <Text style={styles.lbToggleText}>我 {myFinished}/4</Text>
             <Ionicons
               name={lbOpen ? 'chevron-up' : 'chevron-down'}
@@ -714,7 +716,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
                     testID={`ludo-lb-${p.seat}`}
                     style={[styles.lbRow, isMe && styles.lbRowMe, isTurn && styles.lbRowTurn]}
                   >
-                    <View style={[styles.colorDot, { backgroundColor: PLAYER_COLORS[p.color] || '#999' }]} />
+                    <View style={[styles.colorDot, { backgroundColor: PLAYER_COLORS[p.color] || colors.textMuted }]} />
                     <Text
                       style={[styles.lbName, (isMe || isTurn) && styles.lbNameStrong]}
                       numberOfLines={1}
@@ -770,7 +772,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
               <Text style={styles.surrenderText}>认输</Text>
             </TouchableOpacity>
           )}
-          <GameHelpButton game="ludo" size={32} />
+
         </View>
       </View>
 
@@ -825,10 +827,10 @@ export default function LudoScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>对局结束</Text>
+      <GameResult visible={showGameOver} result={'排名确定'} players={shellPlayers({ game: 'ludo', players: roomPlayers }, user?.id, gameState)} onBackToRoom={handleBackToRoom}
+        onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+
+
             <Text style={styles.modalReason}>
               {gameReason === 'all_finished' ? '全部完成' : gameReason === 'last_remaining' ? '排名确定' : gameReason}
             </Text>
@@ -836,22 +838,16 @@ export default function LudoScreen({ code, onLeave }: Props) {
               {ranking.map((r) => (
                 <View key={r.seat} style={[styles.rankingRow, r.rank === 1 && styles.rankingFirst]}>
                   <Text style={styles.rankNum}>#{r.rank}</Text>
-                  <View style={[styles.colorDot, { backgroundColor: PLAYER_COLORS[r.color] || '#999' }]} />
+                  <View style={[styles.colorDot, { backgroundColor: PLAYER_COLORS[r.color] || colors.textMuted }]} />
                   <Text style={styles.rankingName}>{r.nickname || r.username}</Text>
                   <Text style={styles.rankingScore}>{r.finished_count}/4</Text>
                 </View>
               ))}
             </ScrollView>
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnPrimary]}
-              onPress={handleBackToRoom}
-            >
-              <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+
+
+      </GameResult>
+    </GameShell>
   );
 }
 
@@ -914,14 +910,14 @@ const styles = StyleSheet.create({
   // 轮不到自己：置灰但**不隐藏**——位置固定，拇指不用找
   diceBtnIdle: { backgroundColor: colors.border },
   diceBtnIdleText: { color: colors.textMuted },
-  diceBtnText: { color: '#FFF', fontSize: fontSize.md, fontWeight: '700' },
+  diceBtnText: { color: colors.white, fontSize: fontSize.md, fontWeight: '700' },
   surrenderBtn: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
     borderRadius: radius.sm, borderWidth: 1, borderColor: colors.danger,
   },
   surrenderText: { color: colors.danger, fontSize: fontSize.sm },
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
+    flex: 1, backgroundColor: colors.overlay,
     justifyContent: 'center', alignItems: 'center', padding: spacing.xl,
   },
   modalCard: {
@@ -942,9 +938,9 @@ const styles = StyleSheet.create({
   rankingScore: { fontSize: fontSize.sm, fontWeight: '700', color: colors.primary },
   modalBtn: { width: '100%', paddingVertical: spacing.sm, borderRadius: radius.md, alignItems: 'center', marginTop: spacing.sm },
   modalBtnPrimary: { backgroundColor: colors.primary },
-  modalBtnPrimaryText: { color: '#FFF', fontSize: fontSize.md, fontWeight: '700' },
+  modalBtnPrimaryText: { color: colors.white, fontSize: fontSize.md, fontWeight: '700' },
   modalBtnDanger: { backgroundColor: colors.danger },
-  modalBtnDangerText: { color: '#FFF', fontSize: fontSize.md, fontWeight: '700' },
+  modalBtnDangerText: { color: colors.white, fontSize: fontSize.md, fontWeight: '700' },
   modalBtnSecondary: { borderWidth: 1, borderColor: colors.borderStrong },
   modalBtnSecondaryText: { color: colors.textSecondary, fontSize: fontSize.md },
 });

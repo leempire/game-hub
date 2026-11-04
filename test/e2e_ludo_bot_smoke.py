@@ -42,7 +42,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
 
 
 def body(page):

@@ -51,7 +51,7 @@ app/                    # Expo 客户端（RN + Web）
 ├── app.json            # version/versionCode（与 server/config/config.json 双写）
 ├── assets/             # 图标 PNG；assets/svg/ 为矢量源稿
 └── src/
-    ├── navigation.tsx  # 路由栈：Auth → MainTabs(游戏/房间/社交/我的) → Room → 各对局屏 → Admin
+    ├── navigation.tsx  # 路由栈：Auth → MainTabs(游戏/房间/我的) → Room → 各对局屏 → Admin
     ├── backGuard.tsx   # 返回操作统一体系（见下文，改动前必读注释）
     ├── help.tsx        # 游戏规则帮助系统（GAME_HELP 内容库 + GameHelpButton）
     ├── icons.tsx       # react-native-svg 矢量图标组件
@@ -69,7 +69,7 @@ app/                    # Expo 客户端（RN + Web）
     │                   #     + LuzhanqiBoardView.tsx、stasisRules.ts + StasisBoard.tsx
     │                   #     + StasisPanels.tsx + stasisArt.tsx + StasisShots.tsx
     │                   # 每款游戏的文件职责与实现约定见其 docs/游戏设计/<游戏>/设计.md
-    └── screens/        # AuthScreen/GamesTab/RoomsTab/SocialTab/ProfileTab/RoomScreen/
+    └── screens/        # AuthScreen/GamesTab/RoomsTab/ProfileTab/RoomScreen/
                         # 各对局屏（Gomoku/Mine/Reversi/Battleship/Dots/Ludo/Game2048/
                         # Xiangqi/ConnectFour/Tetris/Uno/Stasis/Luzhanqi/Spider）
                         # + HistoryScreen/AdminScreen
@@ -223,7 +223,7 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   `join_room` 的判断顺序是 **① 已是本房成员 → 直接放行**（覆盖游戏中重连 / 结束后重进 /
   等待房重进）→ ② `playing` → 抛「游戏已开始」→ ③ 密码/满员。**①必须在②之前**。
   前端点房间卡片必须走 `joinRoom` 接口再导航，不能直接跳房间页。
-- **结算流转**：结算弹窗只有「返回房间」按钮，**没有「再来一局」**。续开新局统一回
+- **结算流转**：结算统一使用 `GameResult`，提供「返回房间 / 查看战绩」。续开新局统一回
   房间大厅由房主点「开始游戏」（rematch 协议已删干净）。
 - **人机（bot）**：房主在等待大厅 `add_bot` → 合成玩家（负 id、`is_bot=True`、自动
   ready、无 WS 连接但视为在线）入座 → 轮到 bot 时 `asyncio` 延迟 0.8~1.2s 调
@@ -260,6 +260,13 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   回归：`test_stasis_send.py`。**别在 tick 路径上再写 `await ws.send_json`。**
 - 将来做炸弹人/贪吃蛇这类需要 tick 的游戏，可以复用这套骨架；能不用 tick 的
   （如俄罗斯方块的「客户端攒动作、服务端重放」）仍然优先不用。
+
+### 公共对局与表单组件
+
+- 十五个对局屏使用 `GameShell` / `GameResult`，玩家昵称、身份、回合与连接状态统一呈现。各屏保留 Socket、规则载荷、手势和离开确认。
+- 结算回房用 `navigation.popTo("Room", {code})`，覆盖深链进入而导航栈里没有房间的情况；查看战绩先完成同样的保座返回，再进入 History。
+- 房间页的 REST 自愈、WS sync 与 game_start 共用一次入局门闩，聚焦重置；导航回调存在 ref 中，不能因 wrapper 内联函数变化重建 Socket。深链先完成入房再连 WS，REST 返回不得覆盖之后到达的权威状态。
+- 表单使用 `ui.tsx` 的 `AppModal` / `FormInput` / `Card`。`AppModal` 自带返回保护、键盘避让和可滚动容器，调用方不重复注册同一弹窗。阴影统一 `theme.shadow`，遮罩统一 `colors.overlay`。
 
 ### 返回操作（backGuard.tsx）
 
@@ -418,7 +425,7 @@ curl -s http://127.0.0.1:50541/api/app/version
 - **react-navigation linking**：开启后浏览器 history 与路由双向同步；程序化导航先改路由
   状态再调 history.go，popstate 时 `getRouteName()` 已是新路由——backGuard 靠包装 history
   方法区分程序化/用户返回。linking 的 replaceState 会冲掉自定义 pushState 条目；
-  `getCurrentRoute()` 返回叶子路由名（Tab 页是 Games/Rooms/Social/Profile，不是 MainTabs）。
+  `getCurrentRoute()` 返回叶子路由名（Tab 页是 Games/Rooms/Profile，不是 MainTabs）。
 - **新增对局屏必须同时补三处深链**：`App.tsx` 的 `LINKING.config.screens` path、
   `app/src/deepLink.ts` 的 `ROUTE_BY_PATH`、以及 `navigation.tsx` 的 Stack.Screen。
   漏了不会报错，只会表现为「刷新页面回主页 / 分享链接打不开」。

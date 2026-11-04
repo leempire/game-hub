@@ -74,7 +74,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
 
 
 def opacity(page, testid):
@@ -220,7 +220,7 @@ def reset_to_lobby(page):
     storage 里，重载不丢。
     """
     page.goto(BASE)
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=25000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=25000)
 
 
 def pump_bot(ws, stats):

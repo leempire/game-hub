@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { getRoom, leaveRoom, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
-import {
+import { gameSurfaces, shadow,
   colors, spacing, radius, fontSize, lastMoveMark, lastMoveMarkEdge,
   gomokuHintWin, gomokuHintBlock,
 } from '../theme';
@@ -15,7 +15,8 @@ import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 
 interface GameState {
   board_size: number;
@@ -56,7 +57,7 @@ const REASON_LABELS: Record<string, string> = {
 // 胜利五连的环。金色 #FFD700 在木色棋盘上只有 1.32:1、在白子上 1.29:1——
 // 白棋赢的那一局等于没高亮。深红在所有三种背景（木色 3.03 / 黑子 3.10 /
 // 白子 5.16）上都过 3:1，见 docs/移动端体验设计方法论.md 第 9 节。
-const WIN_RING = '#C62828';
+const WIN_RING = gameSurfaces.gomokuWin;
 
 // 脉冲循环次数上限。WCAG 2.2.2：自动播放且持续超过 5 秒的运动必须能暂停/停止；
 // 这里用「限次」代替「加暂停按钮」——脉冲本来就只是把注意力拉过来，3 轮足够。
@@ -266,7 +267,8 @@ function MagnifierView({ aimX, aimY, touchX, touchY, cellSize, game, boardPixelS
 
 export default function GomokuScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
-  const { width: winWidth } = useWindowDimensions();
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<GameState | null>(null);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
@@ -304,7 +306,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
   useModalBackGuard(confirm !== null, () => setConfirm(null));
 
   // 尺寸计算
-  const boardEdge = Math.min(winWidth - 12, 560);
+  const boardEdge = Math.max(180, Math.min(winWidth - 32, winHeight - 330, 560));
   const cellSize = Math.floor(boardEdge / BOARD_SIZE);
   const boardPixelSize = cellSize * BOARD_SIZE;
 
@@ -575,7 +577,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     ws.on('player_reconnected', handlePlayerReconnected);
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave]);
 
@@ -815,8 +817,8 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   // 预览只在「轮到自己 + 局面没变」时有效：回合交接、任何一方落子、终局都清掉，
   // 否则上一手的预览子会留在盘上，看起来像多了一颗棋
@@ -835,29 +837,24 @@ export default function GomokuScreen({ code, onLeave }: Props) {
     return '等待对方...';
   })();
 
-  const myColorLabel = game ? (game.your_color === 'black' ? '黑棋' : '白棋') : '';
-  const myColorIconColor = game ? (game.your_color === 'black' ? colors.stoneBlack : colors.stoneEdge) : colors.textFaint;
 
   // 预览（非放大镜模式下也显示半透明子）
   // 预览子：拖动中跟随放大镜准星，松手后停在待确认的位置上等第二次点击。
   const previewCoord = drag ? { x: drag.aimX, y: drag.aimY } : pendingMove;
 
   return (
-    <View style={styles.container}>
+    <GameShell game="gomoku" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={turnText} style={styles.container} actions={<View style={styles.bottomBar}>
+        {game && !game.winner && (
+          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
+            <Text style={styles.surrenderBtnText}>认输</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
+          <Text style={styles.leaveBtnText}>退出</Text>
+        </TouchableOpacity>
+      </View>}>
       {/* 顶栏 */}
-      <View style={styles.topBar}>
-        <View style={styles.topLeft}>
-          {game && <Ionicons name="ellipse" size={16} color={myColorIconColor} />}
-          <Text style={styles.myColor}>{myColorLabel}</Text>
-          <Animated.Text style={[styles.turnHint, isMyTurn && styles.turnActive, { opacity: isMyTurn ? turnPulse : 1 }]}>
-            {turnText}
-          </Animated.Text>
-        </View>
-        <View style={styles.topRight}>
-          <GameHelpButton game="gomoku" size={24} />
-          <Text style={styles.roomCode}>#{code}</Text>
-        </View>
-      </View>
+
 
       {opponentDisconnected && (
         <View style={styles.banner}>
@@ -1103,16 +1100,7 @@ export default function GomokuScreen({ code, onLeave }: Props) {
       )}
 
       {/* 底部操作栏 */}
-      <View style={styles.bottomBar}>
-        {game && !game.winner && (
-          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
-            <Text style={styles.surrenderBtnText}>认输</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
-          <Text style={styles.leaveBtnText}>退出</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* 确认弹窗 */}
       <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
@@ -1137,23 +1125,11 @@ export default function GomokuScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* 结算弹窗 */}
-      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>对局结束</Text>
-            {game && (
-              <>
-                <Text style={styles.modalResult}>{WINNER_LABELS[game.winner || ''] || game.winner}</Text>
-                {game.reason && <Text style={styles.modalReason}>{REASON_LABELS[game.reason] || game.reason}</Text>}
-              </>
-            )}
-            <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleBackToRoom}>
-              <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      <GameResult visible={showGameOver} result={WINNER_LABELS[game?.winner || ''] || '对局结束'} reason={game?.reason ? REASON_LABELS[game.reason] || game.reason : ''} players={shellPlayers(room, user?.id, game)}
+        onBackToRoom={handleBackToRoom} onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+
+      </GameResult>
+    </GameShell>
   );
 }
 
@@ -1175,8 +1151,7 @@ const styles = StyleSheet.create({
   // 棋盘外层：阴影/圆角，同时是复位按钮的定位参照（复位按钮在视口之上、不在手势层里）
   boardArea: {
     position: 'relative', marginTop: spacing.md,
-    borderRadius: 12, shadowColor: colors.black, shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18, shadowRadius: 6, elevation: 3,
+    borderRadius: 12, ...shadow.card,
   },
   // 手势视口：尺寸固定、不参与 transform；overflow:hidden 让缩放后的内容不溢出到
   // 顶栏/按钮上。Web 端必须 touch-action:none，否则捏合会被浏览器当成页面缩放抢走。
@@ -1237,12 +1212,11 @@ const styles = StyleSheet.create({
   stone: { borderRadius: 9999 },
   stoneAnchor: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   stoneBlack: {
-    backgroundColor: colors.stoneBlack, shadowColor: colors.black,
-    shadowOffset: { width: 1, height: 1 }, shadowOpacity: 0.4, shadowRadius: 2, elevation: 3,
+    backgroundColor: colors.stoneBlack, ...shadow.card,
   },
   stoneWhite: {
     backgroundColor: colors.stoneWhite, borderWidth: 1, borderColor: colors.stoneEdge,
-    shadowColor: colors.black, shadowOffset: { width: 1, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+    ...shadow.card,
   },
   winRing: { position: 'absolute', borderWidth: 3, borderColor: WIN_RING },
   // 最近一步标记：黄点 + 深墨描边（与翻转棋/点格棋/象棋共用一套，见 theme.ts）。
@@ -1276,7 +1250,7 @@ const styles = StyleSheet.create({
   // 放大镜
   magnifier: {
     position: 'absolute', overflow: 'hidden',
-    shadowColor: colors.black, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 5,
+    ...shadow.card,
   },
   magVLine: { position: 'absolute', width: 1, top: 0, height: MAG_SIZE, backgroundColor: colors.boardLine },
   magHLine: { position: 'absolute', height: 1, left: 0, width: MAG_SIZE, backgroundColor: colors.boardLine },

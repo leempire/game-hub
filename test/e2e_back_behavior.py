@@ -33,7 +33,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
 
 
 def main():
@@ -51,7 +51,7 @@ def main():
 
         pa.go_back()
         pa.get_by_text('再按一次返回退出 GameHub', exact=False).first.wait_for(timeout=5000)
-        assert '社交' in pa.locator('body').inner_text(), '首次返回后离开了应用'
+        assert '我的' in pa.locator('body').inner_text(), '首次返回后离开了应用'
         ok('主Tab首次返回：提示再按一次，停留在应用内')
 
         pa.wait_for_timeout(2500)  # 超过 2s 窗口，计数重置

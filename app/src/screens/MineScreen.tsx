@@ -7,13 +7,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { getRoom, leaveRoom, fetchMyStats, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
-import { colors, spacing, radius, fontSize } from '../theme';
+import { gameSurfaces, shadow, colors, spacing, radius, fontSize } from '../theme';
 import { notify } from '../utils';
 import { pushToast } from '../toast';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 import { settingValueLabel } from '../roomSettings';
 import {
   MineGameState, MineRankingEntry, RevealedCell, NUMBER_COLORS,
@@ -21,9 +22,9 @@ import {
 } from '../minesweeper';
 
 // 旗子压在覆盖格 #CBD5E1 上，需 ≥3:1（原 #EF4444 只有 2.53）
-const MINE_FLAG = '#B91C1C';
+const MINE_FLAG = gameSurfaces.mineFlag;
 // 踩中的雷格：上面压着白色警示图标，底色需让白字 ≥4.5:1（原 #EF4444 只有 3.76）
-const MINE_CELL = '#B91C1C';
+const MINE_CELL = gameSurfaces.mineFlag;
 
 interface Props {
   code: string;
@@ -39,11 +40,12 @@ interface CellState {
 }
 
 /** 问号笔记的颜色：压在未翻开格上要够清楚，与旗子的红刻意区分开。 */
-const MINE_QUESTION = '#475569';
+const MINE_QUESTION = gameSurfaces.mineQuestion;
 
 export default function MineScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<MineGameState | null>(null);
   const [grid, setGrid] = useState<CellState[][] | null>(null);
@@ -96,7 +98,6 @@ export default function MineScreen({ code, onLeave }: Props) {
   gameOverRef.current = isFinished;
   useModalBackGuard(confirmLeave, () => setConfirmLeave(false));
   useModalBackGuard(confirmSurrender, () => setConfirmSurrender(false));
-  useModalBackGuard(showGameOver, () => {});
 
   // System / browser back: confirm if game in progress
   useEffect(() => navigation.addListener('beforeRemove', (e: any) => {
@@ -405,7 +406,7 @@ export default function MineScreen({ code, onLeave }: Props) {
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
 
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
 
     return () => {
       ws.close();
@@ -486,8 +487,8 @@ export default function MineScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   // Player status chips: one per player showing alive/eliminated + revealed count.
   // 4 人局横排放不下，默认收起（只显示自己），点右侧 chevron 展开全部。
@@ -604,7 +605,7 @@ export default function MineScreen({ code, onLeave }: Props) {
       );
     }
     if (isRevealed && isMine) {
-      return <Ionicons name="warning" size={cellSize * 0.55} color="#FFF" />;
+      return <Ionicons name="warning" size={cellSize * 0.55} color={colors.white} />;
     }
     if (isRevealed && numVal > 0) {
       return (
@@ -628,7 +629,7 @@ export default function MineScreen({ code, onLeave }: Props) {
     const isRevealed = cell.value !== null;
     const isMine = cell.value === -1;
     const bgColor = isRevealed
-      ? (isMine ? MINE_CELL : '#EDEFF2')
+      ? (isMine ? MINE_CELL : gameSurfaces.mineRevealed)
       : colors.card;
 
     return (
@@ -717,7 +718,19 @@ export default function MineScreen({ code, onLeave }: Props) {
   const myElapsedMs = game?.ranking?.find((r) => r.username === user?.username)?.elapsed_ms ?? null;
 
   return (
-    <View style={styles.container}>
+    <GameShell game="minesweeper" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.container} actions={<View style={styles.bottomBar}>
+        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirmLeave(true)}>
+          <Text style={styles.leaveBtnText}>退出</Text>
+        </TouchableOpacity>
+        {gameStarted && !isFinished && !isEliminated && (
+          <TouchableOpacity
+            style={styles.surrenderBtn}
+            onPress={() => setConfirmSurrender(true)}
+          >
+            <Text style={styles.surrenderBtnText}>放弃本局</Text>
+          </TouchableOpacity>
+        )}
+      </View>}>
       {/* Top info bar */}
       <View style={styles.topBar}>
         <View style={styles.topLeft}>
@@ -737,14 +750,14 @@ export default function MineScreen({ code, onLeave }: Props) {
           )}
         </View>
         <View style={styles.topRight}>
-          <GameHelpButton game="minesweeper" size={24} />
+
           {difficultyLabel ? (
             // 难度名由服务端下发（`room.settings`）—— 客户端不再自己抄一份档位表
             <Text style={styles.diffChip}>
               {difficultyLabel}{game?.daily ? ' · 今日盘' : ''}
             </Text>
           ) : null}
-          <Text style={styles.roomCode}>#{code}</Text>
+
         </View>
       </View>
 
@@ -802,19 +815,7 @@ export default function MineScreen({ code, onLeave }: Props) {
       </View>
 
       {/* Bottom actions */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirmLeave(true)}>
-          <Text style={styles.leaveBtnText}>退出</Text>
-        </TouchableOpacity>
-        {gameStarted && !isFinished && !isEliminated && (
-          <TouchableOpacity
-            style={styles.surrenderBtn}
-            onPress={() => setConfirmSurrender(true)}
-          >
-            <Text style={styles.surrenderBtnText}>放弃本局</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+
 
       {/* Leave confirmation modal */}
       <Modal visible={confirmLeave} transparent animationType="fade" onRequestClose={() => setConfirmLeave(false)}>
@@ -869,10 +870,10 @@ export default function MineScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over / ranking modal */}
-      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>游戏结束</Text>
+      <GameResult visible={showGameOver} result={reasonLabel} players={shellPlayers(room, user?.id, game)} onBackToRoom={handleBackToRoom}
+        onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+
+
             {game && (
               <>
                 <Ionicons
@@ -940,16 +941,10 @@ export default function MineScreen({ code, onLeave }: Props) {
                 ))}
               </ScrollView>
             )}
-            <TouchableOpacity
-              style={[styles.modalBtn, styles.modalBtnPrimary]}
-              onPress={handleBackToRoom}
-            >
-              <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+
+
+      </GameResult>
+    </GameShell>
   );
 }
 
@@ -1170,29 +1165,25 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    elevation: 3,
+    ...shadow.card,
   },
   cell: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 0.5,
-    borderColor: '#DDE1E6',
+    borderColor: gameSurfaces.mineLine,
   },
   cellUnrevealed: {
-    backgroundColor: '#CBD5E1',
+    backgroundColor: gameSurfaces.mineCover,
     borderTopWidth: 2,
     borderLeftWidth: 2,
     borderBottomWidth: 2,
     borderRightWidth: 2,
-    borderTopColor: '#E4EAF1',
-    borderLeftColor: '#E4EAF1',
-    borderBottomColor: '#9AA7B8',
-    borderRightColor: '#9AA7B8',
+    borderTopColor: gameSurfaces.mineBevelLight,
+    borderLeftColor: gameSurfaces.mineBevelLight,
+    borderBottomColor: gameSurfaces.mineBevelDark,
+    borderRightColor: gameSurfaces.mineBevelDark,
   },
   cellNumber: {
     fontWeight: '800',

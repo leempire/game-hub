@@ -11,8 +11,8 @@ const EXIT_WINDOW_MS = 2000;
 const EXIT_TOAST = '再按一次返回退出 GameHub';
 
 let getRouteName: () => string | undefined = () => undefined;
-// 根判定：getCurrentRoute 返回叶子路由，主Tab的叶子是四个页签之一
-const ROOT_TABS = new Set(['MainTabs', 'Games', 'Rooms', 'Social', 'Profile']);
+// 根判定：getCurrentRoute 返回叶子路由，主Tab的叶子是三个页签之一
+const ROOT_TABS = new Set(['MainTabs', 'Games', 'Rooms', 'Profile']);
 const atRootTabs = () => ROOT_TABS.has(getRouteName() || '');
 let lastExitPrompt = 0;
 

@@ -9,14 +9,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { getRoom, leaveRoom, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
-import {
+import { shadow,
   colors, spacing, radius, fontSize, reversiBoard, lastMoveMark, lastMoveMarkEdge,
 } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 
 // --- Types ---
 
@@ -166,7 +167,8 @@ function StoneView({ colorVal, size, isNew, isFlipped, flipDelay = 0 }: {
 
 export default function ReversiScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
-  const { width: winWidth } = useWindowDimensions();
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<ReversiState | null>(null);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
@@ -212,7 +214,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
   const [animFlipped, setAnimFlipped] = useState<Map<string, number>>(new Map());
 
   // Board sizing — fill available width with padding，并为左侧行号留出 AXIS_W
-  const boardEdge = Math.min(winWidth - 24 - AXIS_W, 480);
+  const boardEdge = Math.max(160, Math.min(winWidth - 40 - AXIS_W, winHeight - 310, 480));
   const cellSize = Math.floor(boardEdge / BOARD_SIZE);
   const boardPixelSize = cellSize * BOARD_SIZE;
 
@@ -351,7 +353,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
     ws.on('player_reconnected', handlePlayerReconnected);
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave]);
 
@@ -381,8 +383,8 @@ export default function ReversiScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   const isMyTurn = game ? game.your_color === game.next && !game.winner : false;
 
@@ -413,10 +415,6 @@ export default function ReversiScreen({ code, onLeave }: Props) {
 
   const lastMove = game && game.moves.length > 0 ? game.moves[game.moves.length - 1] : null;
   const score = game ? game.score : { black: 0, white: 0 };
-  const myColorLabel = game ? (game.your_color === 'black' ? '黑棋' : '白棋') : '';
-  const myColorIconColor = game
-    ? (game.your_color === 'black' ? colors.stoneBlack : '#ccc')
-    : colors.textMuted;
 
   const turnText = (() => {
     if (!game || game.winner) return '';
@@ -436,28 +434,20 @@ export default function ReversiScreen({ code, onLeave }: Props) {
   const dcLeft = useDisconnectCountdown(opponentDisconnected, dcTimeout ?? oppDcLeft);
 
   return (
-    <View style={styles.container}>
+    <GameShell game="reversi" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={<View style={{ flexDirection: 'row', justifyContent: 'center', gap: spacing.sm }}><Text style={styles.turnHint}>{turnText}</Text><Text style={styles.turnHint}>{'黑 '}{score.black} : {'白 '}{score.white}</Text></View>} style={styles.container} actions={<View style={styles.bottomBar}>
+        {game && !game.winner && (
+          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
+            <Ionicons name="flag-outline" size={16} color={colors.white} />
+            <Text style={styles.surrenderBtnText}> 认输</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
+          <Ionicons name="exit-outline" size={16} color={colors.textSecondary} />
+          <Text style={styles.leaveBtnText}> 退出</Text>
+        </TouchableOpacity>
+      </View>}>
       {/* Top bar: color, turn, score */}
-      <View style={styles.topBar}>
-        <View style={styles.topLeft}>
-          {game && <Ionicons name="ellipse" size={16} color={myColorIconColor} />}
-          <Text style={styles.myColor}>{myColorLabel}</Text>
-          <Text style={[styles.turnHint, isMyTurn && styles.turnActive]}>{turnText}</Text>
-        </View>
-        <View style={styles.scoreRow}>
-          <View style={styles.scoreItem}>
-            <View style={[styles.scoreDot, styles.scoreDotBlack]} />
-            <Text style={styles.scoreNum}>{score.black}</Text>
-          </View>
-          <Text style={styles.scoreSep}>:</Text>
-          <View style={styles.scoreItem}>
-            <View style={[styles.scoreDot, styles.scoreDotWhite]} />
-            <Text style={styles.scoreNum}>{score.white}</Text>
-          </View>
-        </View>
-        <GameHelpButton game="reversi" size={24} />
-        <Text style={styles.roomCode}>#{code}</Text>
-      </View>
+
 
       {/* Disconnected banner */}
       {opponentDisconnected && (
@@ -567,18 +557,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
       </View>
 
       {/* Action buttons */}
-      <View style={styles.bottomBar}>
-        {game && !game.winner && (
-          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
-            <Ionicons name="flag-outline" size={16} color={colors.white} />
-            <Text style={styles.surrenderBtnText}> 认输</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
-          <Ionicons name="exit-outline" size={16} color={colors.textSecondary} />
-          <Text style={styles.leaveBtnText}> 退出</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* Confirm modal */}
       <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
@@ -616,27 +595,11 @@ export default function ReversiScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>对局结束</Text>
-            {game && (
-              <>
-                <Text style={styles.modalResult}>
-                  {WINNER_LABELS[game.winner || ''] || game.winner}
-                </Text>
-                <Text style={styles.modalScore}>
-                  {score.black} : {score.white}
-                </Text>
-              </>
-            )}
-            <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleBackToRoom}>
-              <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      <GameResult visible={showGameOver} result={WINNER_LABELS[game?.winner || ''] || '对局结束'} reason={''} players={shellPlayers(room, user?.id, game)}
+        onBackToRoom={handleBackToRoom} onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+        <Text style={styles.modalScore}>{score.black} : {score.white}</Text>
+      </GameResult>
+    </GameShell>
   );
 }
 
@@ -657,7 +620,7 @@ const styles = StyleSheet.create({
   scoreItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   scoreDot: { width: 12, height: 12, borderRadius: 6 },
   scoreDotBlack: { backgroundColor: colors.stoneBlack },
-  scoreDotWhite: { backgroundColor: colors.stoneWhite, borderWidth: 1, borderColor: '#ccc' },
+  scoreDotWhite: { backgroundColor: colors.stoneWhite, borderWidth: 1, borderColor: colors.borderStrong },
   scoreNum: { fontSize: fontSize.md, fontWeight: '700', color: colors.text },
   scoreSep: { fontSize: fontSize.md, fontWeight: '700', color: colors.textMuted },
   roomCode: {
@@ -677,8 +640,7 @@ const styles = StyleSheet.create({
   boardWrap: {
     position: 'relative', backgroundColor: reversiBoard,
     borderRadius: 8, overflow: 'hidden',
-    shadowColor: colors.black, shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.18, shadowRadius: 6, elevation: 3,
+    ...shadow.card,
   },
   hLine: { position: 'absolute', height: 1, backgroundColor: 'rgba(0,0,0,0.2)' },
   vLine: { position: 'absolute', width: 1, backgroundColor: 'rgba(0,0,0,0.2)' },
@@ -693,13 +655,11 @@ const styles = StyleSheet.create({
   stone: { borderRadius: 9999 },
   stoneBlack: {
     backgroundColor: colors.stoneBlack,
-    shadowColor: colors.black, shadowOffset: { width: 1, height: 1 },
-    shadowOpacity: 0.4, shadowRadius: 2, elevation: 3,
+    ...shadow.card,
   },
   stoneWhite: {
-    backgroundColor: colors.stoneWhite, borderWidth: 1, borderColor: '#ccc',
-    shadowColor: colors.black, shadowOffset: { width: 1, height: 1 },
-    shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+    backgroundColor: colors.stoneWhite, borderWidth: 1, borderColor: colors.borderStrong,
+    ...shadow.card,
   },
   hintDot: { borderRadius: 9999 },
   bottomBar: { flexDirection: 'row', gap: spacing.md, padding: spacing.md },

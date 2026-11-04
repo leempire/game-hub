@@ -255,6 +255,7 @@ def browser_checks(api):
             assert peer.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             box = peer.get_by_test_id("spider-back").bounding_box()
             assert box and box["height"] >= 44 and box["y"] + box["height"] <= height
+            peer.wait_for_timeout(350)  # let the shared result fade settle before visual capture
             peer.screenshot(path=str(OUT / f"spider-{name}.png"))
         peer.get_by_test_id("spider-back").click()
         peer.get_by_text("退出房间", exact=True).click()

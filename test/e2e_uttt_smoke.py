@@ -182,9 +182,13 @@ def browser_checks(api):
         select(0, 2, 2)
         expect(host.get_by_test_id("uttt-destination")).to_contain_text("结束对局")
         confirm(0, base + 1)
-        for page in pages:
-            page.get_by_test_id("uttt-back-to-room").wait_for()
-            back(page)
+        host.get_by_test_id("game-result-history").click()
+        host.locator('[data-testid^="history-record-"]').first.wait_for()
+        back(peer)
+        # The history route sits above the preserved Room route; no leave was sent.
+        host.go_back()
+        host.get_by_text("房间号", exact=True).wait_for()
+        assert code in host.locator("body").inner_text()
         host.goto(BASE + "/history")
         host.get_by_text("终极井字棋", exact=True).first.click()
         host.get_by_test_id("uttt-history").wait_for()

@@ -29,6 +29,15 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const socketRef = useRef<RoomSocket | null>(null);
+  const focusedRef = useRef(true);
+  const enteringRef = useRef(false);
+  const callbacksRef = useRef({ onLeave, onGameStart });
+  useEffect(() => { callbacksRef.current = { onLeave, onGameStart }; }, [onLeave, onGameStart]);
+  const enterGame = useCallback((game?: string) => {
+    if (!focusedRef.current || enteringRef.current) return;
+    enteringRef.current = true;
+    callbacksRef.current.onGameStart(code, game);
+  }, [code]);
   // 支持三档难度的游戏，档位存在每个 bot 自己身上。
   // **必须放在 `if (loading)` 提前返回之前**——放到下面会让首次渲染少调一个 hook，
   // React 直接报「Rendered more hooks than during the previous render」并白屏。
@@ -43,6 +52,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   useModalBackGuard(swapFrom !== null, () => setSwapFrom(null));
   // WS sync 到达后 REST 快照即为陈旧数据（如 connected），不再覆盖实时状态
   const syncedRef = useRef(false);
+  const syncVersionRef = useRef(0);
   // Track game type in a ref to avoid stale closure in handleGameStart
   const gameTypeRef = useRef<string | undefined>(undefined);
 
@@ -55,16 +65,18 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const refreshAndEnterGame = useCallback(async () => {
     if (!token) return;
     try {
+      const version = syncVersionRef.current;
       const r = await getRoom(token, code);
-      setRoom(r);
+      if (!focusedRef.current || syncVersionRef.current !== version) return;
+      if (!syncedRef.current) setRoom(r);
       gameTypeRef.current = r.game;
       if (r.status === 'playing' && r.in_game !== false) {
-        onGameStart(code, r.game);
+        enterGame(r.game);
       }
     } catch {
       // 房间可能已解散：交给 WS 的 room_closed 处理，这里不打扰用户
     }
-  }, [token, code, onGameStart]);
+  }, [token, code, enterGame]);
 
   const fetchRoom = useCallback(async () => {
     if (!token) return;
@@ -79,32 +91,35 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           r = await joinRoom(token, code, null);
         } catch (joinErr) {
           notify('无法加入', (joinErr as Error).message);
-          onLeave();
-          return;
+          callbacksRef.current.onLeave();
+          return false;
         }
       }
       if (!syncedRef.current) {
         setRoom(r);
         gameTypeRef.current = r.game;
       }
+      return true;
     } catch (err) {
       notify('加载失败', (err as Error).message);
+      return false;
     } finally {
       setLoading(false);
     }
-  }, [token, code, user?.id, onLeave]);
+  }, [token, code, user?.id]);
 
   // Connect WS on mount
   useEffect(() => {
     if (!token) return;
-    fetchRoom();
-
+    let disposed = false;
+    syncedRef.current = false;
     const ws = new RoomSocket(code, token);
     socketRef.current = ws;
 
     const handleSync = (msg: SocketMessage) => {
       const roomData = msg.room as Room;
       syncedRef.current = true;
+      syncVersionRef.current += 1;
       if (roomData) {
         setRoom(roomData);
         gameTypeRef.current = roomData.game;
@@ -112,14 +127,15 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
       // 游戏进行中才跳对局页。**还要看自己是否仍在局中**：扫雷/飞行棋/2048
       // 允许「本人已出局、其他人继续」，这类玩家回到房间页后不能再被弹回去
       // （否则点「退出」没反应、页面闪一下还在原处）。服务端用 in_game 告知。
-      if (msg.game && roomData.status === 'playing' && msg.in_game !== false) {
-        onGameStart(code, roomData.game);
+      if (msg.game && roomData?.status === 'playing' && msg.in_game !== false) {
+        enterGame(roomData.game);
       }
     };
 
     const handleLobby = (msg: SocketMessage) => {
       const roomData = msg.room as Room;
       syncedRef.current = true;
+      syncVersionRef.current += 1;
       if (roomData) {
         setRoom(roomData);
         gameTypeRef.current = roomData.game;
@@ -127,13 +143,13 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
     };
 
     const handleGameStart = () => {
-      onGameStart(code, gameTypeRef.current);
+      enterGame(gameTypeRef.current);
     };
 
     const handleRoomClosed = () => {
       notify('房间已解散', '房主已离开');
       ws.close();
-      onLeave();
+      callbacksRef.current.onLeave();
     };
 
     const handleError = (msg: SocketMessage) => {
@@ -165,12 +181,14 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
     ws.on('swap_request', handleSwapRequest);
     ws.on('swap_result', handleSwapResult);
 
-    ws.connect();
-
+    void fetchRoom().then(ready => {
+      if (ready && !disposed && focusedRef.current) ws.connect();
+    });
     return () => {
+      disposed = true;
       ws.close();
     };
-  }, [token, code, fetchRoom, onGameStart, onLeave]);
+  }, [token, code, fetchRoom, enterGame]);
 
   // 从对局页返回时本页不会重挂载，其 socket 可能已被对局页连接替换并被服务端弹出；
   // 每次重新聚焦强制重连，保证重新注册能收到 game_start/lobby 广播（跳过首次挂载）。
@@ -181,13 +199,13 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const startFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 本页当前是否在前台：兜底定时器只在本页还开着时才补查，
   // 已经跳进对局页了就别再多跑一次 REST（navigate 同路由虽是无害的，但没必要）
-  const focusedRef = useRef(true);
   useEffect(() => () => {
     if (startFallbackRef.current) clearTimeout(startFallbackRef.current);
   }, []);
   useFocusEffect(useCallback(() => {
     const ws = socketRef.current;
     focusedRef.current = true;
+    enteringRef.current = false;
     if (firstFocusRef.current) {
       firstFocusRef.current = false;
     } else {

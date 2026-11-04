@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from './theme';
-import { GAME_CATEGORIES, gameShort, type GameCategoryKey } from './games';
+import { GAMES, GAME_CATEGORIES, gameShort, type GameCategoryKey } from './games';
 
 /**
  * 主页顶部三块：主 CTA / 最近玩过 / 搜索与分类筛选。
@@ -20,7 +20,7 @@ export function HomeHero({ onCreate, onJoin, onBrowse }: {
   return (
     <View style={styles.hero}>
       <Text style={styles.heroTitle}>和朋友开一局</Text>
-      <Text style={styles.heroSub}>13 款小游戏 · 房间号或链接直接进</Text>
+      <Text style={styles.heroSub}>{GAMES.length} 款小游戏 · 房间号或链接直接进</Text>
       <TouchableOpacity style={styles.heroPrimary} onPress={onCreate} accessibilityRole="button">
         <Ionicons name="add-circle" size={20} color={colors.white} />
         <Text style={styles.heroPrimaryText}>立即开房</Text>

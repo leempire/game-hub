@@ -13,12 +13,12 @@ interface IdentityState {
   phase?: string;
   seat_colors?: string[];
   seat_uids?: number[];
-  players?: Record<string, { color?: string }>;
+  players?: Record<string, unknown>;
 }
 
 const seatColors = ['blue', 'red', 'green', 'yellow'];
 
-export function shellPlayers(room: Room | null, userId: number | undefined,
+export function shellPlayers(room: Pick<Room, 'game' | 'players'> | null, userId: number | undefined,
   state: IdentityState | null): ShellPlayer[] {
   if (!room) return [];
   const ended = !!state?.finished || (state?.winner != null && state.winner !== '');
@@ -52,8 +52,9 @@ export function shellPlayers(room: Room | null, userId: number | undefined,
       }
       if (state?.phase === 'placing' || state?.phase === 'setup') active = false;
     } else if (room.game === 'ludo') {
-      const key = state?.players?.[String(currentSeat)]?.color;
-      if (key) {
+      const entry = state?.players?.[String(currentSeat)];
+      const key = entry && typeof entry === 'object' && 'color' in entry ? entry.color : null;
+      if (typeof key === 'string') {
         identity = `${({ blue: '蓝', red: '红', green: '绿', yellow: '黄' } as Record<string, string>)[key] || key}方`;
         color = ludoColors[key] || color;
       }

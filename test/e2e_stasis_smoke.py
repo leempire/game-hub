@@ -73,7 +73,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
 
 
 def body(page):
@@ -377,7 +377,7 @@ def main():
         assert my_room(pb) == 'B1', f'B 应该占下 B1，实际 {my_room(pb)}'
         pb.locator('[data-testid="stasis-lie"]').wait_for(timeout=8000)
         pb.locator('[data-testid="stasis-lie"]').click()
-        pb.wait_for_timeout(400)
+        pb.get_by_text('躺好了 —— 现在就能升床、建炮台', exact=True).wait_for(timeout=4000)
         assert '躺好了' in body(pb), f'倒计时里躺下后引导应变成「躺好了」：{body(pb)[:200]}'
         rb0 = read_bio(pb)
         pb.wait_for_timeout(2000)

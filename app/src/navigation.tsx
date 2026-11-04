@@ -27,7 +27,6 @@ import UltimateTicTacToeScreen from './screens/UltimateTicTacToeScreen';
 import TetrisScreen from './screens/TetrisScreen';
 import UnoScreen from './screens/UnoScreen';
 import StasisScreen from './screens/StasisScreen';
-import SocialTab from './screens/SocialTab';
 import ProfileTab from './screens/ProfileTab';
 import AdminScreen from './screens/AdminScreen';
 import HistoryScreen from './screens/HistoryScreen';
@@ -62,7 +61,6 @@ export type RootStackParamList = {
 export type TabParamList = {
   Games: undefined;
   Rooms: undefined;
-  Social: undefined;
   Profile: undefined;
 };
 
@@ -75,7 +73,6 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   const iconMap: Record<string, { name: keyof typeof Ionicons.glyphMap; filled: keyof typeof Ionicons.glyphMap }> = {
     Games: { name: 'game-controller-outline', filled: 'game-controller' },
     Rooms: { name: 'home-outline', filled: 'home' },
-    Social: { name: 'chatbubbles-outline', filled: 'chatbubbles' },
     Profile: { name: 'person-outline', filled: 'person' },
   };
   const entry = iconMap[label];
@@ -194,11 +191,6 @@ function MainTabs() {
         name="Rooms"
         component={RoomsTabWrapper}
         options={{ title: '房间' }}
-      />
-      <Tab.Screen
-        name="Social"
-        component={SocialTab}
-        options={{ title: '社交' }}
       />
       <Tab.Screen
         name="Profile"

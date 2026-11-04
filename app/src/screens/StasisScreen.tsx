@@ -56,10 +56,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 import { getRoom, leaveRoom, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
-import {
-  spacing, withAlpha, stasisSpace, stasisPod, stasisInk, stasisRepair,
+import { gameSurfaces,
+  colors, spacing, withAlpha, stasisSpace, stasisPod, stasisInk, stasisRepair,
   stasisDoorOk, stasisBio, stasisAlloy, stasisDoorLow, stasisSeatColors,
 } from '../theme';
 import { notify } from '../utils';
@@ -79,7 +81,7 @@ import {
   TICK_MS, REMOTE_SNAP,
   CAM_LERP, CAM_LEAD, ALERT_DOOR_RATIO, OVERLOAD_DOOR_RATIO, PULSE_CYCLES,
   ON_SPACE, ON_SPACE_SOFT, WEB_TOUCH_NONE, WEB_GPU,
-  canStand, clampRatio, fmtClock, AI_PROFILE_NAMES,
+  canStand, clampRatio, fmtClock, AI_PROFILE_NAMES, REASON_LABELS,
 } from '../stasisRules';
 import { TapScale, ResChip, PrimaryButton } from '../stasisWidgets';
 import {
@@ -88,7 +90,7 @@ import {
 } from '../StasisBoard';
 import {
   BuildSheet, BuildingSheet, DoorSheet, GateSheet, PodSheet, WholeStation,
-  ConfirmDialog, ResultDialog, type DoorHpMap, type GateView,
+  ConfirmDialog, type DoorHpMap, type GateView,
 } from '../StasisPanels';
 import type {
   StasisPayload, StasisTick, StasisEvent,
@@ -131,6 +133,7 @@ function sameHp(a: Record<string, object>, b: Record<string, object>): boolean {
 export default function StasisScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const navigation = useNavigation<any>();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<StasisPayload | null>(null);
   const [showGameOver, setShowGameOver] = useState(false);
@@ -551,7 +554,7 @@ export default function StasisScreen({ code, onLeave }: Props) {
     ws.on('error', handleError);
     // **构造函数不连接** —— 必须先注册 handler 再 connect，否则握手回来的
     // `sync` 会在 handler 注册之前被丢掉（新屏白屏、只剩一个空地图）。
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
 
     return () => {
       ws.off('sync', handleSync);
@@ -759,7 +762,7 @@ export default function StasisScreen({ code, onLeave }: Props) {
 
   // ── 本地预演 + 相机 ───────────────────────────────────────
   const { width: vw, height: vh } = useWindowDimensions();
-  const viewportH = Math.max(200, vh - 150 - 132);
+  const viewportH = Math.max(160, vh - 150 - 132 - 100);
 
   /**
    * 相机夹取。**四个边都多给 `PAN_MARGIN` 的越界余量**。
@@ -1070,8 +1073,8 @@ export default function StasisScreen({ code, onLeave }: Props) {
     setPanel(null);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   const handleLeaveRoom = async () => {
     if (!token) return;
@@ -1339,7 +1342,7 @@ export default function StasisScreen({ code, onLeave }: Props) {
   );
 
   return (
-    <View style={styles.root}>
+    <GameShell game="stasis" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.root}>
       {topBar}
 
       {/* 主视图：整张地图 + 相机 */}
@@ -1382,7 +1385,7 @@ export default function StasisScreen({ code, onLeave }: Props) {
         {/* 跑动阶段的提示。**这段文案现在承担一条规则的教学**（v4）：倒计时结束
             还没躺下的人，会以「站着」的状态进入对局 —— 建不了东西，而且走廊里
             遇到静默体直接出局。所以要把「必须在倒计时结束前躺下」说在明处。 */}
-        {phase === 'run' ? (
+        {game && phase === 'run' ? (
           <View testID="stasis-run-panel" pointerEvents="none" style={styles.runBanner}>
             <Text style={styles.runTitle}>
               {myLying ? '躺好了 —— 现在就能升床、建炮台' : '跑进一间空舱室，进去之后点「躺下」'}
@@ -1542,13 +1545,17 @@ export default function StasisScreen({ code, onLeave }: Props) {
           else { setConfirm(null); handleLeaveRoom(); }
         }}
       />
-      <ResultDialog
-        visible={showGameOver}
-        game={game}
-        nameOf={nameOf}
-        seatColorOf={seatColorOf}
-        onBack={handleBackToRoom}
-      />
+      <GameResult visible={showGameOver} result={game?.winner === 'players' ? '静默体被击杀' : '任务失败'}
+        reason={REASON_LABELS[game?.reason ?? ''] ?? '对局结束'}
+        players={shellPlayers(room, user?.id, game)} onBackToRoom={handleBackToRoom}
+        roomButtonTestID="stasis-result-back" onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+        <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>坚守 {fmtClock(elapsedMs)}</Text>
+        {(game?.seat_uids ?? []).map(uid => {
+          const player = game?.players[String(uid)];
+          const member = room?.players.find(entry => entry.id === uid);
+          return <Text key={uid} style={{ color: colors.textSecondary }}>{member?.nickname || member?.username || '船员'} · {player?.alive ? '存活' : player?.surrendered ? '弃守' : '失压'}</Text>;
+        })}
+      </GameResult>
       {/* 断线倒计时（服务端给秒数，客户端只递减） */}
       {dcSeat >= 0 && dcLeft != null ? (
         <View style={styles.dcBanner}>
@@ -1558,7 +1565,7 @@ export default function StasisScreen({ code, onLeave }: Props) {
           </Text>
         </View>
       ) : null}
-    </View>
+    </GameShell>
   );
 }
 
@@ -1575,8 +1582,8 @@ const styles = StyleSheet.create({
   clockValue: { color: ON_SPACE, fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
   chipRow: { flexDirection: 'row', gap: 6, marginTop: 7, flexWrap: 'wrap' },
   chip: {
-    width: 40, height: 40, borderRadius: 9, backgroundColor: '#182436',
-    borderWidth: 1, borderColor: '#2A3A52', alignItems: 'center', justifyContent: 'flex-end',
+    width: 40, height: 40, borderRadius: 9, backgroundColor: gameSurfaces.stasisPanel,
+    borderWidth: 1, borderColor: gameSurfaces.stasisPanelEdge, alignItems: 'center', justifyContent: 'flex-end',
     paddingBottom: 2, overflow: 'hidden',
   },
   chipMine: { borderColor: stasisPod, borderWidth: 2 },
@@ -1610,14 +1617,14 @@ const styles = StyleSheet.create({
   tools: { position: 'absolute', right: 8, top: 42, gap: 8 },
   toolBtn: {
     width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: withAlpha('#182436', 0.92), borderWidth: 1, borderColor: '#2A3A52',
+    backgroundColor: withAlpha(gameSurfaces.stasisPanel, 0.92), borderWidth: 1, borderColor: gameSurfaces.stasisPanelEdge,
   },
   alertGlow: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: withAlpha(stasisDoorLow, 0.16) },
 
   runBanner: {
     position: 'absolute', left: 10, right: 10, bottom: 10, borderRadius: 10,
-    paddingVertical: 9, paddingHorizontal: 12, backgroundColor: withAlpha('#182436', 0.94),
-    borderWidth: 1, borderColor: '#2A3A52',
+    paddingVertical: 9, paddingHorizontal: 12, backgroundColor: withAlpha(gameSurfaces.stasisPanel, 0.94),
+    borderWidth: 1, borderColor: gameSurfaces.stasisPanelEdge,
   },
   runTitle: { color: ON_SPACE, fontSize: 13, fontWeight: '700' },
   runSub: { color: ON_SPACE_SOFT, fontSize: 11, marginTop: 2 },
@@ -1645,7 +1652,7 @@ const styles = StyleSheet.create({
   bottomRight: { position: 'absolute', right: 18, bottom: 26, alignItems: 'center', gap: 10 },
   roundBtn: {
     width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#152238', borderWidth: 2, borderColor: stasisRepair, gap: 1,
+    backgroundColor: gameSurfaces.stasisControl, borderWidth: 2, borderColor: stasisRepair, gap: 1,
   },
   roundBtnText: { color: stasisRepair, fontSize: 11, fontWeight: '700' },
   surrenderBtn: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: withAlpha(stasisDoorLow, 0.7) },

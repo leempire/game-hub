@@ -14,7 +14,7 @@ import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
 import { makeLayout } from '../luzhanqiBoard';
 import {
-  colors, spacing, radius, fontSize, g2048Tile, ludoColors,
+  colors, spacing, radius, fontSize, g2048Tile, ludoColors, gameSurfaces, shadow,
   playerColors, battleshipShipColors, battleshipWater, withAlpha,
   reversiBoard, dotsInk,
   xiangqiBoard, xiangqiLine, xiangqiFace, xiangqiRed, xiangqiBlack,
@@ -897,7 +897,7 @@ function BattleshipSnapshot({ snap, players }: {
                         left: x * bsCell, top: y * bsCell,
                         width: bsCell, height: bsCell,
                         backgroundColor: cell > 0
-                          ? BS_SHIP_COLORS[cell] || '#666'
+                          ? BS_SHIP_COLORS[cell] || colors.textMuted
                           : battleshipWater,
                       }]}
                     />
@@ -996,7 +996,7 @@ function DotsSnapshot({ snap, hideResult = false }: { snap: any; hideResult?: bo
               <View key={`h${y}-${x}`} style={[dotsStyles.hEdge, {
                 left: dDot + x * dCell + dDot, top: dDot + y * dCell - 1,
                 width: dCell - dDot, height: 2,
-                backgroundColor: pColors[val] || '#666',
+                backgroundColor: pColors[val] || colors.textMuted,
               }]} />
             ) : null)
           )}
@@ -1006,7 +1006,7 @@ function DotsSnapshot({ snap, hideResult = false }: { snap: any; hideResult?: bo
               <View key={`v${y}-${x}`} style={[dotsStyles.vEdge, {
                 left: dDot + x * dCell - 1, top: dDot + y * dCell + dDot,
                 width: 2, height: dCell - dDot,
-                backgroundColor: pColors[val] || '#666',
+                backgroundColor: pColors[val] || colors.textMuted,
               }]} />
             ) : null)
           )}
@@ -1064,7 +1064,7 @@ function Snapshot2048({ snap }: { snap: any }) {
                         snap2048Styles.cell,
                         {
                           left: c * 32, top: r * 32, width: 28, height: 28,
-                          backgroundColor: val === 0 ? '#cdc1b4' : tileColor.bg,
+                          backgroundColor: val === 0 ? gameSurfaces.tileSlot : tileColor.bg,
                         },
                       ]}
                     >
@@ -1172,7 +1172,7 @@ const snapTetrisStyles = StyleSheet.create({
 });
 
 const dotsStyles = StyleSheet.create({
-  board: { position: 'relative', backgroundColor: '#FAFAF8', borderRadius: 4, overflow: 'hidden' },
+  board: { position: 'relative', backgroundColor: gameSurfaces.paper, borderRadius: 4, overflow: 'hidden' },
   dot: { position: 'absolute', backgroundColor: dotsInk, zIndex: 2 },
   boxFill: { position: 'absolute', zIndex: 0 },
   hEdge: { position: 'absolute', zIndex: 1 },
@@ -1192,7 +1192,7 @@ const snap2048Styles = StyleSheet.create({
   boards: { flexDirection: 'row', gap: spacing.md },
   boardWrap: { alignItems: 'center' },
   label: { fontSize: fontSize.xs, color: colors.textSecondary, marginBottom: 2 },
-  board: { position: 'relative', backgroundColor: '#bbada0', borderRadius: 4, overflow: 'hidden' },
+  board: { position: 'relative', backgroundColor: gameSurfaces.tileFrame, borderRadius: 4, overflow: 'hidden' },
   cell: { position: 'absolute', alignItems: 'center', justifyContent: 'center', borderRadius: 3 },
   cellText: { fontWeight: '800' },
 });
@@ -1222,7 +1222,7 @@ function MineBoard({
             styles.mineCell,
             {
               width: mCell, height: mCell,
-              backgroundColor: isRevealed ? '#d4c29a' : '#b8b8b8',
+              backgroundColor: isRevealed ? gameSurfaces.historyMineRevealed : gameSurfaces.historyMineCover,
             },
           ]}
         >
@@ -1263,7 +1263,7 @@ function LudoSnapshot({ snap, players }: {
       {ranking.map((r) => (
         <View key={r.seat} style={[ludoSnapStyles.row, r.rank === 1 && ludoSnapStyles.first]}>
           <Text style={ludoSnapStyles.rank}>#{r.rank}</Text>
-          <View style={[ludoSnapStyles.colorDot, { backgroundColor: ludoColors[r.color] || '#999' }]} />
+          <View style={[ludoSnapStyles.colorDot, { backgroundColor: ludoColors[r.color] || colors.borderStrong }]} />
           <Text style={ludoSnapStyles.name}>{r.nickname || r.username}</Text>
           <Text style={ludoSnapStyles.count}>{r.finished_count}/4 到达</Text>
         </View>
@@ -1272,7 +1272,7 @@ function LudoSnapshot({ snap, players }: {
       <View style={ludoSnapStyles.boardWrap}>
         {Object.entries(ludoPlayers).map(([seat, p]: [string, any]) => (
           <View key={seat} style={ludoSnapStyles.playerRow}>
-            <View style={[ludoSnapStyles.colorDot, { backgroundColor: ludoColors[p.color] || '#999' }]} />
+            <View style={[ludoSnapStyles.colorDot, { backgroundColor: ludoColors[p.color] || colors.borderStrong }]} />
             <Text style={ludoSnapStyles.pieces}>
               {p.pieces.map((v: number) => v === 57 ? '✓' : v === -1 ? '·' : v).join(' ')}
             </Text>
@@ -1309,11 +1309,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     marginBottom: spacing.md,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
+    ...shadow.card,
   },
   row: { flexDirection: 'row', alignItems: 'center' },
   iconWrap: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
@@ -1359,7 +1355,7 @@ const styles = StyleSheet.create({
     backgroundColor: xiangqiFace,
   },
   mineRow: { flexDirection: 'row' },
-  mineCell: { alignItems: 'center', justifyContent: 'center', borderWidth: 0.5, borderColor: '#999' },
+  mineCell: { alignItems: 'center', justifyContent: 'center', borderWidth: 0.5, borderColor: colors.borderStrong },
   mineText: { color: colors.danger, fontWeight: '800', fontSize: 14 },
   mineNum: { fontWeight: '800', fontSize: 13 },
   mineFlag: { color: colors.primary, fontWeight: '800', fontSize: 13 },

@@ -16,13 +16,15 @@ import re
 import sys
 import time
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 BASE = 'http://localhost:50540'
 PWD = 'test123456'
 TS = int(time.time())
 UA, UB = f'c4_a_{TS}', f'c4_b_{TS}'
 STEP = 0
+PAGES = []
+ERRORS = []
 
 
 def ok(msg):
@@ -43,7 +45,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
 
 
 def wait_board(page, timeout=20000):
@@ -64,8 +66,16 @@ def disc_at(page, r, c):
 
 def drop(page, col):
     """点整列热区落子。"""
+    page.get_by_text('已连接', exact=True).wait_for()
+    before = page.locator('[data-testid^="c4-disc-"]').count()
     page.locator(f'[data-testid="c4-col-{col}"]').click()
-    page.wait_for_timeout(700)
+    try:
+        for peer in PAGES:
+            expect(peer.locator('[data-testid^="c4-disc-"]')).to_have_count(before + 1)
+    except AssertionError as error:
+        page.screenshot(path='/tmp/gamehub-connect4-drop.png')
+        raise AssertionError(f'落子未同步：{ERRORS}; 页面：{page.locator("body").inner_text()[:1000]}') from error
+    page.wait_for_timeout(180)  # finish the drop animation after both authoritative updates
 
 
 def hint_chips(page):
@@ -89,6 +99,9 @@ def main():
         )
         pa = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
         pb = browser.new_context(viewport={'width': 390, 'height': 844}).new_page()
+        PAGES[:] = [pa, pb]
+        for page in PAGES:
+            page.on('pageerror', lambda error: ERRORS.append(str(error)))
         pa.set_default_timeout(15000)
         pb.set_default_timeout(15000)
 
@@ -160,7 +173,7 @@ def main():
                          # 两头都接不上第四子，所以白没有威胁
         drop(pa, 0)      # (3,0) 黑 → 黑第 0 列竖三连，威胁 (2,0)
         chips_b = hint_chips(pb)
-        assert '堵' in chips_b, f'对手三连时 B 应看到「堵」提示，实际 {chips_b}'
+        assert '堵' in chips_b, f'对手三连时 B 应看到「堵」提示，实际 {chips_b}; 页面 {pb.locator("body").inner_text()[:1200]}'
         assert '连四' not in chips_b, \
             f'B 自己没有连四的机会，不该出现「连四」提示: {chips_b}'
         ok('对手竖三连 → B 侧出现「堵」提示（且没有误报「连四」）')
@@ -248,7 +261,8 @@ def main():
         pa.wait_for_timeout(600)
         ok('重力四子棋房支持添加人机并开局')
 
-        # A 落子后轮到人机：文案应为「思考中」，随后人机自己落一子
+        # A 落子后轮到人机：B 已退房，本局仅等待 A 的权威盘面。
+        PAGES[:] = [pa]
         drop(pa, 3)
         pa.wait_for_timeout(300)
         assert '思考中' in pa.locator('body').inner_text(), \

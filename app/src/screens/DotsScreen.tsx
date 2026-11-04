@@ -10,7 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
 import { getRoom, leaveRoom, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
-import {
+import { gameSurfaces, shadow,
   colors, spacing, radius, fontSize, playerColors, withAlpha, dotsInk,
   lastMoveMark,
 } from '../theme';
@@ -18,7 +18,8 @@ import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 
 // --- Types ---
 
@@ -159,7 +160,8 @@ function BoxFill({ animate, style }: { animate: boolean; style: any }) {
 
 export default function DotsScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
-  const { width: winWidth } = useWindowDimensions();
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<DotsState | null>(null);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
@@ -207,7 +209,7 @@ export default function DotsScreen({ code, onLeave }: Props) {
   const dots = game?.dots || 5;
   const rows = dots - 1;
   const cols = dots - 1;
-  const maxBoardW = Math.min(winWidth - 32, 440);
+  const maxBoardW = Math.max(160, Math.min(winWidth - 32, winHeight - 310, 440));
   const cellSize = Math.floor(maxBoardW / cols);
   const boardW = cellSize * cols;
   const boardH = cellSize * rows;
@@ -335,7 +337,7 @@ export default function DotsScreen({ code, onLeave }: Props) {
     ws.on('player_reconnected', handlePlayerReconnected);
     ws.on('room_closed', handleRoomClosed);
     ws.on('error', handleError);
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
     return () => { ws.close(); };
   }, [token, code, user?.id, onLeave]);
 
@@ -365,8 +367,8 @@ export default function DotsScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   const isMyTurn = game
     ? (game.your_color === 'black' ? P1 : P2) === game.next && !game.winner
@@ -383,7 +385,6 @@ export default function DotsScreen({ code, onLeave }: Props) {
   const isLastEdge = (kind: 'h' | 'v', y: number, x: number): boolean =>
     !!lastEdge && lastEdge.orient === kind && lastEdge.y === y && lastEdge.x === x;
 
-  const myColorLabel = game ? colorOf(game.your_color).label : '';
   const turnText = (() => {
     if (!game || game.winner) return '';
     if (isMyTurn) return '轮到你画边';
@@ -416,30 +417,20 @@ export default function DotsScreen({ code, onLeave }: Props) {
   const totalBoxes = rows * cols;
 
   return (
-    <View style={styles.container}>
+    <GameShell game="dots" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={<View style={{ flexDirection: 'row', justifyContent: 'center', gap: spacing.sm }}><Text style={styles.turnHint}>{turnText}</Text><Text style={styles.turnHint}>{'蓝 '}{score.black} : {'红 '}{score.white}</Text></View>} style={styles.container} actions={<View style={styles.bottomBar}>
+        {game && !game.winner && (
+          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
+            <Ionicons name="flag-outline" size={16} color={colors.white} />
+            <Text style={styles.surrenderBtnText}> 认输</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
+          <Ionicons name="exit-outline" size={16} color={colors.textSecondary} />
+          <Text style={styles.leaveBtnText}> 退出</Text>
+        </TouchableOpacity>
+      </View>}>
       {/* Top bar */}
-      <View style={styles.topBar}>
-        <View style={styles.topLeft}>
-          <View style={[styles.colorDot, {
-            backgroundColor: game?.your_color === 'black' ? colors.primary : colors.danger,
-          }]} />
-          <Text style={styles.myColor}>{myColorLabel}</Text>
-          <Text style={[styles.turnHint, isMyTurn && styles.turnActive]}>{turnText}</Text>
-        </View>
-        <View style={styles.scoreRow}>
-          <View style={styles.scoreItem}>
-            <View style={[styles.scoreDot, { backgroundColor: colors.primary }]} />
-            <Text style={styles.scoreNum}>{score.black}</Text>
-          </View>
-          <Text style={styles.scoreSep}>:</Text>
-          <View style={styles.scoreItem}>
-            <View style={[styles.scoreDot, { backgroundColor: colors.danger }]} />
-            <Text style={styles.scoreNum}>{score.white}</Text>
-          </View>
-        </View>
-        <GameHelpButton game="dots" size={24} />
-        <Text style={styles.roomCode}>#{code}</Text>
-      </View>
+
 
       {opponentDisconnected && (
         <View style={styles.banner}>
@@ -589,18 +580,7 @@ export default function DotsScreen({ code, onLeave }: Props) {
       )}
 
       {/* Action buttons */}
-      <View style={styles.bottomBar}>
-        {game && !game.winner && (
-          <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
-            <Ionicons name="flag-outline" size={16} color={colors.white} />
-            <Text style={styles.surrenderBtnText}> 认输</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity style={styles.leaveBtn} onPress={() => setConfirm('leave')}>
-          <Ionicons name="exit-outline" size={16} color={colors.textSecondary} />
-          <Text style={styles.leaveBtnText}> 退出</Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* Confirm modal */}
       <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
@@ -638,27 +618,11 @@ export default function DotsScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <Modal visible={showGameOver} transparent animationType="fade" onRequestClose={handleBackToRoom}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>对局结束</Text>
-            {game && (
-              <>
-                <Text style={styles.modalResult}>
-                  {WINNER_LABELS[game.winner || ''] || game.winner}
-                </Text>
-                <Text style={styles.modalScore}>
-                  {score.black} : {score.white}
-                </Text>
-              </>
-            )}
-            <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleBackToRoom}>
-              <Text style={styles.modalBtnPrimaryText}>返回房间</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+      <GameResult visible={showGameOver} result={WINNER_LABELS[game?.winner || ''] || '对局结束'} reason={''} players={shellPlayers(room, user?.id, game)}
+        onBackToRoom={handleBackToRoom} onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+        <Text style={styles.modalScore}>{score.black} : {score.white}</Text>
+      </GameResult>
+    </GameShell>
   );
 }
 
@@ -691,11 +655,10 @@ const styles = StyleSheet.create({
   },
   bannerText: { color: colors.white, fontSize: fontSize.sm, fontWeight: '600' },
   boardWrap: {
-    position: 'relative', backgroundColor: '#FAFAF8',
+    position: 'relative', backgroundColor: gameSurfaces.paper,
     marginTop: spacing.md, borderRadius: 8, overflow: 'hidden',
     borderWidth: 1, borderColor: colors.border,
-    shadowColor: colors.black, shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1, shadowRadius: 6, elevation: 2,
+    ...shadow.card,
   },
   dot: {
     position: 'absolute', backgroundColor: dotsInk,

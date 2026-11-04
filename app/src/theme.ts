@@ -32,6 +32,21 @@ export const colors = {
   stoneEdge: '#6B4F0C',     // 白子描边，与棋盘线同色（4.12 ✓）
 };
 
+/** Existing game materials, centralized without changing their established contrast. */
+export const gameSurfaces = {
+  gomokuWin: '#C62828', // 木纹底 3.03:1、白子 5.16:1
+  paper: '#FAFAF8', // 点格棋桌面，textMuted 4.63:1
+  tileSlot: '#CDC1B4', tileFrame: '#BBADA0', // 2048 的装饰性凹槽与框体
+  ludoBoard: '#F1F1F1', ludoCream: '#F2ECCE', ludoApronEdge: '#222222',
+  historyMineRevealed: '#D4C29A', historyMineCover: '#B8B8B8', // 旧终局快照材质，非信息通道
+  ludoDangerEdge: '#7F1D1D', // 四色格上均≥3:1，仍配额外圆环
+  mineFlag: '#B91C1C', // 覆盖格 4.36:1、白色警示图形 6.47:1
+  mineQuestion: '#475569', mineRevealed: '#EDEFF2', mineLine: '#DDE1E6',
+  mineCover: '#CBD5E1', mineBevelLight: '#E4EAF1', mineBevelDark: '#9AA7B8',
+  stasisPanel: '#182436', stasisPanelEdge: '#2A3A52', stasisControl: '#152238',
+  selection: '#EEF2FF', // 浅色选中表面，状态另有primary描边
+};
+
 /**
  * 五子棋的落点提示：**这一手直接连五**（实心点）/ **不堵就输**（空心环）。
  * 木色棋盘 `boardBg #DEB887` 上，绿只有 1.78、琥珀只有 0.87 —— **两个自己都不达标**，

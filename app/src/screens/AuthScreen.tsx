@@ -2,9 +2,10 @@ import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Card } from '../ui';
 import { AppLogo } from '../icons';
 import { useAuth, LAST_USERNAME_KEY } from '../auth';
-import { colors, spacing, radius, fontSize } from '../theme';
+import { colors, spacing, radius, fontSize, shadow } from '../theme';
 
 type Tab = 'login' | 'register';
 
@@ -81,7 +82,7 @@ export default function AuthScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <View style={styles.card}>
+        <Card style={styles.card}>
           <View style={styles.titleRow}>
             <AppLogo size={40} />
             <Text style={styles.title}>GameHub</Text>
@@ -173,7 +174,7 @@ export default function AuthScreen() {
               {submitting ? '请稍候...' : tab === 'login' ? '登 录' : '注 册'}
             </Text>
           </TouchableOpacity>
-        </View>
+        </Card>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -194,13 +195,9 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
     backgroundColor: colors.white,
-    borderRadius: radius.xl,
+    borderRadius: radius.lg,
     padding: spacing.lg,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+    ...shadow.card,
   },
   titleRow: {
     flexDirection: 'row',
@@ -235,11 +232,7 @@ const styles = StyleSheet.create({
   },
   tabActive: {
     backgroundColor: colors.white,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
+    ...shadow.card,
   },
   tabText: {
     fontSize: fontSize.md,

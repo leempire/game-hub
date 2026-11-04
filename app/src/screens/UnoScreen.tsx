@@ -31,7 +31,8 @@ import {
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 import { useDisconnectCountdown } from '../disconnect';
 import { UnoCardView, UnoHandBacks, UNO_CARD_H, UNO_CARD_W } from '../UnoCardView';
 import { UnoColorBadge } from '../icons';
@@ -173,6 +174,7 @@ interface UnoEvent {
 export default function UnoScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const navigation = useNavigation<any>();
+  const [shellConnected, setShellConnected] = useState(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<UnoPayload | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
@@ -418,7 +420,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
     ws.on('game_over', handleGameOver);
     ws.on('room_closed', handleClosed);
     ws.on('error', (msg) => notify('提示', msg.message as string));
-    ws.connect();
+    ws.connect(() => setShellConnected(true), () => setShellConnected(false));
 
     return () => { ws.close(); };
   }, [token, code, nameOfSeat, onLeave, flash]);
@@ -494,8 +496,8 @@ export default function UnoScreen({ code, onLeave }: Props) {
     setShowGameOver(false);
     skipRemoveRef.current = true;
     socketRef.current?.close();
-    navigation.goBack();
-  }, [navigation]);
+    navigation.popTo('Room', { code });
+  }, [navigation, code]);
 
   const handleLeaveRoom = async () => {
     if (!token) return;
@@ -578,10 +580,34 @@ export default function UnoScreen({ code, onLeave }: Props) {
   })();
 
   return (
-    <View style={styles.container}>
+    <GameShell game="uno" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.container} actions={iAmOut && !showGameOver ? null : <View style={styles.actions}>
+          <TouchableOpacity
+            style={[styles.actBtn, !(isMyTurn && game?.can_pass) && styles.idle]}
+            onPress={() => isMyTurn && game?.can_pass && socketRef.current?.unoPass()}
+            disabled={!(isMyTurn && game?.can_pass)}
+            testID="u-pass"
+          >
+            <Text style={styles.actBtnText}>过牌</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actBtn, styles.unoBtn, !game?.can_call_uno && styles.idle]}
+            onPress={() => unoTarget !== undefined && socketRef.current?.unoCall(unoTarget)}
+            disabled={!game?.can_call_uno}
+            testID="u-uno"
+          >
+            <Text style={styles.unoBtnText}>{unoForMate ? '替队友喊' : '喊 UNO'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.surrenderBtn}
+            onPress={() => setConfirm('surrender')}
+            testID="u-surrender"
+          >
+            <Text style={styles.surrenderText}>认输</Text>
+          </TouchableOpacity>
+        </View>}>
       {/* 规则入口（与象棋 / 四子棋一样放在对局屏内，不占牌桌空间） */}
       <View style={styles.topBar}>
-        <GameHelpButton game="uno" size={24} />
+
       </View>
 
       {/* ── 牌桌（深色毡面） ────────────────────────────────── */}
@@ -828,33 +854,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
             <Text style={styles.waitBtnText}>返回房间</Text>
           </TouchableOpacity>
         </View>
-      ) : (
-        <View style={styles.actions}>
-          <TouchableOpacity
-            style={[styles.actBtn, !(isMyTurn && game?.can_pass) && styles.idle]}
-            onPress={() => isMyTurn && game?.can_pass && socketRef.current?.unoPass()}
-            disabled={!(isMyTurn && game?.can_pass)}
-            testID="u-pass"
-          >
-            <Text style={styles.actBtnText}>过牌</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actBtn, styles.unoBtn, !game?.can_call_uno && styles.idle]}
-            onPress={() => unoTarget !== undefined && socketRef.current?.unoCall(unoTarget)}
-            disabled={!game?.can_call_uno}
-            testID="u-uno"
-          >
-            <Text style={styles.unoBtnText}>{unoForMate ? '替队友喊' : '喊 UNO'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.surrenderBtn}
-            onPress={() => setConfirm('surrender')}
-            testID="u-surrender"
-          >
-            <Text style={styles.surrenderText}>认输</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      ) : null}
 
       {/* 选色：黑牌选色 / 颜色轮盘点名，**共用同一个弹窗**（两件事都是「点一个颜色」，
           分成两个框只会多一份要维护的样式与返回键处理） */}
@@ -913,9 +913,8 @@ export default function UnoScreen({ code, onLeave }: Props) {
       </ModalM>
 
       {/* 结算 */}
-      <ModalM visible={showGameOver} onClose={() => {}}>
-        <Text style={styles.modalTitle}>本局结束</Text>
-        <Text style={styles.modalSub}>{resultText}</Text>
+      <GameResult visible={showGameOver} result={resultText} players={shellPlayers(room, user?.id, game)} roomButtonTestID="u-result-back" onBackToRoom={handleBackToRoom}
+        onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
         <View style={styles.rankList}>
           {ranking.map((r) => (
             <View key={r.seat} style={styles.rankRow}>
@@ -930,10 +929,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
             </View>
           ))}
         </View>
-        <TouchableOpacity style={styles.primaryBtn} onPress={handleBackToRoom} testID="u-result-back">
-          <Text style={styles.primaryBtnText}>返回房间</Text>
-        </TouchableOpacity>
-      </ModalM>
+      </GameResult>
 
       {/* 认输 / 退出确认 */}
       <ModalM visible={confirm !== null} onClose={() => setConfirm(null)}>
@@ -956,7 +952,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
           </TouchableOpacity>
         </View>
       </ModalM>
-    </View>
+    </GameShell>
   );
 }
 

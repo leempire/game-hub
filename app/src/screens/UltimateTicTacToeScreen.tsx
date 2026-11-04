@@ -6,7 +6,8 @@ import { getRoom, leaveRoom, Room } from '../api';
 import { RoomSocket, SocketMessage } from '../socket';
 import { onConfirmLeave, useModalBackGuard } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
-import { GameHelpButton } from '../help';
+import GameShell, { GameResult } from '../GameShell';
+import { shellPlayers } from '../gamePlayers';
 import { colors, playerColors, withAlpha, spacing, radius, fontSize, lastMoveMark, lastMoveMarkEdge } from '../theme';
 import { notify } from '../utils';
 import UtttBoard from '../UtttBoard';
@@ -51,7 +52,6 @@ export default function UltimateTicTacToeScreen({ code, onLeave }: Props) {
     navigation.popTo('Room', { code });
   }, [navigation, code]);
   useModalBackGuard(confirm !== null, () => setConfirm(null));
-  useModalBackGuard(showResult, backToRoom);
 
   useEffect(() => navigation.addListener('beforeRemove', (event: any) => {
     if (Platform.OS === 'web' || skipRemoveRef.current || gameRef.current?.winner || inLobbyRef.current) return;
@@ -181,13 +181,23 @@ export default function UltimateTicTacToeScreen({ code, onLeave }: Props) {
   const lastMove = game?.moves[game.moves.length - 1];
 
   return (
-    <View style={styles.page}>
+    <GameShell game="uttt" code={code} connected={connected} players={shellPlayers(room, user?.id, game)} style={styles.page} actions={<View testID="uttt-actions" style={styles.actions}>
+        <Text testID="uttt-destination" accessibilityLiveRegion="polite" style={styles.destination}>{!connected ? '连接断开，预览已清空；同步后可继续' : submitting ? '正在提交，等待服务器确认…' : previewText}</Text>
+        <View style={styles.row}>
+          <TouchableOpacity testID="uttt-cancel" accessibilityRole="button" disabled={!preview || submitting} onPress={clearPreview} style={[styles.button, styles.secondary, (!preview || submitting) && styles.disabled]}><Text style={styles.label}>取消选择</Text></TouchableOpacity>
+          <TouchableOpacity testID="uttt-confirm" accessibilityRole="button" disabled={!preview || !canPlay} onPress={confirmMove} style={[styles.button, styles.primary, styles.grow, (!preview || !canPlay) && styles.disabled]}><Text style={styles.white}>{submitting ? '提交中…' : '确认落子'}</Text></TouchableOpacity>
+        </View>
+        <View style={styles.row}>
+          <TouchableOpacity testID="uttt-surrender" accessibilityRole="button" disabled={!game || !!game.winner || inLobby || !connected} onPress={() => { clearPreview(); setConfirm('surrender'); }} style={[styles.dangerButton, (!game || !!game.winner || inLobby || !connected) && styles.disabled]}><Text style={styles.dangerText}>认输</Text></TouchableOpacity>
+          <TouchableOpacity testID="uttt-leave" accessibilityRole="button" onPress={() => { clearPreview(); setConfirm('leave'); }} style={styles.dangerButton}><Text style={styles.muted}>离开房间</Text></TouchableOpacity>
+        </View>
+      </View>}>
       <View style={styles.header}>
         <View style={styles.grow}>
           <Text style={styles.identity}>你是 <Text style={{ color: game?.your_color === 'white' ? playerColors.red : playerColors.blue }}>{utttSymbol(game?.your_color || 0)}</Text> · X 先手</Text>
           <Text accessibilityLiveRegion="polite" style={styles.turn}>{turn}</Text>
         </View>
-        <Text style={styles.muted}>#{code}</Text><GameHelpButton game="uttt" />
+
       </View>
       {opponentDisconnected && !game?.winner && <Text style={styles.disconnect}>对方已断线，等待重连（{dcLeft} 秒），超时判负</Text>}
       <ScrollView testID="uttt-scroll" style={styles.grow} contentContainerStyle={styles.content}>
@@ -224,17 +234,7 @@ export default function UltimateTicTacToeScreen({ code, onLeave }: Props) {
           <Text style={styles.muted}>X {game.local_results.filter(value => value === 1).length} 盘 · O {game.local_results.filter(value => value === 2).length} 盘 · 已落 {game.moves.length} 手 · 不限思考时间</Text>
         </>}
       </ScrollView>
-      <View testID="uttt-actions" style={styles.actions}>
-        <Text testID="uttt-destination" accessibilityLiveRegion="polite" style={styles.destination}>{!connected ? '连接断开，预览已清空；同步后可继续' : submitting ? '正在提交，等待服务器确认…' : previewText}</Text>
-        <View style={styles.row}>
-          <TouchableOpacity testID="uttt-cancel" accessibilityRole="button" disabled={!preview || submitting} onPress={clearPreview} style={[styles.button, styles.secondary, (!preview || submitting) && styles.disabled]}><Text style={styles.label}>取消选择</Text></TouchableOpacity>
-          <TouchableOpacity testID="uttt-confirm" accessibilityRole="button" disabled={!preview || !canPlay} onPress={confirmMove} style={[styles.button, styles.primary, styles.grow, (!preview || !canPlay) && styles.disabled]}><Text style={styles.white}>{submitting ? '提交中…' : '确认落子'}</Text></TouchableOpacity>
-        </View>
-        <View style={styles.row}>
-          <TouchableOpacity testID="uttt-surrender" accessibilityRole="button" disabled={!game || !!game.winner || inLobby || !connected} onPress={() => { clearPreview(); setConfirm('surrender'); }} style={[styles.dangerButton, (!game || !!game.winner || inLobby || !connected) && styles.disabled]}><Text style={styles.dangerText}>认输</Text></TouchableOpacity>
-          <TouchableOpacity testID="uttt-leave" accessibilityRole="button" onPress={() => { clearPreview(); setConfirm('leave'); }} style={styles.dangerButton}><Text style={styles.muted}>离开房间</Text></TouchableOpacity>
-        </View>
-      </View>
+
       <Modal visible={confirm !== null} transparent animationType="fade" onRequestClose={() => setConfirm(null)}>
         <View style={styles.overlay}><View style={styles.modal}>
           <Text style={styles.modalTitle}>{confirm === 'surrender' ? '确认认输？' : '确认离开房间？'}</Text>
@@ -248,15 +248,15 @@ export default function UltimateTicTacToeScreen({ code, onLeave }: Props) {
           <TouchableOpacity accessibilityRole="button" style={[styles.button, styles.secondary]} onPress={() => setConfirm(null)}><Text style={styles.label}>再想想</Text></TouchableOpacity>
         </View></View>
       </Modal>
-      <Modal visible={showResult} transparent animationType="fade" onRequestClose={backToRoom}>
-        <View style={styles.overlay}><View style={styles.modal}>
-          <Text style={styles.modalTitle}>对局结束</Text>
-          <Text style={styles.result}>{resultLabel(game?.winner || null)}</Text>
+      <GameResult visible={showResult} result={resultLabel(game?.winner || null)} players={shellPlayers(room, user?.id, game)} roomButtonTestID="uttt-back-to-room" onBackToRoom={backToRoom}
+        onViewHistory={() => { backToRoom(); navigation.navigate('History'); }}>
+
+
           <Text style={styles.explanation}>{game?.reason ? reasons[game.reason] || game.reason : ''} · 共 {game?.moves.length ?? 0} 手</Text>
-          <TouchableOpacity testID="uttt-back-to-room" accessibilityRole="button" style={[styles.button, styles.primary]} onPress={backToRoom}><Text style={styles.white}>返回房间</Text></TouchableOpacity>
-        </View></View>
-      </Modal>
-    </View>
+
+
+      </GameResult>
+    </GameShell>
   );
 }
 

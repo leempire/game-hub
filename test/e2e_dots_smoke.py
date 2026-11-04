@@ -34,7 +34,7 @@ def register(page, username):
     page.get_by_placeholder('6-32位').fill(PWD)
     page.get_by_placeholder('再次输入密码').fill(PWD)
     page.get_by_text('注 册', exact=True).click()
-    page.get_by_text('社交', exact=True).last.wait_for(timeout=20000)
+    page.get_by_text('我的', exact=True).last.wait_for(timeout=20000)
 
 
 def wait_board(page, timeout=20000):
@@ -147,7 +147,8 @@ def main():
             # 封格会加手，每步都重新判断轮到谁
             page = pa if '轮到你画边' in pa.locator('body').inner_text() else pb
             page.locator(f'[data-testid="{orient}-{y}-{x}"]').click()
-            page.wait_for_timeout(220)
+            for peer in (pa, pb):
+                peer.get_by_test_id(f'dots-last-{orient}-{y}-{x}').wait_for()
         pa.get_by_text('对局结束', exact=True).wait_for(timeout=15000)
         pb.get_by_text('对局结束', exact=True).wait_for(timeout=15000)
         body_a = pa.locator('body').inner_text()

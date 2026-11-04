@@ -7,10 +7,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
 import { useAuth } from '../auth';
 import { listRooms, createRoom, joinRoom, Room } from '../api';
-import { colors, spacing, radius, fontSize } from '../theme';
+import { colors, spacing, radius, fontSize, shadow } from '../theme';
 import { notify } from '../utils';
 import { settingValueLabel, settingsSummary } from '../roomSettings';
-import { useModalBackGuard } from '../backGuard';
 import { CreateRoomModal, JoinRoomModal } from '../roomForms';
 import { gameShort, gameIonicon, type GameKey } from '../games';
 
@@ -103,8 +102,6 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
     setModalError(null);
   };
 
-  useModalBackGuard(showCreate, closeCreate);
-  useModalBackGuard(showJoin, closeJoin);
 
   const handleCreate = async () => {
     if (!token) return;
@@ -279,7 +276,7 @@ export default function RoomsTab({ onNavigateToRoom }: Props) {
                   <View style={styles.roomMeta}>
                     <Text style={styles.roomCode}>#{room.code}</Text>
                     <View style={styles.gameBadge}>
-                      <Ionicons name={gameIonicon(room.game)} size={12} color={colors.white} />
+                      <Ionicons name={gameIonicon(room.game)} size={14} color={colors.textSecondary} />
                       <Text style={styles.gameBadgeText}>
                         {room.game === 'minesweeper'
                           // 难度名由服务端下发（`room.settings`），客户端不抄一份档位表
@@ -409,11 +406,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     marginBottom: spacing.sm,
-    shadowColor: colors.black,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    ...shadow.card,
   },
   roomHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   roomCardDim: { opacity: 0.62 },
@@ -438,7 +431,7 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
   },
   statusText: { color: colors.white, fontSize: fontSize.xs, fontWeight: '600' },
-  roomMeta: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.xs, gap: spacing.md },
+  roomMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: spacing.xs, gap: spacing.md },
   roomCode: { fontSize: fontSize.sm, color: colors.textSecondary, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   roomPlayers: { flexDirection: 'row', alignItems: 'center' },
   roomPlayersText: { fontSize: fontSize.sm, color: colors.textSecondary },
@@ -448,11 +441,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.bg,
     borderRadius: radius.full,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
   },
-  gameBadgeText: { color: colors.white, fontSize: fontSize.xs, fontWeight: '600' },
+  gameBadgeText: { color: colors.textSecondary, fontSize: fontSize.xs, fontWeight: '600' },
 });
 

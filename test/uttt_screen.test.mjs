@@ -1,3 +1,4 @@
+import { installGameChrome } from './load_game_chrome.mjs';
 // node --test test/uttt_screen.test.mjs
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -41,7 +42,7 @@ function screen(os = 'web', width = 390, height = 844) {
     return React.createElement(name, { 'data-testid': props.testID }, props.children);
   };
   const rn = {
-    View: host('div'), Text: host('span'), ScrollView: host('section'), TouchableOpacity: host('button'),
+    KeyboardAvoidingView: host('section'), View: host('div'), Text: host('span'), ScrollView: host('section'), TouchableOpacity: host('button'),
     StyleSheet: { create: styles => styles, absoluteFillObject: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 } },
     Modal: ({ visible, children }) => visible ? children : null,
     Platform: { OS: os }, useWindowDimensions: () => ({ width, height }), Vibration: { vibrate() {} },
@@ -56,7 +57,7 @@ function screen(os = 'web', width = 390, height = 844) {
     close() {}
   }
   const room = { status: 'playing', players: [{ id: 1, connected: true }, { id: 2, connected: true }] };
-  const navigation = { addListener: () => () => {}, goBack() { navigationCalls.push(['goBack']); }, popTo(...args) { navigationCalls.push(args); } };
+  const navigation = { addListener: () => () => {}, goBack() { navigationCalls.push(['goBack']); }, popTo(...args) { navigationCalls.push(args); }, navigate(...args) { navigationCalls.push(args); } };
   const modules = {
     react: hooks, 'react-native': rn,
     '../auth': { useAuth: () => ({ token: 'test', user: { id: 1 } }) },
@@ -79,6 +80,7 @@ function screen(os = 'web', width = 390, height = 844) {
     }, setTimeout, clearTimeout });
     return exports;
   };
+  installGameChrome(modules, ts);
   modules['../uttt'] = modules['./uttt'] = load('../app/src/uttt.ts');
   modules['../UtttBoard'] = load('../app/src/UtttBoard.tsx');
   const component = load('../app/src/screens/UltimateTicTacToeScreen.tsx').default;
@@ -212,5 +214,15 @@ for (const [width, height] of [[320, 640], [390, 844], [1280, 900]]) {
     assert.ok(view.get('uttt-actions'));
     assert.ok(view.get('uttt-surrender'));
     assert.ok(view.get('uttt-leave'));
+  });
+}
+
+for (const os of ['android', 'web']) {
+  test(`${os}: 结算查看战绩先回指定房间，保留席位与返回路径`, () => {
+    const view = screen(os);
+    start(view, game({ winner: 'black', reason: 'three_boards', legal: [] }));
+    view.press('game-result-history');
+    assert.equal(JSON.stringify(view.navigationCalls), JSON.stringify([['Room', { code: 'TEST01' }], ['History']]));
+    assert.equal(view.leaveCalls.length, 0);
   });
 }
