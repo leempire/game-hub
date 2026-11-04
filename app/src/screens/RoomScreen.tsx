@@ -400,25 +400,25 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
         </Text>
         {room.players.map((p: RoomPlayer) => (
           <View key={p.id} style={styles.playerRow}>
-            <View style={styles.playerInfo}>
-              <Text style={[styles.playerName, showOffline && !p.connected && styles.playerDisconnected]}>
-                {p.nickname || p.username}
-              </Text>
-              {p.is_host && <Text style={styles.hostBadge}>房主</Text>}
-              {p.is_bot && (
-                <Text style={styles.botBadge}>
-                  人机{p.ai_difficulty
-                    ? `·${BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? ''}`
-                    : ''}
+            <View style={styles.playerHeader}>
+              <View style={styles.playerInfo}>
+                <Text numberOfLines={1} style={[styles.playerName, showOffline && !p.connected && styles.playerDisconnected]}>
+                  {p.nickname || p.username}
                 </Text>
-              )}
+                <View style={styles.playerMeta}>
+                  {p.is_host && <Text style={styles.hostBadge}>房主</Text>}
+                  {p.is_bot && <Text style={styles.botBadge}>
+                    {BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? '普通'}难度
+                  </Text>}
+                </View>
+              </View>
+              <View style={styles.playerStatus}>
+                {showOffline && !p.connected && <Text style={[styles.statusPill, styles.disconnectedPill]}>断线</Text>}
+                {!p.is_bot && p.ready && <Text style={[styles.statusPill, styles.readyPill]}>已准备</Text>}
+                {!p.is_bot && !p.ready && !p.is_host && <Text style={[styles.statusPill, styles.unreadyPill]}>未准备</Text>}
+              </View>
             </View>
-            <View style={styles.playerBadges}>
-              {showOffline && !p.connected && (
-                <Text style={[styles.statusPill, styles.disconnectedPill]}>断线</Text>
-              )}
-              {p.ready && <Text style={[styles.statusPill, styles.readyPill]}>已准备</Text>}
-              {!p.ready && !p.is_host && <Text style={[styles.statusPill, styles.unreadyPill]}>未准备</Text>}
+            {isLobbyStatus && p.id !== user?.id && <View style={styles.playerBadges}>
               {/* 换位（v1.16）：座位就是玩家列表里的下标，开局时决定先手 / 出牌顺序。
                   **只在大厅里出现**（对局中座位已锁死，服务端也会拒）。 */}
               {isLobbyStatus && p.id !== user?.id && (
@@ -441,7 +441,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
                   <Text style={[styles.rowBtnText, styles.removeBotBtnText]}>移除</Text>
                 </TouchableOpacity>
               )}
-            </View>
+            </View>}
           </View>
         ))}
 
@@ -609,9 +609,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   playerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: spacing.sm,
     backgroundColor: colors.card,
     borderRadius: radius.md,
     padding: spacing.md,
@@ -619,11 +617,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  playerInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  playerHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  playerInfo: { flex: 1, minWidth: 0, gap: spacing.xs },
+  playerMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  playerStatus: { flexDirection: 'row', gap: spacing.xs, flexShrink: 0 },
   playerName: { fontSize: fontSize.md, color: colors.text, fontWeight: '600' },
   playerDisconnected: { textDecorationLine: 'line-through', color: colors.textMuted },
   hostBadge: {
-    marginLeft: spacing.sm,
+    alignSelf: 'flex-start',
     backgroundColor: colors.warning,
     paddingHorizontal: spacing.sm,
     paddingVertical: 1,
@@ -634,15 +635,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   botBadge: {
-    marginLeft: spacing.sm,
-    backgroundColor: colors.textSecondary,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 1,
-    borderRadius: radius.full,
     fontSize: fontSize.xs,
-    color: colors.white,
-    fontWeight: '600',
-    overflow: 'hidden',
+    color: colors.textSecondary,
   },
   difficultyRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -720,11 +714,8 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     fontWeight: '600',
   },
-  // 玩家行右侧那一簇（状态胶囊 + 两颗动作按钮）。
-  // **`alignItems: 'center'` 是必须的**：默认的 `stretch` 会把状态胶囊拉满整行高度，
-  // 于是「已准备」被撑成一枚 52×44 的绿色大圆饼（截图实测），而旁边的按钮只有 44 高
-  // —— 三颗控件三种尺寸，正是这一行难看的根源。
-  playerBadges: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // 次要操作独立一行，保留完整触控面积，避免与昵称和状态争抢宽度。
+  playerBadges: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   // 状态胶囊：**标签比按钮小一档**（22 高 vs 44 高）是常见的层级表达，所以它只居中、
   // 不跟着按钮一起长高。`lineHeight` 写死是为了让高度不随平台默认行高漂移。
   statusPill: {
