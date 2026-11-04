@@ -79,6 +79,8 @@ export interface LzqView {
   cells: (LzqCell | null)[][];
   topology: LzqTopology;
   phase: 'setup' | 'playing';
+  setup_remaining_ms?: number | null;
+  truth_available?: boolean;
   mode: 'open' | 'hidden';
   reveal: boolean;
   next: string;

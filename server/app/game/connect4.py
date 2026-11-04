@@ -101,3 +101,77 @@ def would_win_at(board: list[list[int]], col: int, color: int) -> bool:
     won = check_win(board, row, col)
     board[row][col] = EMPTY
     return won
+
+def legal_actions(board: list[list[int]], player: int, popout: bool = False) -> list[dict]:
+    """PopOut allows removing only one's own bottom checker."""
+    actions = [{"action": "drop", "col": col} for col in legal_columns(board)]
+    if popout:
+        actions.extend({"action": "pop", "col": col} for col in range(COLS)
+                       if board[ROWS - 1][col] == player)
+    return actions
+
+
+def pop(board: list[list[int]], col: int, player: int) -> None:
+    """Remove a bottom checker and let its column fall one row."""
+    if isinstance(col, bool) or not isinstance(col, int) or not 0 <= col < COLS:
+        raise ValueError("列号不合法")
+    if board[ROWS - 1][col] != player:
+        raise ValueError("只能弹出自己最底下一枚棋子")
+    for row in range(ROWS - 1, 0, -1):
+        board[row][col] = board[row - 1][col]
+    board[0][col] = EMPTY
+
+
+def winning_players(board: list[list[int]]) -> set[int]:
+    return {board[r][c] for r in range(ROWS) for c in range(COLS)
+            if board[r][c] != EMPTY and check_win(board, r, c)}
+
+
+def position_key(board: list[list[int]], next_player: int) -> str:
+    return ''.join(str(cell) for row in board for cell in row) + ':' + str(next_player)
+
+
+def apply_action(gs: dict, player: int, col: int, action: str = "drop") -> dict:
+    """Authoritative normal/PopOut move, including both-player wins and repetition.
+
+    The room owns player identity and must map it to the integer stone first.
+    Same-move simultaneous lines award the mover the win (Hasbro PopOut).
+    Three occurrences of the same board AND player to move draw the game.
+    """
+    if gs.get('winner'):
+        return {'ok': False, 'error': '游戏已结束'}
+    color = 'black' if player == BLACK else 'white'
+    if player not in (BLACK, WHITE) or gs.get('next') != color:
+        return {'ok': False, 'error': '还没轮到你'}
+    if isinstance(col, bool) or not isinstance(col, int) or not 0 <= col < COLS:
+        return {'ok': False, 'error': '列号不合法'}
+    board = gs['board']
+    if {'action': action, 'col': col} not in legal_actions(board, player, gs.get('popout', False)):
+        return {'ok': False, 'error': '不能在这里落子或弹出'}
+    initial = position_key(board, player)
+    row = ROWS - 1 if action == 'pop' else landing_row(board, col)
+    if action == 'pop':
+        pop(board, col, player)
+    else:
+        drop(board, col, player)
+    other = WHITE if player == BLACK else BLACK
+    gs['next'] = 'white' if player == BLACK else 'black'
+    move = {'x': col, 'y': row, 'color': color, 'next': gs['next'], 'action': action}
+    gs['moves'].append(move.copy())
+    winners = winning_players(board)
+    winner = player if player in winners else other if other in winners else None
+    if winner:
+        gs['winner'] = 'black' if winner == BLACK else 'white'
+        gs['reason'] = 'four'
+    else:
+        key = position_key(board, other)
+        repetitions = gs.setdefault('repetitions', {initial: 1})
+        repetitions[key] = repetitions.get(key, 0) + 1
+        if repetitions[key] >= 3 or not legal_actions(board, other, gs.get('popout', False)):
+            gs['winner'] = 'draw'
+            gs['reason'] = 'repetition' if repetitions[key] >= 3 else 'draw'
+    # A pop changes every occupied row in its column; clients use this authority.
+    if action == 'pop':
+        move['board'] = [line[:] for line in board]
+    over = {'winner': gs['winner'], 'reason': gs['reason']} if gs.get('winner') else None
+    return {'ok': True, 'move': move, 'game_over': over}

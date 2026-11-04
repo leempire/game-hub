@@ -14,7 +14,7 @@ import time
 from app.game.ai_difficulty import normalize_difficulty
 from app.game.connect4 import (
     COLS, ROWS, EMPTY, BLACK, WHITE,
-    landing_row, check_win, legal_columns, would_win_at,
+    landing_row, check_win, legal_columns, would_win_at, legal_actions, winning_players, pop,
 )
 
 _TIME_BUDGET = 0.5
@@ -191,3 +191,67 @@ def random_move(board: list[list[int]], rng: random.Random | None = None) -> int
     if not cols:
         return None
     return (rng or random).choice(cols)
+
+def best_action(board, player, popout=False, difficulty="normal", time_budget=None, rng=None):
+    """Choose from both drop and pop moves using only the visible board."""
+    if not popout:
+        col = best_move(board, player, time_budget=time_budget, difficulty=difficulty, rng=rng)
+        return None if col is None else {'action': 'drop', 'col': col}
+    actions = legal_actions(board, player, True)
+    if not actions:
+        return None
+    level = normalize_difficulty(difficulty)
+    if level == 'easy':
+        return (rng or random).choice(actions)
+    budget = time_budget if time_budget is not None else (0.5 if level == 'normal' else 1.0)
+    deadline = time.monotonic() + budget
+
+    def child(state, action, side):
+        after = [row[:] for row in state]
+        col = action['col']
+        if action['action'] == 'pop':
+            pop(after, col, side)
+        else:
+            after[landing_row(after, col)][col] = side
+        return after
+
+    def search(state, side, depth, alpha, beta):
+        if time.monotonic() >= deadline:
+            raise _Timeout
+        if depth == 0:
+            return evaluate(state, side)
+        moves = legal_actions(state, side, True)
+        best = -_WIN_SCORE * 2
+        for move in moves:
+            after = child(state, move, side)
+            winners = winning_players(after)
+            if side in winners:
+                value = _WIN_SCORE + depth
+            elif _opp(side) in winners:
+                value = -_WIN_SCORE - depth
+            else:
+                value = -search(after, _opp(side), depth - 1, -beta, -alpha)
+            best = max(best, value)
+            alpha = max(alpha, value)
+            if alpha >= beta:
+                break
+        return best if moves else 0
+
+    # Tactical pass is completed before search, even with a zero budget.
+    for action in actions:
+        if player in winning_players(child(board, action, player)):
+            return action
+    best = actions[0]
+    for depth in range(1, 8 if level == 'normal' else 11):
+        scored = []
+        try:
+            for action in actions:
+                after = child(board, action, player)
+                winners = winning_players(after)
+                value = -_WIN_SCORE if _opp(player) in winners else -search(
+                    after, _opp(player), depth - 1, -_WIN_SCORE * 2, _WIN_SCORE * 2)
+                scored.append((value, action))
+        except _Timeout:
+            break
+        best = max(scored, key=lambda item: item[0])[1]
+    return best

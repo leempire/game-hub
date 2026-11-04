@@ -34,6 +34,7 @@ v1.14 起房规可配（`uno_rules`），AI 跟着多两条判断：
 import random
 from collections import Counter
 
+from app.game import uno_official
 from app.game.ai_difficulty import normalize_difficulty
 from app.game.uno import (
     COLORS, SKIP, REVERSE, DRAW2, SKIP_ALL, DISCARD_ALL, MERCY_LIMIT,
@@ -249,3 +250,21 @@ def _hard_priority(game: dict, seat: int, card: str) -> tuple:
     remaining.remove(card)
     same_color = sum(card_color(c) == card_color(card) for c in remaining)
     return (0 if threatened and attack else 1, _priority(game, seat, card), -same_color)
+
+
+def best_arbitration(game: dict, seat: int, difficulty="normal", rng=None) -> dict | None:
+    """Optional off-turn catch / on-turn challenge using only public opportunities.
+
+    Deliberately never reads the private `guilty` adjudication evidence. Calling
+    code dispatches this before an ordinary decision, then re-reads the turn.
+    """
+    level = normalize_difficulty(difficulty)
+    rng = rng or random
+    catch = uno_official.catch_targets(game, seat)
+    if catch and (level != 'easy' or rng.random() < 0.25):
+        return {'action': 'catch_uno', 'target': catch[0]}
+    if uno_official.challenge_targets(game, seat) and not game['rules'].get('wild4_strict'):
+        chance = {'easy': 0.05, 'normal': 0.2, 'hard': 0.35}[level]
+        if rng.random() < chance:
+            return {'action': 'challenge_wild4'}
+    return None

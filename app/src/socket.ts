@@ -236,7 +236,10 @@ export class RoomSocket {
     this.send({ type: 'xiangqi_move', from_x: fromX, from_y: fromY, to_x: toX, to_y: toY });
   }
   /** 重力四子棋落子：只给列号，落点行由服务端按重力算并通过 move 广播回来。 */
-  drop(col: number): void { this.send({ type: 'move', x: col }); }
+  drop(col: number, action: 'drop' | 'pop' = 'drop'): void { this.send({ type: 'move', x: col, action }); }
+  xiangqiUndo(): void { this.send({ type: 'xiangqi_undo' }); }
+  unoChallengeWild4(): void { this.send({ type: 'uno_challenge_wild4' }); }
+  unoCatch(target: number): void { this.send({ type: 'uno_catch', target }); }
   /** 军棋布阵：交换自己半场两枚棋子（合法性由服务端判定，回一条 `luzhanqi_setup`）。 */
   luzhanqiSwap(a: [number, number], b: [number, number]): void {
     this.send({ type: 'luzhanqi_setup', action: 'swap', a, b });

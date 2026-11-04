@@ -11,6 +11,8 @@
 - **同分随机**。等价的着法里随机挑一个，否则人机会每局下出完全相同的一盘棋。
 """
 
+from collections import Counter
+from copy import deepcopy
 import random
 import time
 
@@ -23,6 +25,7 @@ from app.game.xiangqi import (
     type_of,
     color_of,
     undo_move,
+    make_move,
 )
 
 #: 子力价值（象棋常用量级；兵过河后另有位置加成，见 `_pos_bonus`）。
@@ -139,14 +142,31 @@ def _root_search(board, color: str, moves, depth: int, deadline: float):
     return [(s, mv) for s, mv in results if s == best]
 
 
-def best_move(board, color: str, time_budget: float | None = None, difficulty="normal", rng=None):
+def _avoid_immediate_perpetual_loss(moves, color, game):
+    """Use public history only at the root; keep a legal fallback if all moves lose."""
+    positions = game.get("_repetition_positions", []) if game else []
+    if not positions or max(Counter(positions).values()) < 2:
+        return moves
+    safe = []
+    for move in moves:
+        trial = deepcopy(game)
+        result = make_move(trial, *move)
+        if not (result.get("ok") and trial.get("reason") == "perpetual_check"
+                and trial.get("winner") == other(color)):
+            safe.append(move)
+    return safe or moves
+
+
+def best_move(board, color: str, time_budget: float | None = None, difficulty="normal", rng=None, *, game=None):
     """给 color 方算一步棋。返回 ``((fr,fc),(tr,tc))`` 或 None（无着可走）。
 
+    可选 game 提供公开重复历史，仅排除根层立即长将判负；无替代时仍返回合法着。
     **不改动传入的 board**（走子后一律撤销）——调用方可能正拿着房间里的盘面。
     """
     moves = all_legal_moves(board, color)
     if not moves:
         return None
+    moves = _avoid_immediate_perpetual_loss(moves, color, game)
     if len(moves) == 1:
         return moves[0]
     level = normalize_difficulty(difficulty)

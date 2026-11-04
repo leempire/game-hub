@@ -23,16 +23,20 @@ INITIAL_STONES = [
 ]
 
 
-def create_board() -> list[list[int]]:
+def create_board(size: int = BOARD_SIZE) -> list[list[int]]:
     """Create 8×8 board with initial 4-stone layout."""
-    board = [[EMPTY] * BOARD_SIZE for _ in range(BOARD_SIZE)]
-    for x, y, color in INITIAL_STONES:
+    if isinstance(size, bool) or size not in (6, 8, 10):
+        raise ValueError("翻转棋棋盘支持 6/8/10 路")
+    board = [[EMPTY] * size for _ in range(size)]
+    middle = size // 2
+    for x, y, color in ((middle - 1, middle - 1, WHITE), (middle, middle, WHITE),
+                         (middle - 1, middle, BLACK), (middle, middle - 1, BLACK)):
         board[y][x] = color
     return board
 
 
-def _in_bounds(x: int, y: int) -> bool:
-    return 0 <= x < BOARD_SIZE and 0 <= y < BOARD_SIZE
+def _in_bounds(x: int, y: int, size: int = BOARD_SIZE) -> bool:
+    return 0 <= x < size and 0 <= y < size
 
 
 def opponent(color: int) -> int:
@@ -48,11 +52,11 @@ def find_flips_in_dir(
     opp = opponent(color)
     flips: list[tuple[int, int]] = []
     nx, ny = x + dx, y + dy
-    while _in_bounds(nx, ny) and board[ny][nx] == opp:
+    while _in_bounds(nx, ny, len(board)) and board[ny][nx] == opp:
         flips.append((nx, ny))
         nx += dx
         ny += dy
-    if flips and _in_bounds(nx, ny) and board[ny][nx] == color:
+    if flips and _in_bounds(nx, ny, len(board)) and board[ny][nx] == color:
         return flips
     return []
 
@@ -61,7 +65,7 @@ def find_all_flips(
     board: list[list[int]], x: int, y: int, color: int,
 ) -> list[tuple[int, int]]:
     """Find all stones flipped by placing color at (x, y). Empty if illegal."""
-    if not _in_bounds(x, y) or board[y][x] != EMPTY:
+    if not _in_bounds(x, y, len(board)) or board[y][x] != EMPTY:
         return []
     flips: list[tuple[int, int]] = []
     for dx, dy in DIRECTIONS:
@@ -77,8 +81,8 @@ def is_valid_move(board: list[list[int]], x: int, y: int, color: int) -> bool:
 def get_legal_moves(board: list[list[int]], color: int) -> list[tuple[int, int]]:
     """Return all legal move positions for color."""
     moves: list[tuple[int, int]] = []
-    for y in range(BOARD_SIZE):
-        for x in range(BOARD_SIZE):
+    for y in range(len(board)):
+        for x in range(len(board)):
             if is_valid_move(board, x, y, color):
                 moves.append((x, y))
     return moves
@@ -107,7 +111,9 @@ def count_stones(board: list[list[int]]) -> dict[str, int]:
 def game_to_sync(gs: dict, user_id: int) -> dict:
     """Build the game portion of a sync message for reversi."""
     return {
-        "board_size": BOARD_SIZE,
+        "board_size": len(gs["board"]),
+        "legal": ([] if gs.get("winner") else get_legal_moves(
+            gs["board"], BLACK if gs["next"] == "black" else WHITE)),
         "board": gs["board"],
         "moves": gs["moves"],
         "next": gs["next"],

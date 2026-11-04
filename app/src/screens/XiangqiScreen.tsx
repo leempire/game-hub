@@ -11,7 +11,7 @@
 //    这正是小棋盘缺的那层补偿。
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Modal, useWindowDimensions,
+  View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, useWindowDimensions,
   Platform, Vibration, Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,6 +33,7 @@ import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
 import GameShell, { GameResult } from '../GameShell';
 import { shellPlayers } from '../gamePlayers';
+import { observeClock, ClockPayload, ObservedClock } from '../GameClock';
 
 // --- Types ---
 
@@ -41,10 +42,15 @@ interface XiangqiMove {
   to: number[];
   piece: string;
   captured: string | null;
+  notation?: string;
 }
 
 interface XiangqiState {
   rows: number;
+  can_undo?: boolean;
+  undo_reason?: string;
+  revision?: number;
+  clock?: ObservedClock | null;
   cols: number;
   /** 10×9，元素是棋子单字符（红大写/黑小写）或 null。 */
   board: (string | null)[][];
@@ -52,7 +58,7 @@ interface XiangqiState {
   next: 'red' | 'black';
   your_color: 'red' | 'black' | '';
   winner: null | 'red' | 'black' | 'draw';
-  reason: null | 'checkmate' | 'stalemate' | 'no_capture' | 'surrender' | 'disconnect';
+  reason: string | null;
   check: boolean;
   last_move: XiangqiMove | null;
   /** 轮到走的一方全部合法着法，扁平 [fr, fc, tr, tc]。 */
@@ -78,6 +84,7 @@ const WINNER_LABELS: Record<string, string> = {
 };
 
 const REASON_LABELS: Record<string, string> = {
+  timeout: '超时判负', perpetual_check: '长将判负', mutual_perpetual_check: '双方长将，和棋',
   checkmate: '将死',
   stalemate: '困毙（无子可动，判负）',
   no_capture: '60 回合无吃子，判和',
@@ -174,6 +181,7 @@ export default function XiangqiScreen({ code, onLeave }: Props) {
   const dcLeft = useDisconnectCountdown(opponentDisconnected, dcTimeout ?? oppDcLeft);
   const [showGameOver, setShowGameOver] = useState(false);
   const [confirm, setConfirm] = useState<'surrender' | 'leave' | null>(null);
+  const [undoPending, setUndoPending] = useState(false);
   const [selected, setSelected] = useState<[number, number] | null>(null);
   const [slideAt, setSlideAt] = useState<string | null>(null);
   const navigation = useNavigation<any>();
@@ -191,7 +199,7 @@ export default function XiangqiScreen({ code, onLeave }: Props) {
   // 四周再留 0.6 单位给棋子出界（边缘的棋子有一半在棋盘外）：
   //   宽 = 8 格 + 2×0.6 = 9.2 单位；高 = 9 格 + 1.2 = 10.2 单位
   const availW = winWidth - spacing.md * 2;
-  const availH = winHeight - 320;                    // 顶部/底部 chrome 估算
+  const availH = winHeight - 356 - (game?.clock ? 44 : 0);                    // 顶部/底部 chrome 估算
   const cell = Math.max(24, Math.min(
     availW / 9.2, Math.max(availH, 240) / 10.2, BOARD_MAX / 9.2,
   ));
@@ -284,7 +292,7 @@ export default function XiangqiScreen({ code, onLeave }: Props) {
       if (roomData) setRoom(roomData);
       if (msg.game) {
         const g = msg.game as XiangqiState;
-        setGame(g);
+        setGame({ ...g, clock: observeClock(g.clock) });
         setSelected(null);
         setSlideAt(null);
         if (g.winner) setShowGameOver(true);
@@ -307,7 +315,7 @@ export default function XiangqiScreen({ code, onLeave }: Props) {
     const handleGameStart = (msg: SocketMessage) => {
       const g = msg.game as XiangqiState;
       if (g) {
-        setGame(g);
+        setGame({ ...g, clock: observeClock(g.clock) });
         setShowGameOver(false);
         gameOverShownRef.current = false;
         setSelected(null);
@@ -327,11 +335,14 @@ export default function XiangqiScreen({ code, onLeave }: Props) {
           from, to,
           piece: msg.piece as string,
           captured: (msg.captured as string | null) ?? null,
+          notation: msg.notation as string | undefined,
         };
         return {
-          ...prev,
+          ...prev, clock: msg.clock ? observeClock(msg.clock as ClockPayload) : prev.clock,
           board,
           moves: [...prev.moves, move],
+          can_undo: msg.can_undo as boolean | undefined,
+          revision: msg.revision as number | undefined,
           next: msg.next as 'red' | 'black',
           check: !!msg.check,
           legal: (msg.legal as number[][]) || [],
@@ -374,9 +385,16 @@ export default function XiangqiScreen({ code, onLeave }: Props) {
       onLeave();
     };
     const handleError = (msg: SocketMessage) => {
+      setUndoPending(false);
       notify('提示', msg.message as string);
     };
 
+    ws.on('xiangqi_state', msg => {
+      const next = msg.game as XiangqiState;
+      if (next) setGame({ ...next, clock: observeClock(next.clock) });
+      setSelected(null); setSlideAt(null); setUndoPending(false);
+    });
+    ws.on('clock_update', msg => setGame(previous => previous ? { ...previous, clock: observeClock(msg.clock as ClockPayload), can_undo: (msg.can_undo as boolean | undefined) ?? previous.can_undo, undo_reason: (msg.undo_reason as string | undefined) ?? previous.undo_reason } : previous));
     ws.on('sync', handleSync);
     ws.on('lobby', handleLobby);
     ws.on('game_start', handleGameStart);
@@ -593,7 +611,13 @@ export default function XiangqiScreen({ code, onLeave }: Props) {
   }
 
   return (
-    <GameShell game="xiangqi" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={turnText} style={styles.container} actions={<View style={styles.bottomBar}>
+    <GameShell clock={game?.clock} game="xiangqi" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={turnText} style={styles.container} actions={<View style={styles.bottomBar}>
+        {(game?.can_undo || undoPending || room?.settings?.some(setting => setting.key === 'allow_undo' && setting.value === true)) && <TouchableOpacity
+          style={[styles.leaveBtn, (!game?.can_undo || undoPending) && { backgroundColor: colors.disabled }]}
+          testID="xiangqi-undo" accessibilityHint={game?.undo_reason} disabled={!game?.can_undo || undoPending || !shellConnected}
+          onPress={() => { setUndoPending(true); socketRef.current?.xiangqiUndo(); }}>
+          <Text style={styles.leaveBtnText}>{undoPending ? '悔棋中…' : '悔棋'}</Text>
+        </TouchableOpacity>}
         {!game.winner && (
           <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
             <Ionicons name="flag-outline" size={16} color={colors.white} />
@@ -624,6 +648,11 @@ export default function XiangqiScreen({ code, onLeave }: Props) {
         </View>
       )}
 
+      <ScrollView horizontal style={{ maxHeight: 32, alignSelf: 'stretch' }} contentContainerStyle={{ paddingHorizontal: spacing.md, gap: spacing.sm }} testID="xiangqi-notation">
+        {!game.can_undo && game.undo_reason && room?.settings?.some(setting => setting.key === 'allow_undo' && setting.value === true)
+          && <Text style={{ color: colors.textMuted }} testID="xiangqi-undo-reason">{game.undo_reason}</Text>}
+        {game.moves.map((move, index) => <Text key={index} style={{ color: colors.textSecondary }}>{index + 1}. {move.notation || '走子'}</Text>)}
+      </ScrollView>
       {/* 棋盘 */}
       <View style={styles.boardArea}>
         <View

@@ -13,6 +13,7 @@ interface IdentityState {
   phase?: string;
   seat_colors?: string[];
   seat_uids?: number[];
+  seat_teams?: (number | null)[];
   players?: Record<string, unknown>;
 }
 
@@ -62,8 +63,10 @@ export function shellPlayers(room: Pick<Room, 'game' | 'players'> | null, userId
       const key = state.seat_colors[currentSeat];
       color = playerColors[key] || color;
     }
+    const team = state?.seat_teams?.[currentSeat];
+    const difficulty = player.is_bot ? ({ easy: '简单', normal: '普通', hard: '困难' } as Record<string, string>)[player.ai_difficulty || 'normal'] : undefined;
     return { id: player.id, name: player.nickname || player.username || `玩家 ${seat + 1}`, isMe,
       isBot: player.is_bot, connected: player.connected, identity, color, active,
-      detail: player.is_bot ? ({ easy: '简单', normal: '普通', hard: '困难' } as Record<string, string>)[player.ai_difficulty || 'normal'] : undefined };
+      detail: [difficulty, team != null ? `第 ${team + 1} 队` : null].filter(Boolean).join(' · ') || undefined };
   });
 }

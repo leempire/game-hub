@@ -27,7 +27,7 @@ from app.game.ludo import (
     FINISH_PROGRESS,
     get_global_position,
     resolve_landing,
-    enemy_stacks_at,
+    enemy_stacks_at, same_team,
 )
 
 W_CAPTURE = 120.0
@@ -78,7 +78,7 @@ def _score_piece(gs: dict, seat: int, pid: int, dice: int) -> float:
     score += new * W_PROGRESS
 
     # 撞机只发生在赛道
-    if 0 <= new <= RING_END:
+    if gs.get("rules", {}).get("capture", True) and 0 <= new <= RING_END:
         gpos = get_global_position(seat, new)
         captured = _pieces_at_global(gs, seat, gpos)
         if captured:
@@ -97,7 +97,7 @@ def _destination(gs: dict, seat: int, old: int, dice: int) -> int:
     """
     if old == -1:
         return 0
-    landed = _walk_end(old, dice)
+    landed = _walk_end(old, dice, gs.get("rules", {}).get("exact_finish", True))
     if landed == FINISH_PROGRESS:
         return landed
     final, _path, _segments = resolve_landing(gs, seat, landed)
@@ -106,9 +106,11 @@ def _destination(gs: dict, seat: int, old: int, dice: int) -> int:
     return final
 
 
-def _walk_end(old: int, dice: int) -> int:
+def _walk_end(old: int, dice: int, exact_finish: bool = True) -> int:
     """掷骰子走完的落点（超出终点按规则折返）。"""
     new = old + dice
+    if not exact_finish:
+        return min(new, FINISH_PROGRESS)
     if new > FINISH_PROGRESS:
         return FINISH_PROGRESS - (new - FINISH_PROGRESS)
     return new
@@ -118,7 +120,7 @@ def _pieces_at_global(gs: dict, seat: int, gpos: int) -> list[tuple[int, int]]:
     """返回 (seat, progress) 列表：落在全局格 gpos 上的对手飞机。"""
     hits = []
     for other_seat, other in gs["players"].items():
-        if other_seat == seat or other.get("finished"):
+        if same_team(gs, seat, other_seat) or other.get("finished"):
             continue
         for opid in range(PIECES_PER_PLAYER):
             op = other["pieces"][opid]
@@ -135,7 +137,7 @@ def _threat_count(gs: dict, seat: int, gpos: int) -> int:
     """
     threats = 0
     for other_seat, other in gs["players"].items():
-        if other_seat == seat or other.get("finished"):
+        if same_team(gs, seat, other_seat) or other.get("finished"):
             continue
         for opid in range(PIECES_PER_PLAYER):
             op = other["pieces"][opid]
@@ -151,12 +153,12 @@ def _threat_count(gs: dict, seat: int, gpos: int) -> int:
 def _hard_safety(gs: dict, seat: int, pid: int, dice: int) -> float:
     """Account for opponents' forced jumps/flights over all six public dice outcomes."""
     destination = _destination(gs, seat, gs["players"][seat]["pieces"][pid], dice)
-    if not 0 <= destination <= RING_END:
+    if not gs.get("rules", {}).get("capture", True) or not 0 <= destination <= RING_END:
         return 0.0
     target = get_global_position(seat, destination)
     danger = 0
     for other_seat, other in gs["players"].items():
-        if other_seat == seat or other.get("finished"):
+        if same_team(gs, seat, other_seat) or other.get("finished"):
             continue
         for progress in other["pieces"]:
             if progress < 0 or progress >= FINISH_PROGRESS:

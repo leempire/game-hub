@@ -22,9 +22,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import room_manager as rm
 from app import room_settings as rs
+from app.game import uno_rules
 
 #: 有房间级设置的五个游戏（其余游戏 `settings` 应当压根不下发）。
-GAMES = ("minesweeper", "luzhanqi", "stasis", "battleship", "tetris", "uno")
+GAMES = ("minesweeper", "luzhanqi", "stasis", "battleship", "tetris", "uno",
+         "gomoku", "reversi", "xiangqi", "dots", "connect4", "ludo")
 
 
 @pytest.fixture(autouse=True)
@@ -163,7 +165,7 @@ class TestPayloadShape:
     def test_a_game_without_settings_ships_nothing(self, client):
         """没有房间级设置的游戏**压根不下发 `settings`**（客户端据此决定显不显示入口）。"""
         t1, _ = _register(client, _u("none"))
-        assert "settings" not in _create_room(client, t1, "gomoku")
+        assert "settings" not in _create_room(client, t1, "spider")
 
     def test_luzhanqi_reveal_is_gated_on_hidden_mode(self, client):
         """「阵亡公开身份」只在暗棋下有意义 —— 由 `visible_when` 交给客户端过滤。
@@ -308,7 +310,7 @@ class TestEachGameShipsItsOwnSettings:
     def test_uno_ships_the_preset_plus_eight_rules(self, client):
         t1, _ = _register(client, _u("uno"))
         room = _create_room(client, t1, "uno")
-        assert len(room["settings"]) == 9
+        assert len(room["settings"]) == len(rs.specs_for("uno"))
         assert _setting(room, "preset")["value_label"] == "经典"
         assert _setting(room, "deck")["value"] == "classic"
 
@@ -323,7 +325,7 @@ class TestRegistryGuards:
         assert keys[1:] == [m["key"] for m in uno_rules.RULE_META]
 
     def test_unknown_game_has_no_specs(self):
-        assert rs.specs_for("gomoku") == []
+        assert rs.specs_for("unknown") == []
         assert rs.spec_for("gomoku", "anything") is None
 
     def test_boolean_cannot_impersonate_a_number(self):

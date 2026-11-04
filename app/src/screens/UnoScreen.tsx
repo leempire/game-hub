@@ -36,7 +36,7 @@ import { shellPlayers } from '../gamePlayers';
 import { useDisconnectCountdown } from '../disconnect';
 import { UnoCardView, UnoHandBacks, UNO_CARD_H, UNO_CARD_W } from '../UnoCardView';
 import { UnoColorBadge } from '../icons';
-import { UNO_COLOR_KEYS, UNO_COLOR_NAMES, cardLabel, cardKind } from '../uno';
+import { UNO_COLOR_KEYS, UNO_COLOR_NAMES, cardLabel, cardKind, UnoSeries } from '../uno';
 
 /** 扇形手牌：相邻牌重叠这么多像素（露出 `UNO_CARD_W - OVERLAP`）。 */
 const OVERLAP = 22;
@@ -47,6 +47,7 @@ const PRESS_LIFT = 10;
 /** 弃牌堆的尺寸（比手牌大一档：它是全桌的视觉焦点）。 */
 const PILE_W = 88;
 const PILE_H = 132;
+
 
 /** 服务端逐人下发的对局状态（`game_start` / `sync` / `uno_state` 同构）。 */
 interface UnoPayload {
@@ -116,6 +117,10 @@ interface UnoPayload {
   can_draw: boolean;
   can_pass: boolean;
   can_call_uno: boolean;
+  can_challenge_wild4?: boolean;
+  wild4_challenge_targets?: number[];
+  catch_uno_targets?: number[];
+  series?: UnoSeries | null;
   /** 能替谁喊 UNO（组队档里可能只有队友那一张）。服务端下发，客户端不自己推。 */
   uno_targets?: number[];
   winner: number | null;
@@ -152,6 +157,9 @@ const REASON_LABELS: Record<string, string> = {
 /** `uno_event` 的载荷：公开事件（谁做了什么），供提示条与动效。 */
 interface UnoEvent {
   kind: string;
+  success?: boolean;
+  offender?: number;
+  penalty_seat?: number;
   seat: number | null;
   card?: string;
   color?: string;
@@ -373,6 +381,10 @@ export default function UnoScreen({ code, onLeave }: Props) {
         flash(`${subject}喊了 UNO！`);
       } else if (ev.kind === 'autopass') {
         flash(`${subject}已掉线 · 自动过牌`);
+      } else if (ev.kind === 'challenge_wild4') {
+        flash(`质疑 +4 ${ev.success ? '成功' : '失败'} · ${nameOfSeat(ev.penalty_seat)} 罚摸 ${ev.penalty ?? 0} 张`);
+      } else if (ev.kind === 'catch_uno') {
+        flash(`${nameOfSeat(ev.target)} 漏喊 UNO · 罚摸 ${ev.penalty ?? 0} 张`);
       } else if (ev.kind === 'surrender') {
         flash(`${subject}认输退出`);
       } else if (ev.kind === 'leave') {
@@ -397,6 +409,7 @@ export default function UnoScreen({ code, onLeave }: Props) {
             ranking: (msg.ranking as UnoRankRow[]) || [],
             points: (msg.points as Record<string, number>) || {},
             finished: true,
+            series: (msg.series as UnoSeries | null) ?? prev.series,
           }
         : prev));
       if (!gameOverShownRef.current) {
@@ -581,6 +594,17 @@ export default function UnoScreen({ code, onLeave }: Props) {
 
   return (
     <GameShell game="uno" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} style={styles.container} actions={iAmOut && !showGameOver ? null : <View style={styles.actions}>
+          {game?.can_challenge_wild4 && <TouchableOpacity style={styles.actBtn} testID="uno-challenge-wild4"
+            disabled={!shellConnected} onPress={() => socketRef.current?.unoChallengeWild4()}>
+            <Text style={styles.actBtnText}>质疑 +4</Text>
+          </TouchableOpacity>}
+          {(game?.catch_uno_targets ?? []).map(target => {
+            const player = room?.players.find(member => member.id === game?.seat_uids[target]);
+            return <TouchableOpacity key={target} style={styles.actBtn}
+              testID={`uno-catch-${target}`} disabled={!shellConnected} onPress={() => socketRef.current?.unoCatch(target)}>
+              <Text style={styles.actBtnText}>抓 {player?.nickname || player?.username || '对手'} 漏喊</Text>
+            </TouchableOpacity>;
+          })}
           <TouchableOpacity
             style={[styles.actBtn, !(isMyTurn && game?.can_pass) && styles.idle]}
             onPress={() => isMyTurn && game?.can_pass && socketRef.current?.unoPass()}
@@ -913,8 +937,17 @@ export default function UnoScreen({ code, onLeave }: Props) {
       </ModalM>
 
       {/* 结算 */}
-      <GameResult visible={showGameOver} result={resultText} players={shellPlayers(room, user?.id, game)} roomButtonTestID="u-result-back" onBackToRoom={handleBackToRoom}
+      <GameResult visible={showGameOver} result={game?.series?.finished ? '系列赛结束' : game?.series ? '本局结束，系列赛继续' : resultText} players={shellPlayers(room, user?.id, game)} roomButtonTestID="u-result-back" onBackToRoom={handleBackToRoom}
         onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+        {game?.series && <View testID="uno-series-score" style={{ gap: spacing.xs }}>
+          <Text style={{ color: colors.text, fontWeight: '700' }}>{game.series.target} 分赛 · 已完成 {game.series.rounds} 局</Text>
+          <Text style={{ color: colors.textSecondary }}>{resultText}</Text>
+          {Object.entries(game.series.scores).map(([uid, score]) => {
+            const player = room?.players.find(member => member.id === Number(uid));
+            const champion = game.series?.finished && game.series.winners.includes(Number(uid));
+            return <Text key={uid} style={{ color: champion ? colors.success : colors.textSecondary }}>{player?.nickname || player?.username || '玩家'} · {score} 分{champion ? ' · 系列赛胜者' : ''}</Text>;
+          })}
+        </View>}
         <View style={styles.rankList}>
           {ranking.map((r) => (
             <View key={r.seat} style={styles.rankRow}>

@@ -277,8 +277,9 @@ export default function LudoScreen({ code, onLeave }: Props) {
       const kind = kindOf(prev, prog);
       prev = prog;
       const [tx, ty] = piecePixel(seat, pi, prog, c);
-      const dur = kind === 'fly' ? FLY_MS : kind === 'jump' ? JUMP_MS
+      const baseDuration = kind === 'fly' ? FLY_MS : kind === 'jump' ? JUMP_MS
         : kind === 'bounce' ? BOUNCE_MS : walkDur;
+      const dur = baseDuration * (gameStateRef.current?.animation_scale ?? 1);
       const move = [
         Animated.timing(a.x, { toValue: tx, duration: dur, useNativeDriver: NATIVE_DRIVER }),
         Animated.timing(a.y, { toValue: ty, duration: dur, useNativeDriver: NATIVE_DRIVER }),
@@ -461,12 +462,12 @@ export default function LudoScreen({ code, onLeave }: Props) {
             const a = getAnim(cap.seat, cap.piece_id);
             const [bx, by] = apronSlotPixel(cap.seat, cap.piece_id, c);
             Animated.parallel([
-              Animated.timing(a.x, { toValue: bx, duration: CAPTURE_MS, useNativeDriver: NATIVE_DRIVER }),
-              Animated.timing(a.y, { toValue: by, duration: CAPTURE_MS, useNativeDriver: NATIVE_DRIVER }),
+              Animated.timing(a.x, { toValue: bx, duration: CAPTURE_MS * (gameStateRef.current?.animation_scale ?? 1), useNativeDriver: NATIVE_DRIVER }),
+              Animated.timing(a.y, { toValue: by, duration: CAPTURE_MS * (gameStateRef.current?.animation_scale ?? 1), useNativeDriver: NATIVE_DRIVER }),
             ]).start();
           });
           // 落定后按最终逻辑位置重排（同格叠子要错位，否则 4 架叠成一架）
-          setTimeout(() => snapAllPieces(gameStateRef.current, edgeRef.current), CAPTURE_MS + 40);
+          setTimeout(() => snapAllPieces(gameStateRef.current, edgeRef.current), CAPTURE_MS * (gameStateRef.current?.animation_scale ?? 1) + 40);
         },
       );
 
@@ -524,6 +525,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
     });
 
     ws.on('game_over', (msg: any) => {
+      setGameState((previous: any) => previous ? { ...previous, finished: true, winner_team: msg.winner_team ?? null } : previous);
       gameOverRef.current = true;
       if (!gameOverShownRef.current) {
         gameOverShownRef.current = true;
@@ -827,7 +829,7 @@ export default function LudoScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <GameResult visible={showGameOver} result={'排名确定'} players={shellPlayers({ game: 'ludo', players: roomPlayers }, user?.id, gameState)} onBackToRoom={handleBackToRoom}
+      <GameResult visible={showGameOver} result={gameState?.winner_team != null ? `第 ${gameState.winner_team + 1} 队获胜` : '排名确定'} players={shellPlayers({ game: 'ludo', players: roomPlayers }, user?.id, gameState)} onBackToRoom={handleBackToRoom}
         onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
 
 

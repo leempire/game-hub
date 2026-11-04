@@ -63,7 +63,8 @@ ARROW_FIRST = 3
 STACK_MIN = 2
 
 
-def create_game(num_players: int = 4) -> dict:
+def create_game(num_players: int = 4, teams: str = "off", capture: bool = True,
+                color_jump: bool = True, exact_finish: bool = True, animation_speed: str = "normal") -> dict:
     """Create a new aeroplane chess game state.
 
     Args:
@@ -71,6 +72,12 @@ def create_game(num_players: int = 4) -> dict:
     """
     if num_players < 2 or num_players > 4:
         raise ValueError("飞行棋需要 2-4 名玩家")
+    if teams not in ("off", "2v2") or (teams == "2v2" and num_players != 4):
+        raise ValueError("飞行棋组队模式需要恰好4名玩家")
+    if not all(isinstance(v, bool) for v in (capture, color_jump, exact_finish)):
+        raise ValueError("飞行棋规则开关必须为布尔值")
+    if animation_speed not in ("slow", "normal", "fast"):
+        raise ValueError("没有这个动画速度档位")
     players = {}
     for seat in range(num_players):
         players[seat] = {
@@ -83,6 +90,10 @@ def create_game(num_players: int = 4) -> dict:
         }
     return {
         "num_players": num_players,
+        "rules": {"teams": teams, "capture": capture, "color_jump": color_jump,
+                  "exact_finish": exact_finish},
+        "winner_team": None,
+        "animation_speed": animation_speed,
         "players": players,
         "current_seat": 0,
         "dice_value": None,
@@ -211,7 +222,7 @@ def move_piece(game: dict, piece_id: int) -> dict:
         player["pieces"][piece_id] = new_progress
         captures = _check_capture(game, seat, new_progress, piece_id)
     else:
-        path = _walk_path(old_progress, dice)
+        path = _walk_path(old_progress, dice, game.get("rules", {}).get("exact_finish", True))
         new_progress = path[-1]
         if new_progress == FINISH_PROGRESS:
             # 精确到达终点
@@ -336,6 +347,13 @@ def compute_ranking(game: dict, players_info: list[dict]) -> list[dict]:
             "rank": rank,
         })
 
+    if game.get("rules", {}).get("teams") == "2v2":
+        winner = game.get('winner_team')
+        result.sort(key=lambda entry: (team_of(game, entry['seat']) != winner,
+                                       entry['seat']))
+        for entry in result:
+            entry['team'] = team_of(game, entry['seat'])
+            entry['rank'] = 1 if entry['team'] == winner else 2
     return result
 
 
@@ -351,6 +369,12 @@ def game_to_sync(game: dict, players_info: list[dict] | None = None) -> dict:
         }
     result = {
         "game": "ludo",
+        "rules": dict(game.get("rules") or {}),
+        "seat_teams": [team_of(game, s) for s in range(game["num_players"])],
+        "animation_speed": game.get("animation_speed", "normal"),
+        "animation_scale": {"slow": 1.5, "normal": 1.0, "fast": 0.6}.get(
+            game.get("animation_speed", "normal"), 1.0),
+        "winner_team": game.get("winner_team"),
         "num_players": game["num_players"],
         "players": players,
         "current_seat": game["current_seat"],
@@ -442,7 +466,8 @@ def resolve_landing(game: dict, seat: int, landed: int) -> tuple[int, list[int],
             segments.append({"kind": "fly", "from": cur, "to": target})
             cur = target
             flew = True
-        elif is_own_color(cur) and not jumped and cur + JUMP_STEP <= RING_END:
+        elif (game.get("rules", {}).get("color_jump", True) and is_own_color(cur)
+              and not jumped and cur + JUMP_STEP <= RING_END):
             # 不允许跳进终点航道：航道不属于 52 格的配色环，跳过去会绕过
             # 「终点必须精确到达」这条规则
             nxt = cur + JUMP_STEP
@@ -464,12 +489,14 @@ def _reset_all_pieces(player: dict):
     player["finished_count"] = 0
 
 
-def _walk_path(old: int, dice: int) -> list[int]:
+def _walk_path(old: int, dice: int, exact_finish: bool = True) -> list[int]:
     """掷骰子逐格走过的 progress 序列（不含起点，含超出终点后的折返）。
 
     例：old=55, dice=5 → [56, 57, 56, 55, 54]，终点 54 与引擎的
     「超出多少退多少」一致，但中间过程也画得出来（客户端逐格动画要用）。
     """
+    if not exact_finish:
+        return list(range(old + 1, min(old + dice, FINISH_PROGRESS) + 1))
     out: list[int] = []
     for i in range(1, dice + 1):
         p = old + i
@@ -485,12 +512,12 @@ def enemy_stacks_at(game: dict, seat: int, progress: int) -> list[int]:
     迭子的两条规则都靠它：走子路径经过迭子格 → 该走法非法；落点正好是迭子 →
     同归于尽（见 move_piece）。
     """
-    if progress < 0 or progress > RING_END:
+    if not game.get("rules", {}).get("capture", True) or progress < 0 or progress > RING_END:
         return []
     global_pos = get_global_position(seat, progress)
     out: list[int] = []
     for other_seat, other_player in game["players"].items():
-        if other_seat == seat or other_player["finished"]:
+        if same_team(game, seat, other_seat) or other_player["finished"]:
             continue
         n = 0
         for pid in range(PIECES_PER_PLAYER):
@@ -513,11 +540,11 @@ def _path_blocked(game: dict, seat: int, path: list[int]) -> bool:
 
 def _enemies_at(game: dict, seat: int, progress: int) -> bool:
     """落点上是否停着对手飞机（只读，不改动状态——改状态的留给 _check_capture）。"""
-    if progress < 0 or progress > RING_END:
+    if not game.get("rules", {}).get("capture", True) or progress < 0 or progress > RING_END:
         return False
     global_pos = get_global_position(seat, progress)
     for other_seat, other_player in game["players"].items():
-        if other_seat == seat or other_player["finished"]:
+        if same_team(game, seat, other_seat) or other_player["finished"]:
             continue
         for pid in range(PIECES_PER_PLAYER):
             other_progress = other_player["pieces"][pid]
@@ -543,7 +570,7 @@ def _get_movable_pieces(player: dict, dice: int, game: dict | None = None, seat:
         elif progress == FINISH_PROGRESS:
             continue  # already finished
         if game is not None and progress != -1:
-            if _path_blocked(game, seat, _walk_path(progress, dice)):
+            if _path_blocked(game, seat, _walk_path(progress, dice, game.get("rules", {}).get("exact_finish", True))):
                 continue
         movable.append(i)
     return movable
@@ -557,14 +584,14 @@ def _check_capture(
     Only captures on the ring (progress 0..RING_END).
     Returns list of {"seat": int, "piece_id": int} for captured pieces.
     """
-    if progress < 0 or progress > RING_END:
+    if not game.get("rules", {}).get("capture", True) or progress < 0 or progress > RING_END:
         return []
 
     global_pos = get_global_position(seat, progress)
     captures = []
 
     for other_seat, other_player in game["players"].items():
-        if other_seat == seat or other_player["finished"]:
+        if same_team(game, seat, other_seat) or other_player["finished"]:
             continue
         for pid in range(PIECES_PER_PLAYER):
             other_progress = other_player["pieces"][pid]
@@ -596,6 +623,17 @@ def _check_game_over(game: dict) -> dict | None:
     Game ends when all players have finished (all 4 pieces home)
     or only one player remains unfinished.
     """
+    if game.get('rules', {}).get('teams') == '2v2':
+        for side in (0, 1):
+            members = [p for seat, p in game['players'].items() if seat % 2 == side]
+            forfeited = any(p.get('surrendered') for p in members)
+            completed = all(p['finished_count'] >= PIECES_PER_PLAYER for p in members)
+            if forfeited or completed:
+                game['finished'] = True
+                game['winner_team'] = 1 - side if forfeited else side
+                game['reason'] = 'team_surrender' if forfeited else 'team_finished'
+                return {'reason': game['reason'], 'winner_team': game['winner_team']}
+        return None
     unfinished = [
         s for s, p in game["players"].items() if not p["finished"]
     ]
@@ -608,3 +646,12 @@ def _check_game_over(game: dict) -> dict | None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def team_of(game: dict, seat: int) -> int | None:
+    return seat % 2 if game.get('rules', {}).get('teams') == '2v2' else None
+
+
+def same_team(game: dict, seat: int, other_seat: int) -> bool:
+    return seat == other_seat or (team_of(game, seat) is not None
+                                  and team_of(game, seat) == team_of(game, other_seat))

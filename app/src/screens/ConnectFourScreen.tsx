@@ -37,6 +37,7 @@ interface Connect4Move {
   x: number;                 // 列
   y: number;                 // 落点行（服务端算的）
   color: 'black' | 'white';
+  action?: 'drop' | 'pop';
 }
 
 interface Connect4State {
@@ -44,6 +45,8 @@ interface Connect4State {
   rows: number;
   board: number[][];         // board[row][col]：0 空 / 1 黑 / 2 白
   moves: Connect4Move[];
+  popout?: boolean;
+  legal_actions?: { action: 'drop' | 'pop'; col: number }[];
   next: 'black' | 'white';
   your_color: 'black' | 'white';
   winner: 'black' | 'white' | 'draw' | null;
@@ -168,7 +171,7 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
   const rows = game?.rows ?? 6;
   const cols = game?.cols ?? 7;
   const availW = winWidth - spacing.md * 2;
-  const availH = winHeight - 320;
+  const availH = winHeight - 320 - (game?.popout ? 48 : 0);
   const cell = Math.max(26, Math.min(
     availW / (cols + 0.7), Math.max(availH, 240) / (rows + 0.7), BOARD_MAX / (cols + 0.7),
   ));
@@ -321,16 +324,18 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
       const color = msg.color as 'black' | 'white';
       setGame((prev) => {
         if (!prev) return prev;
-        const nextBoard = prev.board.map((r) => [...r]);
-        nextBoard[row][col] = stoneOf(color);
+        const nextBoard = msg.board ? (msg.board as number[][]) : prev.board.map((r) => [...r]);
+        if (msg.action !== 'pop') nextBoard[row][col] = stoneOf(color);
         return {
           ...prev,
           board: nextBoard,
-          moves: [...prev.moves, { x: col, y: row, color }],
+          moves: [...prev.moves, { x: col, y: row, color, action: msg.action as 'drop' | 'pop' }],
+          legal_actions: (msg.legal_actions as Connect4State['legal_actions']) ?? prev.legal_actions,
           next: msg.next as 'black' | 'white',
         };
       });
-      playDrop(row, col);
+      if (msg.action === 'pop') setDropping(null);
+      else playDrop(row, col);
       if (Platform.OS !== 'web') Vibration.vibrate(10);
     };
 
@@ -382,6 +387,7 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
   // --- 交互 ---
   const handleColumnPress = useCallback((c: number) => {
     if (!game || !isMyTurn) return;
+    if (!socketRef.current?.isConnected) { notify('连接已断开', '重连后可落子'); return; }
     if (landingRow(game.board, c) < 0) {
       notify('放不下了', '这一列已经满了，换一列吧');
       return;
@@ -582,6 +588,18 @@ export default function ConnectFourScreen({ code, onLeave }: Props) {
             {columnHits}
           </View>
         </View>
+        {game.popout && <View style={{ flexDirection: 'row', gap: 2, marginTop: spacing.xs }}>
+          {Array.from({ length: cols }, (_, col) => {
+            const enabled = isMyTurn && !!game.legal_actions?.some(action => action.action === 'pop' && action.col === col);
+            return <TouchableOpacity key={col} testID={`c4-pop-${col}`} accessibilityRole="button"
+              accessibilityLabel={`弹出第 ${col + 1} 列底部棋子`} disabled={!enabled}
+              onPress={() => socketRef.current?.drop(col, 'pop')}
+              style={{ minHeight: 44, width: Math.max(40, cell - 2), justifyContent: 'center', alignItems: 'center',
+                borderRadius: radius.sm, backgroundColor: enabled ? colors.primary : colors.disabled }}>
+              <Text style={{ color: enabled ? colors.white : colors.textMuted }}>弹 {col + 1}</Text>
+            </TouchableOpacity>;
+          })}
+        </View>}
       </View>
 
       {/* 图例：提示标的含义（颜色之外的第二通道就是标签本身） */}

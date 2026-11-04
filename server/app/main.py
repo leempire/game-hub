@@ -87,6 +87,12 @@ async def on_startup():
     loop.create_task(reschedule_after_restore())
 
 
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Save timed-room balances before the service stops."""
+    await rm.room_timing.shutdown(rm.all_rooms())
+
+
 # Mount routers
 app.include_router(auth.router)
 app.include_router(admin.router)

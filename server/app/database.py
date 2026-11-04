@@ -438,20 +438,18 @@ def _build_results_record(room: dict) -> list[dict]:
             results.append({"username": p["username"], "result": r})
         return results
     if room["game"] == "uno":
-        # 单局定胜负：出完手牌的那个人是胜者，其余按剩余手牌点数排名
-        ranking = room.get("_uno_ranking", [])
-        if not ranking:
-            from app.game.uno import compute_ranking
-            players_info = [
-                {"seat": idx, "username": p["username"],
-                 "nickname": p.get("nickname")}
-                for idx, p in enumerate(room["players"])
-            ]
-            ranking = compute_ranking(gs, players_info)
-        rank_map = {e["username"]: e["rank"] for e in ranking}
-        for p in room["players"]:
-            r = "win" if rank_map.get(p["username"], 999) == 1 else "lose"
-            results.append({"username": p["username"], "result": r})
+        series = gs.get("series")
+        team_mode = gs.get("rules", {}).get("teams") == "2v2"
+        for seat, player in enumerate(room["players"]):
+            round_win = (seat % 2 == gs.get("winner_team")) if team_mode else seat == winner
+            round_result = "win" if round_win else "lose"
+            entry = {"username": player["username"], "result": round_result}
+            if series:
+                entry.update(round_result=round_result,
+                             series_score=series["scores"].get(str(player["id"]), 0),
+                             series_finished=bool(series["finished"]))
+                entry["result"] = ("win" if player["id"] in series["winners"] else "lose") if series["finished"] else "end"
+            results.append(entry)
         return results
     if room["game"] == "2048":
         # 2048 是「各玩各的」跑分竞速，不是胜负对抗：**只有真的合出 2048 才算胜**，
@@ -496,7 +494,8 @@ def _build_snapshot(room: dict) -> dict:
     if game == "gomoku":
         return {
             "game": "gomoku",
-            "board_size": 15,
+            "board_size": len(gs.get("board") or []) or 15,
+            "forbidden": bool(gs.get("forbidden")),
             "board": gs.get("board", []),
             "moves": gs.get("moves", []),
             "winner": gs.get("winner"),
@@ -505,7 +504,7 @@ def _build_snapshot(room: dict) -> dict:
     if game == "reversi":
         return {
             "game": "reversi",
-            "board_size": 8,
+            "board_size": len(gs.get("board") or []) or 8,
             "board": gs.get("board", []),
             "moves": gs.get("moves", []),
             "winner": gs.get("winner"),
@@ -567,6 +566,7 @@ def _build_snapshot(room: dict) -> dict:
         from app.game.connect4 import COLS, ROWS
         return {
             "game": "connect4",
+            "popout": bool(gs.get("popout")),
             "cols": COLS,
             "rows": ROWS,
             "board": gs.get("board", []),
@@ -595,6 +595,11 @@ def _build_snapshot(room: dict) -> dict:
         return {
             "game": "ludo",
             "num_players": gs.get("num_players", 0),
+            "rules": dict(gs.get("rules") or {}),
+            "winner_team": gs.get("winner_team"),
+            "seat_teams": [seat % 2 if gs.get("rules", {}).get("teams") == "2v2" else None
+                           for seat in range(gs.get("num_players", 0))],
+            "animation_speed": gs.get("animation_speed", "normal"),
             "players": players_snap,
             "ranking": ranking,
             "reason": gs.get("reason"),

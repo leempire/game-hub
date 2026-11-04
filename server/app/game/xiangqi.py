@@ -13,6 +13,9 @@
 - **困毙判负**：无子可动但没被将军（西方象棋判和），象棋里**判负**。见 `game_status`。
 """
 
+from app.game import xiangqi_history
+from app.game.xiangqi_notation import notation
+
 ROWS = 10
 COLS = 9
 
@@ -43,7 +46,7 @@ _HORSE = (
 )
 
 #: 60 回合（120 个半回合）无吃子判和——这条规则同时保证了棋局必然终止，
-#: 所以不再单独做「三次重复局面」检测。
+#: 单方长将另由公开重复序列裁决，不把普通重复误判成长将。
 DRAW_PLIES = 120
 
 
@@ -407,7 +410,8 @@ def create_game() -> dict:
     board = create_board()
     return {
         "board": board,
-        "moves": [],               # [{from:[r,c], to:[r,c], piece, captured}]
+        "moves": [],               # [{from, to, piece, captured, notation, by, check}]
+        "revision": 0,             # 单调递增；悔棋也递增，用来丢弃陈旧搜索
         "next": RED,               # 红先
         "winner": None,            # None / RED / BLACK / "draw"
         "reason": None,            # checkmate / stalemate / no_capture / surrender / disconnect
@@ -428,12 +432,7 @@ def _finish(gs: dict, winner: str, reason: str) -> None:
 
 
 def _settle(gs: dict) -> None:
-    """走完一步后判定终局：将死 / 困毙 / 60 回合无吃子判和。
-
-    重复局面（长将）不单独判——没有吃子的来回走子会先把 `no_capture` 顶到上限
-    判和，棋局必然终止，所以不做三次重复检测。**代价是长将赖和**（标准规则里
-    长将判负），属已知简化。
-    """
+    """将死/困毙优先；第三次重复中的单方长将判负，再检查无吃子判和。"""
     turn = gs["next"]
     status = game_status(gs["board"], turn)
     gs["check"] = is_in_check(gs["board"], turn)
@@ -443,7 +442,10 @@ def _settle(gs: dict) -> None:
     if status == "stalemate":
         _finish(gs, other(turn), "stalemate")
         return
-    if gs["no_capture"] >= DRAW_PLIES:
+    repetition = xiangqi_history.adjudicate(gs)
+    if repetition:
+        _finish(gs, *repetition)
+    elif gs["no_capture"] >= DRAW_PLIES:
         _finish(gs, "draw", "no_capture")
 
 
@@ -468,15 +470,24 @@ def make_move(gs: dict, frm, to) -> dict:
     if (tr, tc) not in legal_moves(board, fr, fc):
         return {"ok": False, "error": "这步棋不合规则"}
 
+    xiangqi_history.ensure_history(gs)
+    text = notation(board, (fr, fc), (tr, tc))
+    mover = gs["next"]
     captured = apply_move(board, (fr, fc), (tr, tc))
-    move = {"from": [fr, fc], "to": [tr, tc], "piece": piece, "captured": captured}
+    move = {"from": [fr, fc], "to": [tr, tc], "piece": piece, "captured": captured,
+            "notation": text, "by": mover, "_no_capture_before": gs["no_capture"]}
     gs["moves"].append(move)
     gs["last_move"] = move
     gs["no_capture"] = 0 if captured else gs["no_capture"] + 1
     gs["next"] = other(gs["next"])
+    move["check"] = is_in_check(board, gs["next"])
+    xiangqi_history.record_position(gs, mover, move["check"])
+    gs["revision"] = gs.get("revision", 0) + 1
     _settle(gs)
 
-    msg = {**move, "next": gs["next"], "check": gs["check"], "legal": legal_payload(gs)}
+    msg = {**{key: value for key, value in move.items() if not key.startswith("_")},
+           "next": gs["next"], "check": gs["check"], "legal": legal_payload(gs),
+           "revision": gs["revision"]}
     game_over = None
     if gs["winner"]:
         game_over = {"winner": gs["winner"], "reason": gs["reason"]}
@@ -510,13 +521,16 @@ def game_to_sync(gs: dict, user_id: int) -> dict:
         "rows": ROWS,
         "cols": COLS,
         "board": gs["board"],
-        "moves": gs["moves"],
+        "moves": [{k: v for k, v in move.items() if not k.startswith("_")}
+                  for move in gs["moves"]],
+        "revision": gs.get("revision", 0),
         "next": gs["next"],
         "your_color": gs["player_colors"].get(user_id, ""),
         "winner": gs["winner"],
         "reason": gs["reason"],
         "check": gs.get("check", False),
-        "last_move": gs.get("last_move"),
+        "last_move": ({key: value for key, value in gs["last_move"].items() if not key.startswith("_")}
+                      if gs.get("last_move") else None),
         "legal": legal_payload(gs),
     }
 
@@ -528,7 +542,17 @@ def snapshot(gs: dict) -> dict:
         "rows": ROWS,
         "cols": COLS,
         "board": gs.get("board", []),
-        "moves": gs.get("moves", []),
+        "moves": [{k: v for k, v in move.items() if not k.startswith("_")}
+                  for move in gs.get("moves", [])],
         "winner": gs.get("winner"),
         "reason": gs.get("reason"),
     }
+
+
+def undo_last_pair(gs: dict, color: str) -> dict:
+    """Pure takeback of the last completed pair; no permission or time reads."""
+    result = xiangqi_history.rewind_pair(gs, color)
+    if result["ok"]:
+        gs["check"] = is_in_check(gs["board"], gs["next"])
+        result.update(revision=gs["revision"], legal=legal_payload(gs))
+    return result

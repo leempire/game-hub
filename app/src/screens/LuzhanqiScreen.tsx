@@ -24,6 +24,7 @@ import { onConfirmLeave, useModalBackGuard } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
 import GameShell, { GameResult } from '../GameShell';
 import { shellPlayers } from '../gamePlayers';
+import { SetupCountdown, observeCountdown, ObservedCountdown } from '../GameClock';
 import { RoomSocket, SocketMessage } from '../socket';
 import {
   LzqBattle, LzqView, PIECE_ORDER, battleText, pieceName, reasonText, sideName,
@@ -51,6 +52,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
   const { token, user } = useAuth();
   const { width: winWidth, height: winHeight } = useWindowDimensions();
   const [shellConnected, setShellConnected] = useState(false);
+  const [setupClock, setSetupClock] = useState<ObservedCountdown | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [game, setGame] = useState<LzqView | null>(null);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
@@ -128,7 +130,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
     socketRef.current = ws;
 
     const adopt = (g: LzqView) => {
-      setGame(g);
+      setGame(g); setSetupClock(g.setup_remaining_ms != null ? observeCountdown(g.setup_remaining_ms) : null);
       setSelected(null);
       setSwapSel(null);
       setBattleAt(null);
@@ -157,7 +159,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
     };
     const handleSetup = (msg: SocketMessage) => {
       const g = msg.game as LzqView;
-      if (g) { setGame(g); setSwapSel(null); }
+      if (g) { setGame(g); setSetupClock(g.setup_remaining_ms != null ? observeCountdown(g.setup_remaining_ms) : null); setSwapSel(null); }
     };
     const handleReady = (msg: SocketMessage) => {
       setGame((prev) => (prev ? { ...prev, ready: (msg.ready as Record<string, boolean>) ?? prev.ready } : prev));
@@ -236,6 +238,8 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
       setSwapSel(null);
     };
 
+    ws.on('luzhanqi_state', msg => { const next = msg.game as LzqView; if (next) { setGame(next); setSelected(null); setSwapSel(null); } });
+    ws.on('setup_left', msg => setSetupClock(typeof msg.remaining_ms === 'number' ? observeCountdown(msg.remaining_ms) : null));
     ws.on('sync', handleSync);
     ws.on('lobby', handleLobby);
     ws.on('game_start', handleGameStart);
@@ -352,7 +356,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
     .filter((x) => x.n > 0);
 
   return (
-    <GameShell game="luzhanqi" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={<View style={{ flexDirection: 'row', justifyContent: 'center', gap: spacing.sm }}><Text style={{ color: colors.textSecondary }}>{turnText}</Text><Text style={{ color: colors.textSecondary }}>{game?.mode === 'hidden' ? game.reveal ? '暗棋（公开阵亡身份）' : '暗棋' : '明棋'}</Text></View>} style={styles.root} actions={<View style={styles.bottomBar}>
+    <GameShell game="luzhanqi" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={<View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.sm }}><Text style={{ color: colors.textSecondary }}>{turnText}</Text><Text style={{ color: colors.textSecondary }}>{game?.mode === 'hidden' ? game.reveal ? '暗棋（公开阵亡身份）' : '暗棋' : '明棋'}</Text>{inSetup && <SetupCountdown value={setupClock} />}</View>} style={styles.root} actions={<View style={styles.bottomBar}>
         <TouchableOpacity
           testID="lz-surrender"
           style={[styles.ghostBtn, styles.flex1]}
@@ -531,6 +535,7 @@ export default function LuzhanqiScreen({ code, onLeave }: Props) {
       {/* 结算 */}
       <GameResult visible={showGameOver} result={game?.winner ? WINNER_LABELS[game.winner] ?? '对局结束' : '对局结束'} reason={reasonText(game?.reason)} players={shellPlayers(room, user?.id, game)} roomButtonTestID="lz-back-room"
         onBackToRoom={handleBackToRoom} onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
+        {game?.truth_available && <><Text style={{ color: colors.textSecondary }}>终局亮牌（只读）</Text><ScrollView style={{ maxHeight: 280 }} contentContainerStyle={{ alignItems: 'center' }} testID="lz-truth-board"><LuzhanqiBoardView view={game} layout={makeLayout(game.topology, 40, 26, 13)} flipped={false} interactive={false} /></ScrollView></>}
 
       </GameResult>
     </GameShell>

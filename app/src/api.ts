@@ -1,5 +1,6 @@
 import { API_BASE } from './config';
 import type { SpiderSnapshot } from './spider';
+import type { UnoSeries } from './uno';
 import { parseError } from './utils';
 
 // Callback invoked on 401 - set by AuthProvider to trigger logout
@@ -259,6 +260,8 @@ export interface HistoryResult {
 
 export interface GomokuSnapshot {
   game: 'gomoku';
+  forbidden?: boolean;
+  moves?: { x: number; y: number; color: string }[];
   board_size: number;
   board: number[][];
   winner: string | null;
@@ -267,6 +270,7 @@ export interface GomokuSnapshot {
 
 export interface ReversiSnapshot {
   game: 'reversi';
+  moves?: { x: number; y: number; color: string; flipped?: number[][] }[];
   board_size: number;
   board: number[][];
   winner: string | null;
@@ -302,13 +306,15 @@ export interface XiangqiSnapshot {
   cols: number;
   /** 10×9，元素是棋子单字符（红大写/黑小写）或 null。 */
   board: (string | null)[][];
-  moves: Array<{ from: number[]; to: number[]; piece: string; captured: string | null }>;
+  moves: Array<{ from: number[]; to: number[]; piece: string; captured: string | null; notation?: string }>;
   winner: string | null;
   reason: string | null;
 }
 
 export interface ConnectFourSnapshot {
   game: 'connect4';
+  popout?: boolean;
+  moves?: { x: number; y: number; color: string; action?: 'drop' | 'pop' }[];
   cols: number;
   rows: number;
   /** rows × cols，元素是 0（空）/ 1（黑）/ 2（白）。 */
@@ -348,6 +354,7 @@ export interface TetrisSnapshot {
  */
 export interface UnoSnapshot {
   game: 'uno';
+  series?: UnoSeries | null;
   num_players: number;
   /** 座位号 → uid（座位号即 room.players 下标，也是回合顺序） */
   seat_uids: number[];
@@ -389,6 +396,10 @@ export interface Game2048Snapshot {
 
 export interface LudoSnapshot {
   game: 'ludo';
+  seat_teams?: (number | null)[];
+  winner_team?: number | null;
+  animation_speed?: string;
+  rules?: Record<string, unknown>;
   num_players: number;
   players: Record<string, { pieces: number[]; color: string; finished_count: number; finished: boolean }>;
   ranking?: Array<{ seat: number; username: string; nickname: string | null; color: string; finished_count: number; rank: number }>;

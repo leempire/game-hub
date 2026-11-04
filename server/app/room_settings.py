@@ -244,13 +244,93 @@ def _uno_rule_settings() -> list[Setting]:
     return out
 
 
+def _board_sizes(key, store, default, sizes, name="棋盘"):
+    return Setting(key=key, label=name, kind=KIND_CHOICE, store=store, default=default,
+                   in_summary=True, choices=tuple(
+                       {"value": n, "label": f"{n}×{n}", "blurb": f"使用{n}×{n}棋盘；小盘节奏快，大盘布局空间更大。"}
+                       for n in sizes))
+
+
+def _gomoku_settings():
+    return [
+        _board_sizes("board_size", "gomoku_size", 15, (9, 13, 15, 19)),
+        Setting(key="forbidden", label="黑棋禁手", kind=KIND_TOGGLE,
+                store="gomoku_forbidden", default=False, in_summary=True,
+                blurb="黑棋禁长连、四四、真三三，恰好五连优先；白棋无禁手。非法位置不可落，不使用比赛开局交换规则。"),
+    ]
+
+
+def _ludo_settings():
+    return [
+        Setting(key="teams", label="组队", kind=KIND_CHOICE, store="ludo_teams",
+                default="off", in_summary=True, blurb="各自控制4架飞机，选择单人竞速或对家组队。", choices=(
+                    {"value": "off", "label": "各自为战"},
+                    {"value": "2v2", "label": "2v2", "blurb": "恰好4人，对家同队；全队8架到达获胜，队友互不撞机或阻挡；队员认输则整队弃权。"})),
+        Setting(key="capture", label="撞机", kind=KIND_TOGGLE,
+                store="ludo_capture", default=True,
+                blurb="关闭后飞机可共用赛道格，不撞回基地，也不受敌方叠机阻挡。"),
+        Setting(key="color_jump", label="同色跳格", kind=KIND_TOGGLE,
+                store="ludo_color_jump", default=True,
+                blurb="控制落在己方颜色后的额外跳4格；虚线飞行保持原规则。"),
+        Setting(key="exact_finish", label="精确到达", kind=KIND_TOGGLE,
+                store="ludo_exact_finish", default=True,
+                blurb="开启时超过终点按多余步数折返；关闭时到达或超过终点均完成。"),
+        Setting(key="animation_speed", label="动画速度", kind=KIND_CHOICE,
+                store="ludo_animation_speed", default="normal", choices=(
+                    {"value": "slow", "label": "慢"}, {"value": "normal", "label": "标准"},
+                    {"value": "fast", "label": "快"}),
+                blurb="只调整逐格移动动画时长，不改变骰子、路径或规则裁决。"),
+    ]
+
+
+def _apply_clock(room, value):
+    room["chess_clock_seconds"] = value
+    if room.get("game") == "xiangqi" and value == 0:
+        room["xiangqi_byoyomi_seconds"] = 0
+
+
+def _apply_byoyomi(room, value):
+    if value and not room.get("chess_clock_seconds"):
+        raise ValueError("请先选择棋钟主时再设置读秒")
+    room["xiangqi_byoyomi_seconds"] = value
+
+
+def _clock_setting():
+    return Setting(key="clock_seconds", label="棋钟", kind=KIND_CHOICE,
+                   store="chess_clock_seconds", default=0, in_summary=True, apply=_apply_clock, choices=(
+                       {"value": 0, "label": "不限时"}, {"value": 300, "label": "5分钟"},
+                       {"value": 600, "label": "10分钟"}, {"value": 1800, "label": "30分钟"}),
+                   blurb="双方各自拥有整局用时，轮到行动时扣时；归零判负。")
+
+
 _GAMES: dict[str, list[Setting]] = {
     "minesweeper": _mine_settings(),
-    "luzhanqi": _luzhanqi_settings(),
+    "luzhanqi": [*_luzhanqi_settings(), Setting(
+        key="setup_timeout", label="布阵时限", kind=KIND_CHOICE,
+        store="luzhanqi_setup_timeout", default=0, in_summary=True,
+        choices=({"value": 0, "label": "不限时"}, {"value": 30, "label": "30秒"}, {"value": 60, "label": "60秒"},
+                 {"value": 120, "label": "120秒"}),
+        blurb="时间到后自动确认当前合法阵型，保留已经完成的布阵。")],
     "stasis": _stasis_settings(),
     "battleship": _battleship_settings(),
     "tetris": _tetris_settings(),
     "uno": [_uno_preset_setting(), *_uno_rule_settings()],
+    "gomoku": [*_gomoku_settings(), _clock_setting()],
+    "reversi": [_board_sizes("board_size", "reversi_size", 8, (6, 8, 10)), _clock_setting()],
+    "dots": [_board_sizes("dots", "dots_count", 5, (4, 5, 6), "点阵")],
+    "connect4": [Setting(key="popout", label="PopOut弹出", kind=KIND_TOGGLE,
+                         store="connect4_popout", default=False, in_summary=True,
+                         blurb="可选择落子或弹出自己最底下一枚；全盘重判四连，双方同时四连时行动方胜，相同局面及行动方第三次出现和棋。")],
+    "ludo": _ludo_settings(),
+    "xiangqi": [_clock_setting(), Setting(
+        key="byoyomi_seconds", label="读秒", kind=KIND_CHOICE,
+        store="xiangqi_byoyomi_seconds", default=0, apply=_apply_byoyomi,
+        choices=({"value": 0, "label": "无读秒"}, {"value": 10, "label": "10秒"},
+                 {"value": 30, "label": "30秒"}),
+        blurb="仅开启棋钟后可设：主时耗尽后每回合使用一段读秒；读秒归零判负。"), Setting(
+        key="allow_undo", label="人机局悔棋", kind=KIND_TOGGLE,
+        store="xiangqi_allow_undo", default=False,
+        blurb="仅人机练习对局中房主可悔棋，每次回退双方各一步。")],
 }
 
 
@@ -342,7 +422,8 @@ def _item_json(spec: Setting, room: dict) -> dict:
         "blurb": spec.blurb,
     }
     if spec.choices:
-        item["choices"] = [dict(c) for c in spec.choices]
+        item["choices"] = [{"value": c["value"], "label": c["label"],
+                            "blurb": c.get("blurb", spec.blurb)} for c in spec.choices]
     if spec.kind == KIND_TOGGLE:
         # 开关也按「一排芯片」渲染（两个状态各一枚），所以两个状态的中文名都要给 ——
         # 否则客户端只能写死「开 / 关」，而军棋那条叫「公开 / 不公开」。

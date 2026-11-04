@@ -18,18 +18,21 @@ import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
 import GameShell, { GameResult } from '../GameShell';
 import { shellPlayers } from '../gamePlayers';
+import { observeClock, ClockPayload, ObservedClock } from '../GameClock';
 
 // --- Types ---
 
 interface ReversiState {
   board_size: number;
+  clock?: ObservedClock | null;
+  legal: number[][];
   board: number[][];
   moves: Array<{ x: number; y: number; color: string; flipped?: number[][] }>;
   next: 'black' | 'white';
   your_color: 'black' | 'white';
   pass_count: number;
   winner: null | 'black' | 'white' | 'draw';
-  reason: null | 'score' | 'surrender' | 'disconnect';
+  reason: string | null;
   score: { black: number; white: number };
 }
 
@@ -41,11 +44,6 @@ interface Props {
 // --- Constants ---
 
 const BOARD_SIZE = 8;
-const DIRECTIONS = [
-  [-1, -1], [-1, 0], [-1, 1],
-  [0, -1],           [0, 1],
-  [1, -1],  [1, 0],  [1, 1],
-];
 
 const WINNER_LABELS: Record<string, string> = {
   black: '黑棋胜',
@@ -71,49 +69,16 @@ const FLIP_HALF_MS = 100;
 // 「从左数第四列往下第三行」。字号 fontSize.xs（12px，项目可见文字下限 10px），
 // 颜色 colors.textMuted（vs 浅底 4.62:1）——它是「可承载信息的最低一档」；
 // textFaint（2.54:1）禁止承载信息。
-const COL_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-const ROW_LABELS = ['1', '2', '3', '4', '5', '6', '7', '8'];
 const AXIS_W = 16;  // 左侧行号列宽
 const AXIS_H = 16;  // 顶部列号行高
 
 // --- Legal move computation (client-side for preview) ---
 
-function findFlips(board: number[][], x: number, y: number, color: number): number[][] {
-  const opp = color === 1 ? 2 : 1;
-  const allFlips: number[][] = [];
-  for (const [dx, dy] of DIRECTIONS) {
-    const dirFlips: number[][] = [];
-    let nx = x + dx;
-    let ny = y + dy;
-    while (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] === opp) {
-      dirFlips.push([nx, ny]);
-      nx += dx;
-      ny += dy;
-    }
-    if (dirFlips.length > 0 && nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE && board[ny][nx] === color) {
-      allFlips.push(...dirFlips);
-    }
-  }
-  return allFlips;
-}
-
-function computeLegalMoves(board: number[][], color: number): Set<string> {
-  const moves = new Set<string>();
-  for (let y = 0; y < BOARD_SIZE; y++) {
-    for (let x = 0; x < BOARD_SIZE; x++) {
-      if (board[y][x] === 0 && findFlips(board, x, y, color).length > 0) {
-        moves.add(`${x},${y}`);
-      }
-    }
-  }
-  return moves;
-}
-
 function countStones(board: number[][]): { black: number; white: number } {
   let black = 0;
   let white = 0;
-  for (let y = 0; y < BOARD_SIZE; y++) {
-    for (let x = 0; x < BOARD_SIZE; x++) {
+  for (let y = 0; y < board.length; y++) {
+    for (let x = 0; x < board.length; x++) {
       if (board[y][x] === 1) black++;
       else if (board[y][x] === 2) white++;
     }
@@ -214,16 +179,18 @@ export default function ReversiScreen({ code, onLeave }: Props) {
   const [animFlipped, setAnimFlipped] = useState<Map<string, number>>(new Map());
 
   // Board sizing — fill available width with padding，并为左侧行号留出 AXIS_W
-  const boardEdge = Math.max(160, Math.min(winWidth - 40 - AXIS_W, winHeight - 310, 480));
-  const cellSize = Math.floor(boardEdge / BOARD_SIZE);
-  const boardPixelSize = cellSize * BOARD_SIZE;
+  const boardSize = game?.board_size ?? BOARD_SIZE;
+  const colLabels = Array.from({ length: boardSize }, (_, index) => String.fromCharCode(65 + index));
+  const rowLabels = Array.from({ length: boardSize }, (_, index) => String(index + 1));
+  const boardEdge = Math.max(160, Math.min(winWidth - 40 - AXIS_W, winHeight - 310 - (game?.clock ? 44 : 0), 480));
+  const cellSize = Math.floor(boardEdge / boardSize);
+  const boardPixelSize = cellSize * boardSize;
 
   // Compute legal moves for current player (client-side for hints)
   const legalMoves = useMemo(() => {
     if (!game || game.winner) return new Set<string>();
-    const myColor = game.your_color === 'black' ? 1 : 2;
     if (game.next !== game.your_color) return new Set<string>();
-    return computeLegalMoves(game.board, myColor);
+    return new Set((game.legal || []).map(([x, y]) => `${x},${y}`));
   }, [game]);
 
   // WS connection and message handling
@@ -239,7 +206,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
       if (roomData) setRoom(roomData);
       if (msg.game) {
         const g = msg.game as ReversiState;
-        setGame(g);
+        setGame({ ...g, clock: observeClock(g.clock) });
         if (g.winner) setShowGameOver(true);
       }
       if (roomData) {
@@ -260,7 +227,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
     const handleGameStart = (msg: SocketMessage) => {
       const g = msg.game as ReversiState;
       if (g) {
-        setGame(g);
+        setGame({ ...g, clock: observeClock(g.clock) });
         setShowGameOver(false);
         gameOverShownRef.current = false;
         setAnimNew(null);
@@ -283,7 +250,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
         }
         const score = countStones(newBoard);
         return {
-          ...prev, board: newBoard, next, score, pass_count: 0,
+          ...prev, clock: msg.clock ? observeClock(msg.clock as ClockPayload) : prev.clock, board: newBoard, next, score, legal: (msg.legal as number[][]) ?? prev.legal, pass_count: 0,
           // 最近一步高亮要用它。原来 handleMove 只更新 board/next/score，
           // moves 一直停在 sync 时的快照（开局是空数组）——渲染端那段
           // `lastMove = game.moves[last]` 因此永远是 null，标记从来没画出来过。
@@ -343,6 +310,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
       notify('提示', msg.message as string);
     };
 
+    ws.on('clock_update', msg => setGame(previous => previous ? { ...previous, clock: observeClock(msg.clock as ClockPayload) } : previous));
     ws.on('sync', handleSync);
     ws.on('lobby', handleLobby);
     ws.on('game_start', handleGameStart);
@@ -434,7 +402,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
   const dcLeft = useDisconnectCountdown(opponentDisconnected, dcTimeout ?? oppDcLeft);
 
   return (
-    <GameShell game="reversi" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={<View style={{ flexDirection: 'row', justifyContent: 'center', gap: spacing.sm }}><Text style={styles.turnHint}>{turnText}</Text><Text style={styles.turnHint}>{'黑 '}{score.black} : {'白 '}{score.white}</Text></View>} style={styles.container} actions={<View style={styles.bottomBar}>
+    <GameShell clock={game?.clock} game="reversi" code={code} connected={shellConnected} players={shellPlayers(room, user?.id, game)} status={<View style={{ flexDirection: 'row', justifyContent: 'center', gap: spacing.sm }}><Text style={styles.turnHint}>{turnText}</Text><Text style={styles.turnHint}>{'黑 '}{score.black} : {'白 '}{score.white}</Text></View>} style={styles.container} actions={<View style={styles.bottomBar}>
         {game && !game.winner && (
           <TouchableOpacity style={styles.surrenderBtn} onPress={handleSurrender}>
             <Ionicons name="flag-outline" size={16} color={colors.white} />
@@ -461,7 +429,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
       <View style={styles.boardArea}>
         <View style={styles.axisRow}>
           <View style={{ width: AXIS_W }} />
-          {COL_LABELS.map((label) => (
+          {colLabels.map((label) => (
             <View key={label} style={{ width: cellSize, height: AXIS_H, alignItems: 'center', justifyContent: 'center' }}>
               <Text style={styles.axisText}>{label}</Text>
             </View>
@@ -469,7 +437,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
         </View>
         <View style={styles.boardRow}>
           <View style={{ width: AXIS_W }}>
-            {ROW_LABELS.map((label) => (
+            {rowLabels.map((label) => (
               <View key={label} style={{ height: cellSize, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={styles.axisText}>{label}</Text>
               </View>
@@ -477,12 +445,12 @@ export default function ReversiScreen({ code, onLeave }: Props) {
           </View>
           <View style={[styles.boardWrap, { width: boardPixelSize, height: boardPixelSize }]}>
             {/* Grid lines */}
-            {Array.from({ length: BOARD_SIZE + 1 }).map((_, i) => (
+            {Array.from({ length: boardSize + 1 }).map((_, i) => (
               <React.Fragment key={`lines-${i}`}>
-                {i < BOARD_SIZE && (
+                {i < boardSize && (
                   <View style={[styles.hLine, { top: cellSize * i, left: 0, width: boardPixelSize }]} />
                 )}
-                {i < BOARD_SIZE && (
+                {i < boardSize && (
                   <View style={[styles.vLine, { left: cellSize * i, top: 0, height: boardPixelSize }]} />
                 )}
               </React.Fragment>
@@ -499,8 +467,8 @@ export default function ReversiScreen({ code, onLeave }: Props) {
               />
             )}
             {/* Cells */}
-            {Array.from({ length: BOARD_SIZE }).map((_, y) =>
-              Array.from({ length: BOARD_SIZE }).map((_, x) => {
+            {Array.from({ length: boardSize }).map((_, y) =>
+              Array.from({ length: boardSize }).map((_, x) => {
                 const val = game ? game.board[y][x] : 0;
                 const key = `${x},${y}`;
                 const isLegal = legalMoves.has(key);
@@ -595,7 +563,7 @@ export default function ReversiScreen({ code, onLeave }: Props) {
       </Modal>
 
       {/* Game over modal */}
-      <GameResult visible={showGameOver} result={WINNER_LABELS[game?.winner || ''] || '对局结束'} reason={''} players={shellPlayers(room, user?.id, game)}
+      <GameResult visible={showGameOver} result={WINNER_LABELS[game?.winner || ''] || '对局结束'} reason={game?.reason === 'timeout' ? '超时判负' : ''} players={shellPlayers(room, user?.id, game)}
         onBackToRoom={handleBackToRoom} onViewHistory={() => { handleBackToRoom(); navigation.navigate('History'); }}>
         <Text style={styles.modalScore}>{score.black} : {score.white}</Text>
       </GameResult>

@@ -39,6 +39,7 @@ function harness(os) {
     return exports;
   };
   modules['./ui'] = load('ui.tsx');
+  modules['./GameClock'] = load('GameClock.tsx');
   const shell = load('GameShell.tsx'), players = load('gamePlayers.ts');
   return { ...shell, ...players, ...modules['./ui'], controls, guards,
     render: element => renderToStaticMarkup(element) };

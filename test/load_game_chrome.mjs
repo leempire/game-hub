@@ -20,6 +20,7 @@ export function installGameChrome(modules, ts) {
     return exports;
   };
   modules['./ui'] = load('ui.tsx');
+  modules['./GameClock'] = modules['../GameClock'] = load('GameClock.tsx');
   modules['../GameShell'] = load('GameShell.tsx');
   modules['../gamePlayers'] = load('gamePlayers.ts');
 }

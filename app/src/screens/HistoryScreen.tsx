@@ -233,7 +233,7 @@ export function BoardSnapshot({ rec }: { rec: GameRecord }) {
     );
   }
   if (view.game === 'xiangqi') {
-    return <XiangqiBoard snap={view} />;
+    return <View><XiangqiBoard snap={view} /><Text style={{ color: colors.textSecondary, marginTop: spacing.sm }} testID="xiangqi-history-notation">{(view.moves || []).map((move: any, index: number) => move.notation ? `${index + 1}. ${move.notation}` : '').filter(Boolean).join(' · ')}</Text></View>;
   }
   if (view.game === 'battleship') {
     return <BattleshipSnapshot snap={view} players={rec.players} />;
@@ -297,7 +297,7 @@ export function BoardSnapshot({ rec }: { rec: GameRecord }) {
     return <SnapshotTetris snap={view as any} />;
   }
   if (view.game === 'uno') {
-    return <UnoSnapshotView snap={view as any} />;
+    return <UnoSnapshotView snap={view as any} players={rec.players} />;
   }
   // stasis 快照类型尚未进 GameSnapshot 联合（api.ts），故用 as any 比较与传参。
   if ((view as any).game === 'stasis') {
@@ -454,7 +454,7 @@ const stasisSnapStyles = StyleSheet.create({
  * 牌面渲染直接复用对局屏那份 `UnoCardView`——分开写两份的话，同一张牌在
  * 战绩页和对局页会长得不一样（飞行棋棋盘踩过这个坑）。
  */
-function UnoSnapshotView({ snap }: { snap: any }) {
+function UnoSnapshotView({ snap, players }: { snap: any; players: GameRecord['players'] }) {
   const ranking: any[] = snap.ranking || [];
   const hands: Record<string, string[]> = snap.hands || {};
   const cw = 26;
@@ -470,6 +470,14 @@ function UnoSnapshotView({ snap }: { snap: any }) {
       {snap.rules_name ? (
         <Text style={snapUnoStyles.rulesName}>{`玩法：${snap.rules_name}`}</Text>
       ) : null}
+      {snap.series && <View testID="uno-history-series">
+        <Text style={snapUnoStyles.rulesName}>{snap.series.target} 分赛 · 第 {snap.series.rounds} 局 · {snap.series.finished ? '系列赛已结束' : '系列赛继续'}</Text>
+        {Object.entries(snap.series.scores || {}).map(([uid, score]) => {
+          const seat = (snap.seat_uids || []).indexOf(Number(uid));
+          const player = players.find(member => member.seat === seat);
+          return <Text key={uid} style={snapUnoStyles.rulesName}>{player?.nickname || player?.username || '玩家'} · {String(score)} 分</Text>;
+        })}
+      </View>}
       {/* 组队档（v1.16）：胜负是**队伍**，所以名次前面标出谁和谁一队 ——
           否则回放里两个并列第一看起来像「两个人都赢了」。老战绩没有这两个
           字段，缺了就不显示。 */}
@@ -1261,12 +1269,12 @@ function LudoSnapshot({ snap, players }: {
 
   return (
     <View style={ludoSnapStyles.container}>
-      <Text style={ludoSnapStyles.title}>终局排名</Text>
+      <Text style={ludoSnapStyles.title}>{snap.winner_team != null ? `第 ${snap.winner_team + 1} 队获胜` : '终局排名'}</Text>
       {ranking.map((r) => (
         <View key={r.seat} style={[ludoSnapStyles.row, r.rank === 1 && ludoSnapStyles.first]}>
           <Text style={ludoSnapStyles.rank}>#{r.rank}</Text>
           <View style={[ludoSnapStyles.colorDot, { backgroundColor: ludoColors[r.color] || colors.borderStrong }]} />
-          <Text style={ludoSnapStyles.name}>{r.nickname || r.username}</Text>
+          <Text style={ludoSnapStyles.name}>{r.nickname || r.username}{snap.seat_teams?.[r.seat] != null ? ` · 第 ${snap.seat_teams[r.seat] + 1} 队` : ''}</Text>
           <Text style={ludoSnapStyles.count}>{r.finished_count}/4 到达</Text>
         </View>
       ))}

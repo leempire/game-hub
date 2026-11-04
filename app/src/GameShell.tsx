@@ -6,6 +6,7 @@ import { gameTitle } from './games';
 import type { GameKey } from './games';
 import { GameHelpButton } from './help';
 import { AppModal } from './ui';
+import { GameClock, ObservedClock } from './GameClock';
 import { colors, fontSize, radius, shadow, spacing } from './theme';
 
 export interface ShellPlayer {
@@ -31,6 +32,7 @@ export interface GameShellProps {
   style?: StyleProp<ViewStyle>;
   /** Fullscreen board routes can collapse the title while keeping identities visible. */
   compact?: boolean;
+  clock?: ObservedClock | null;
 }
 
 export function GamePlayers({ players = [], stacked = false }: { players?: ShellPlayer[]; stacked?: boolean }) {
@@ -52,7 +54,7 @@ export function GamePlayers({ players = [], stacked = false }: { players?: Shell
   </View>;
 }
 
-export default function GameShell({ game, code, connected, players, status, actions, children, style,
+export default function GameShell({ game, code, connected, players, status, actions, children, style, clock,
   compact = false }: GameShellProps) {
   return <View style={[styles.shell, style]} testID={`game-shell-${game}`}>
     <View style={[styles.header, compact && styles.compact]}>
@@ -65,6 +67,7 @@ export default function GameShell({ game, code, connected, players, status, acti
       <GameHelpButton game={game} size={28} />
     </View>
     {!compact && <GamePlayers players={players} />}
+    <GameClock clock={clock} game={game} />
     {status != null && <View style={styles.status}>{typeof status === 'string'
       ? <Text style={styles.statusText}>{status}</Text> : status}</View>}
     <View style={[styles.content, style,

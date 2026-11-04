@@ -28,18 +28,28 @@ _WEIGHTS = [
 ]
 
 
+def _weight(x, y, size):
+    if size == BOARD_SIZE:
+        return _WEIGHTS[y][x]
+    if x in (0, size - 1) and y in (0, size - 1):
+        return 100
+    if x in (0, 1, size - 2, size - 1) and y in (0, 1, size - 2, size - 1):
+        return -50 if x not in (0, size - 1) and y not in (0, size - 1) else -20
+    return 10 if x in (0, size - 1) or y in (0, size - 1) else 1
+
+
 # ── evaluation ─────────────────────────────────────────────────────
 
 def _pos_score(board, player):
     """Sum of position weights for *player*'s stones minus opponent's."""
     opp = opponent(player)
     score = 0
-    for y in range(BOARD_SIZE):
-        for x in range(BOARD_SIZE):
+    for y in range(len(board)):
+        for x in range(len(board)):
             if board[y][x] == player:
-                score += _WEIGHTS[y][x]
+                score += _weight(x, y, len(board))
             elif board[y][x] == opp:
-                score -= _WEIGHTS[y][x]
+                score -= _weight(x, y, len(board))
     return score
 
 
@@ -61,7 +71,7 @@ def _evaluate(board, player):
     """Combined evaluation for *player*."""
     pos = _pos_score(board, player)
     mob = _mobility_score(board, player) * 5
-    empty = sum(1 for y in range(BOARD_SIZE) for x in range(BOARD_SIZE)
+    empty = sum(1 for y in range(len(board)) for x in range(len(board))
                 if board[y][x] == EMPTY)
     stn = _stone_score(board, player) * (2 if empty < 12 else 0)
     return pos + mob + stn
@@ -97,7 +107,7 @@ def _minimax(board, player, depth, alpha, beta, deadline):
         return -sc, None
 
     # move ordering: corners first for better pruning
-    moves.sort(key=lambda m: _WEIGHTS[m[1]][m[0]], reverse=True)
+    moves.sort(key=lambda m: _weight(m[0], m[1], len(board)), reverse=True)
 
     best_score, best_move = -100001, None
     for mx, my in moves:
@@ -138,7 +148,7 @@ def best_move(board, player, difficulty="normal", rng=None):
     level = normalize_difficulty(difficulty)
     if level == "easy":
         return (rng or random).choice(moves)
-    empty = sum(1 for y in range(BOARD_SIZE) for x in range(BOARD_SIZE)
+    empty = sum(1 for y in range(len(board)) for x in range(len(board))
                 if board[y][x] == EMPTY)
     # adaptive depth: deeper in endgame (fewer moves per position)
     if empty <= 10:

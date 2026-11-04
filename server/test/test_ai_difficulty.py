@@ -91,14 +91,19 @@ def test_threaded_search_receives_tier_and_drops_replaced_game(
     started, release = threading.Event(), threading.Event()
     board = reversi.create_board()
     gs = {'board': board, 'moves': [], 'next': next_player, 'player_colors': {-1: 'black' if module is dots_ai else next_player}}
-    room = {'status': 'playing', 'game_state': gs,
+    room = {'code': 'BOT123', 'game': module.__name__.split('.')[-1].removesuffix('_ai'),
+            'status': 'playing', 'game_state': gs,
             'players': [{'id': -1, 'ai_difficulty': 'hard'}]}
     rm._rooms['BOT123'] = room
     captured = []
 
-    def search(state, *args, difficulty=None):
+    def search(state, *args, difficulty=None, **kwargs):
         captured.append(difficulty or args[-1])
         assert state is not gs and state is not board
+        if module is xiangqi_ai:
+            assert kwargs['game'] == gs and kwargs['game'] is not gs
+            assert kwargs['game']['board'] is state
+            assert kwargs['game']['moves'] is not gs['moves']
         started.set()
         assert release.wait(3)
         return (0, 0)
