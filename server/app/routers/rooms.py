@@ -88,7 +88,7 @@ async def leave_room(code: str, background_tasks: BackgroundTasks, user_id: int 
     room = rm.get_room(code)
     if not room:
         return {"ok": True}
-    if room["game"] in ("spider", "uttt") and not any(p["id"] == user_id for p in room["players"]):
+    if not any(p["id"] == user_id for p in room["players"]):
         raise HTTPException(403, "你不在房间中")
     if room["game"] == "uttt":
         from app.ws import _handle_leave

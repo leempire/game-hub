@@ -720,7 +720,7 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
     """
     Handle player leaving.
     Returns (action, room) where action is 'closed', 'game_over', or 'removed'.
-    room is None when action is 'closed'.
+    room is None when action is 'closed', or when a non-member leaves (no-op).
 
     New lifecycle: host leaving does NOT unconditionally delete the room.
     Host is transferred to next human player by seat order.
@@ -729,6 +729,10 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
     room = _rooms.get(code)
     if not room:
         return ("closed", None)
+    # HTTP 退出后可能紧接着收到同一人的 WS leave；也不能让旧连接替非成员
+    # 结算别人的对局。无变更时不返回房间，避免传输层广播虚假的淘汰/大厅事件。
+    if not any(p["id"] == user_id for p in room["players"]):
+        return ("removed", None)
     is_host = user_id == room["host_id"]
     if room["status"] == "playing":
         if room["game"] == "spider":
@@ -3166,12 +3170,14 @@ def _start_dc_timer(code: str, user_id: int, loop: asyncio.AbstractEventLoop):
     _dc_tasks[key] = task
 
 
-# Callback set by ws.py to broadcast game_over on timeout
+# Callback set by ws.py to broadcast timeout updates.
+# 2048 传 (code, user_id, event)，event 捕获本局身份与此次公开载荷；
+# 其余游戏保留 (code, winner) 调用形式。
 _dc_timeout_callback = None
 
 
 def set_dc_timeout_callback(callback):
-    """Set async callback for when disconnect timeout fires."""
+    """Set async timeout callback; 2048 additionally passes its captured event."""
     global _dc_timeout_callback
     _dc_timeout_callback = callback
 
@@ -3238,10 +3244,36 @@ def _on_dc_timeout(code: str, user_id: int):
                     pass
         _touch_activity(room)
         return
+    if room["game"] == "2048":
+        # 各玩各的盘：超时只结束本人，全员结束才按完整排名结算。
+        gs = room["game_state"]
+        if user_id not in gs["game_over_flags"] or gs["game_over_flags"][user_id]:
+            return
+        _finish_2048_player(gs, user_id, "disconnect")
+        game_over = _maybe_finish_2048(room)
+        _touch_activity(room)
+        if _dc_timeout_callback:
+            # 在同步变更点捕获本次事件：多个超时可在回调执行前连续发生，
+            # 只有最后一次的事件携带终局；旧事件不得重新读取下一局状态。
+            event = {
+                "game_state": gs,
+                "move": {
+                    "type": "move2048", "user_id": user_id,
+                    "score": gs["scores"][user_id],
+                    "player_finished": gs["finish_reasons"][user_id],
+                    "leaderboard": g2048_leaderboard(gs),
+                },
+                "game_over": game_over,
+            }
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(_dc_timeout_callback(code, user_id, event))
+            except RuntimeError:
+                pass
+        return
     if room["game"] == "tetris":
         # 各玩各的盘：一人掉线超时只结束他自己，其余人继续玩。
-        # （2048 在这里走的是下面的通用分支 = 一人掉线整局结束，那条与其
-        #   「各玩各的」语义不符，属于已知的历史遗留；tetris 不跟着抄。）
         gs = room["game_state"]
         if not gs["game_over_flags"].get(user_id):
             tetris_finish_player(gs, user_id, "disconnect")

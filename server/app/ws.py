@@ -54,8 +54,25 @@ _connections: dict[str, dict[int, WebSocket]] = {}
 def _register_dc_timeout_callback():
     """Register the callback for disconnect timeout events."""
 
-    async def _on_timeout(code: str, winner: str):
+    async def _on_timeout(code: str, winner: str | int, timeout_event: dict | None = None):
         room = rm.get_room(code)
+        if room and room["game"] == "2048":
+            if timeout_event is None:
+                return
+            # 使用超时发生时捕获的公开事件，防同轮多个超时重复终局；
+            # 每次发送前核对本局身份，慢连接或延迟任务不能污染续开的新局。
+            messages = [timeout_event["move"]]
+            if timeout_event["game_over"]:
+                messages.append({"type": "game_over", **timeout_event["game_over"]})
+            for message in messages:
+                for connection in list(_connections.get(code, {}).values()):
+                    if rm.get_room(code) is not room or room["game_state"] is not timeout_event["game_state"]:
+                        return
+                    try:
+                        await _send_ordered(connection, message)
+                    except Exception:
+                        pass
+            return
         if room and room["game"] == "spider":
             await _broadcast(code, {"type": "spider_state", "game": rm.spider.game_to_sync(room["game_state"])})
             await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(room)})

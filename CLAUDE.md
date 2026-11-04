@@ -55,6 +55,7 @@ app/                    # Expo 客户端（RN + Web）
     ├── backGuard.tsx   # 返回操作统一体系（见下文，改动前必读注释）
     ├── help.tsx        # 游戏规则帮助系统（GAME_HELP 内容库 + GameHelpButton）
     ├── icons.tsx       # react-native-svg 矢量图标组件
+    ├── games.tsx       # 客户端游戏目录：名称、简介、分类与图标入口的唯一来源
     ├── api.ts          # HTTP 客户端（注册/登录/房间/历史/版本检查）
     ├── socket.ts       # 房间 WS 客户端
     ├── auth.tsx        # 登录态 Context
@@ -209,15 +210,16 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   **点「返回房间」提示房间不存在**）。改为只标记离线 + 记 `empty_since`，重连即取消。
 - **掉线只在游戏中存在**：`playing` 才有 120s 保座；等待房（含刚打完一局的房）掉线
   只标离线，界面不显示（`RoomScreen` 的「断线」胶囊有 `room.status === 'playing'` 守卫）。
-- **GC 只有一条规则**：没有真人在线的房间——`waiting` 记 `empty_since` 并由
+- **空房回收**：没有真人在线的房间——`waiting` 记 `empty_since` 并由
   `WAITING_EMPTY_TTL=60s` 回收，`playing` 由 `ROOM_IDLE_TTL=1800s` 回收
-  （`_sweeper_loop` 每 60s 跑）。显式退出/被移出导致「连真人成员都没有了」时才立即销毁。
+  （`_sweeper_loop` 每 60s 跑）。等待房另有 30 分钟无活动回收；进行中的房间只按全员
+  离线时长回收。显式退出/被移出导致「连真人成员都没有了」时才立即销毁。
 - **一个人可以同时在多个房间**（v1.7 起）：不再有「只能在一个等待房」的限制；
   房间按 (房间, 玩家) 维度管理连接与回收，没人管的等待房由 sweeper 回收。
 - **终局要把真人非房主的 `ready` 复位**（v1.7）：`_back_to_lobby()` 里统一复位。
   房主本来就不用准备，人机自动准备，两者都不参与复位。
 - **落盘的 `finished` 房要在 `restore_rooms` 里丢掉**：它是永远回收不掉的僵尸房。
-- **房间列表**：`get_all_rooms` 返回全部 waiting/playing 房间（等待房必然有真人）；
+- **房间列表**：`get_all_rooms` 返回全部 playing 房间与有真人在线的 waiting 房间；
   `join_room` 的判断顺序是 **① 已是本房成员 → 直接放行**（覆盖游戏中重连 / 结束后重进 /
   等待房重进）→ ② `playing` → 抛「游戏已开始」→ ③ 密码/满员。**①必须在②之前**。
   前端点房间卡片必须走 `joinRoom` 接口再导航，不能直接跳房间页。
@@ -479,9 +481,9 @@ curl -s http://127.0.0.1:50541/api/app/version
   不再刷新，于是自己那一格一直显示「掉线」。座位号另存 ref 给回调读。
 - **人机回合要说「思考中」**：服务端留了 0.8-1.2s 思考延迟，只写「等待对方…」用户会以为
   卡了。对手 `is_bot` 时文案改成 `XX 思考中…`。
-- **游戏名散在七处、没有单一来源，改名必须一起改**：`GamesTab`、`navigation.tsx`、
-  `RoomScreen`、`RoomsTab`、`HistoryScreen.GAME_LABELS`、`docs/使用指南.md`、
-  `docs/接口协议.md`。改名前先 `grep -rn "<旧名>"`。命名约定：**游戏名就是游戏本身**
+- **客户端游戏名统一取自 `app/src/games.tsx`**：主页、导航标题、房间页、房间列表与
+  战绩页共用目录，不再各抄名称映射。改名时同步 `docs/使用指南.md`、
+  `docs/接口协议.md` 与对应游戏文档，并用 `rg "<旧名>"` 检查遗漏。命名约定：**游戏名就是游戏本身**
   （`UNO 卡牌`，不是「UNO 牌类」；`2048 竞速`，不是「2048 对战」）。
 - **主页一句话说明写「这游戏是什么」，不写「这版改了什么」**。徽标只放**人数 + 玩法**，
   不写「可人机」。
