@@ -23,3 +23,20 @@ test('a different room, profile or read-only spectator never consumes a player r
   assert.equal(open(target, { name: 'Watch', params: { code: 'ABC123' } }), false);
   assert.equal(open(target, undefined), false);
 });
+
+test('chat startup links preserve numeric user IDs and never match unrelated rooms', async () => {
+  const load = path => {
+    const result = {};
+    runInNewContext(code, { exports: result, URL, Number, window: { location: { pathname: path } },
+      require: name => name === 'react-native' ? { Platform: { OS: 'web' } } : { getInitialURL: async () => null } });
+    return result;
+  };
+  const chat = load('/chat/42');
+  const route = await chat.takePendingRoute();
+  assert.equal(route.screen, 'Chat'); assert.equal(route.params.userId, 42);
+  assert.equal(chat.destinationAlreadyOpen(route, { name: 'Chat', params: { userId: 42 } }), true);
+  assert.equal(chat.destinationAlreadyOpen(route, { name: 'Chat', params: { userId: 43 } }), false);
+  assert.equal(chat.destinationAlreadyOpen(route, { name: 'Room', params: { code: 'ABC123' } }), false);
+  for (const invalid of ['/chat/0', '/chat/-2', '/chat/NaN', '/chat/1.5', '/chat/9007199254740992'])
+    assert.equal(await load(invalid).takePendingRoute(), null, invalid);
+});

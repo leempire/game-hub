@@ -83,6 +83,9 @@ server/
     ├── database.py     # SQLite 建表/users/战绩落库（save_game_record）
     ├── persistence.py  # 房间实时落盘 + 启动恢复（热重启，见「热重启」）
     ├── security.py     # JWT + 密码哈希
+    ├── friends.py      # 账号好友申请/管理/拉黑和社交摘要
+    ├── direct_messages.py # 持久化好友私聊、幂等发送、分页与已读游标
+    ├── social_schema.py# 好友、拉黑、消息和已读表的幂等schema
     ├── spectating.py   # UNO/深空独立只读WS、用户绑定许可与服务端公开字段白名单
     ├── practice.py     # 四款私人练习，统计/榜单/历史排除 practice=1
     ├── room_manager.py # 房间生命周期：创建/加入/准备/开始/断线保座(120s)/对局结束回调
