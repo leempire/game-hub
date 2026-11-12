@@ -104,6 +104,8 @@ bin/
 scripts/                # 运维脚本（见「运维脚本」）——启停本项目服务只走这里，别手写 kill
 ├── lib.sh              # 公共库：三重指纹定位进程、进程树 kill、端口/HTTP 等待（被 source）
 ├── start.sh / stop.sh / restart.sh / status.sh
+├── install.sh          # 注册 systemd 开机自启（gamehub-backend/web.service）
+└── uninstall.sh        # 取消开机自启并清理单元（见「开机自启」）
 tmp/                    # gitignore：run/*.pid + log/{backend,web}.log
 test/                   # 浏览器 E2E 与视觉审计（见 docs/测试矩阵.md）
 docs/                   # 使用指南 / 接口协议 / 协作开发 / 更新计划 / 测试矩阵 /
@@ -371,6 +373,30 @@ team_tools 50031/50035/50040…），手写 `ps aux | grep uvicorn | xargs kill`
 - `start.sh` 会等 HTTP 探活通过才返回（backend 40s / web 120s 上限），失败时自动
   tail 日志再退出。
 
+#### 开机自启（systemd，install.sh 生成）
+
+`scripts/install.sh` 注册两个**系统级**单元（以仓库所有者身份运行），随机器开机启动：
+
+| 单元 | 开机执行 | 停止/关机执行 |
+|---|---|---|
+| `gamehub-backend.service` | `scripts/start.sh backend` | `scripts/stop.sh backend` |
+| `gamehub-web.service` | `scripts/start.sh web` | `scripts/stop.sh web` |
+
+- **只有一层启停逻辑**：两个单元都是 `Type=oneshot + RemainAfterExit=yes`，systemd
+  只负责「开机拉起」与「关机收尾」，实际进程仍归 `scripts/{start,stop,status}.sh`
+  管理（三重指纹不变，手工运维命令照常可用）。改后端代码/配置后仍用
+  `scripts/restart.sh backend`，或 `sudo systemctl restart gamehub-backend.service`（等价）。
+- **环境文件 `/etc/systemd/system/gamehub.env` 只放 `HOME` / `PATH` / `LANG`**：安装时
+  自动探测 `uvicorn`（conda 环境）与 `node/npx` 的目录。**`PUBLIC_BASE` / `IP` /
+  `JWT_SECRET` / `ADMIN_*` 刻意不写进单元**——它们以 `server/config/config.json`
+  为准；写进环境会被 lib.sh 的「环境变量 > config」优先级静默盖掉，之后改 config 无效。
+- **`Restart=no`，只保证开机拉起**：运行中进程崩溃不会自动重启（需要时再加 watchdog
+  timer，别直接改成 `Restart=always`——oneshot 单元不允许该组合）。
+- `uninstall.sh` 会先走单元的 `ExecStop`（即 `stop.sh`）收掉进程，再 disable + 删除单元；
+  重复执行 `install.sh` 是幂等的。
+- 排查：`systemctl status gamehub-{backend,web}.service`、`journalctl -u gamehub-*`；
+  实际服务日志仍在 `tmp/log/{backend,web}.log`。
+
 ## 常用命令
 
 **启停一律走 `scripts/` 下的运维脚本，不要手写 `ps aux | grep ... | kill`**。
@@ -383,6 +409,12 @@ scripts/start.sh web --dev           # 默认是生产模式 bundle（--no-dev -
 scripts/restart.sh backend           # 改 server/ 代码或 config.json 后必须执行
 scripts/stop.sh                      # 停全部
 tail -f tmp/log/backend.log          # 服务日志；pid 在 tmp/run/*.pid
+
+# 开机自启（systemd，见「运维脚本 / 开机自启」）
+bash scripts/install.sh              # 注册并启用（可重复执行）
+sudo systemctl restart gamehub-backend.service   # 等价于 scripts/restart.sh backend
+systemctl status gamehub-backend.service gamehub-web.service
+bash scripts/uninstall.sh            # 取消开机自启
 
 # 类型检查（在 app/ 目录下执行，勿在仓库根）
 (cd app && npx tsc --noEmit)
