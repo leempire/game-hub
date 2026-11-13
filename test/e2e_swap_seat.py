@@ -58,7 +58,10 @@ def player_order(page):
     seg = body.split('玩家 (', 1)[1].split('\n', 1)[1]     # 去掉 "2/4)" 那一行
     seg = re.split(r'开始游戏|等待玩家|等待准备|退出房间|准 备|取消准备', seg, 1)[0]
     return [ln.strip() for ln in seg.splitlines()
-            if ln.strip() and ln.strip() not in BADGES]
+            if ln.strip() and ln.strip() not in BADGES
+            # 图标按钮用 Ionicons 字体渲染，inner_text 会带出私用区字形（U+E000–U+F8FF）；
+            # 它不是文字，不能当成玩家名。
+            and any(not (0xE000 <= ord(ch) <= 0xF8FF) for ch in ln.strip())]
 
 
 def main():
@@ -95,7 +98,8 @@ def main():
             ok(f'两人就位，座位顺序 [{ua}, {ub}]')
 
             # ① 真人之间：请求 → 对方弹窗 → 还没同意之前座位不动
-            pa.get_by_text('换位', exact=True).first.click()
+            # 换位是 44pt 图标按钮（testID / aria-label 指明动作），不再占用第二行。
+            pa.locator('[data-testid^="swap-seat-"]').first.click()
             pb.locator('[data-testid="swap-request-modal"]').wait_for(timeout=8000)
             assert f'「{ua}」想和你交换位置' in pb.locator('body').inner_text(), \
                 pb.locator('body').inner_text()[:200]
@@ -106,7 +110,8 @@ def main():
             # 待答态：发起方那颗按钮要**停在**「等待同意」。服务端对真人目标会立刻回
             # 一条 `accepted: null` 的「已转达」ack —— 曾经拿它清掉待答态，于是按钮
             # 只闪一帧就变回「换位」，玩家以为没发出去又点一次。
-            assert pa.get_by_text('等待同意', exact=True).count() == 1, \
+            pa.locator('[aria-label^="等待同意与"]').wait_for(timeout=8000)
+            assert pa.locator('[aria-label^="等待同意与"]').count() == 1, \
                 '发起方没显示「等待同意」（待答态一帧就没了）'
             ok('发起方停在「等待同意」上')
 
@@ -116,7 +121,7 @@ def main():
             pa.wait_for_timeout(1200)
             assert player_order(pa) == [ub, ua], f'A 侧顺序没变：{player_order(pa)}'
             assert player_order(pb) == [ub, ua], f'B 侧顺序没变：{player_order(pb)}'
-            assert pa.get_by_text('等待同意', exact=True).count() == 0, \
+            assert pa.locator('[aria-label^="等待同意与"]').count() == 0, \
                 '拿到最终答复后「等待同意」没复位'
             ok('同意后双方座位顺序都对调了（广播到位），待答态复位')
 
@@ -124,7 +129,7 @@ def main():
             pa.get_by_text('添加人机', exact=True).click()
             pa.wait_for_timeout(1200)
             assert player_order(pa) == [ub, ua, '人机·棋手'], player_order(pa)
-            pa.get_by_text('换位', exact=True).last.click()
+            pa.locator('[data-testid^="swap-seat-"]').last.click()
             pa.wait_for_timeout(1800)
             order = player_order(pa)
             assert order == [ub, '人机·棋手', ua], f'和人机换位后顺序不对：{order}'

@@ -4,8 +4,10 @@ import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation';
 import { useAuth } from '../auth';
-import { blockContact, displayContact, getSocial, removeFriend, respondFriend, unblockContact,
-  type ContactProfile, type SocialSnapshot } from '../contacts';
+import { joinRoom } from '../api';
+import { gameTitle } from '../games';
+import { blockContact, declineRoomInvite, displayContact, getSocial, removeFriend, respondFriend,
+  unblockContact, type ContactProfile, type RoomInvite, type SocialSnapshot } from '../contacts';
 import useForegroundPolling from '../useForegroundPolling';
 import ContactSearchModal from '../ContactSearchModal';
 import { PersonCard, SocialButton, SocialEmpty } from '../SocialCards';
@@ -45,6 +47,18 @@ export default function SocialTab() {
   const respond = (id: number, action: 'accept' | 'decline' | 'cancel') => {
     if (token) void perform(`${action}-${id}`, () => respondFriend(token, id, action));
   };
+  // 邀请入房 = 直接走正常 join（密码/满员/开局都由服务端裁决），成功后进房间页。
+  const joinInvite = (invite: RoomInvite) => {
+    if (!token) return;
+    void perform(`invite-join-${invite.id}`, async () => {
+      const room = await joinRoom(token, invite.room.code, null);
+      if (alive.current) navigation.navigate('Room', { code: room.code });
+    });
+  };
+  const declineInvite = (invite: RoomInvite) => {
+    if (token) void perform(`invite-decline-${invite.id}`, () => declineRoomInvite(token, invite.id));
+  };
+  const invites = data?.invites || [];
   const conversationFriends = data?.friends.filter(person => person.last_message) || [];
   const count = { messages: data?.unread_total || 0, friends: data?.friends.length || 0, requests: data?.incoming.length || 0 };
   const alert = !!actionError && <Text style={styles.error} accessibilityRole="alert">{actionError}</Text>;
@@ -54,6 +68,25 @@ export default function SocialTab() {
         <View style={styles.heading}><Text style={styles.title}>社交</Text><Text style={styles.hint}>和好友聊天，再约一局。</Text></View>
         <SocialButton label="添加好友" testID="social-add-friend" primary onPress={() => { setActionError(''); setSearchOpen(true); }} />
       </View>
+      {!!invites.length && <View style={styles.invites} testID="social-invites">
+        <Text style={styles.section}>房间邀请</Text>
+        {invites.map(invite => <View key={invite.id} style={styles.inviteCard} testID={`social-invite-${invite.id}`}>
+          <View style={styles.inviteInfo}>
+            <Text numberOfLines={1} style={styles.inviteTitle}>
+              {displayContact(invite.inviter)} 邀请你加入
+            </Text>
+            <Text numberOfLines={2} style={styles.inviteMeta}>
+              {invite.room.name} · {gameTitle(invite.room.game)} · {invite.room.players}/{invite.room.max_players} 人
+            </Text>
+          </View>
+          <View style={styles.inviteActions}>
+            <SocialButton label="忽略" testID={`social-invite-decline-${invite.id}`} disabled={!!busy}
+              onPress={() => declineInvite(invite)} />
+            <SocialButton label="加入房间" primary testID={`social-invite-join-${invite.id}`}
+              disabled={!!busy} busy={busy === `invite-join-${invite.id}`} onPress={() => joinInvite(invite)} />
+          </View>
+        </View>)}
+      </View>}
       <View style={styles.segments}>
         {(['messages', 'friends', 'requests'] as Segment[]).map(key => <TouchableOpacity key={key}
           accessibilityRole="button" accessibilityState={{ selected: segment === key }} testID={`social-segment-${key}`}
@@ -139,6 +172,13 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm }, heading: { flex: 1, minWidth: 0, gap: spacing.xs },
   title: { color: colors.text, fontSize: fontSize.xl, fontWeight: '700' }, hint: { color: colors.textSecondary, fontSize: fontSize.sm, lineHeight: 22 },
   section: { color: colors.text, fontSize: fontSize.md, fontWeight: '700' },
+  invites: { gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.card,
+    borderWidth: 1, borderColor: colors.borderStrong },
+  inviteCard: { gap: spacing.xs, paddingVertical: spacing.xs, borderTopWidth: 1, borderTopColor: colors.border },
+  inviteInfo: { gap: 2 },
+  inviteTitle: { color: colors.text, fontSize: fontSize.md, fontWeight: '600' },
+  inviteMeta: { color: colors.textSecondary, fontSize: fontSize.sm, lineHeight: 20 },
+  inviteActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: spacing.sm },
   segments: { flexDirection: 'row', backgroundColor: colors.surfaceMuted, padding: spacing.xs, borderRadius: radius.md, gap: spacing.xs },
   segment: { flex: 1, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: radius.sm },
   selected: { backgroundColor: colors.primary }, segmentText: { color: colors.textSecondary, fontSize: fontSize.sm, fontWeight: '600' }, selectedText: { color: colors.white },

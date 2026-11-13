@@ -2,7 +2,7 @@
   "expo": {
     "name": "GameHub",
     "slug": "gamehub",
-    "version": "1.23.0",
+    "version": "1.24.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

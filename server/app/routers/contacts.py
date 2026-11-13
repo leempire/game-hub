@@ -3,7 +3,7 @@ from typing import Literal
 import unicodedata
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
-from app import friends, direct_messages
+from app import friends, direct_messages, room_invites
 from app.security import get_current_user_id
 
 router = APIRouter(prefix='/api/social', tags=['social'])
@@ -44,14 +44,35 @@ class ReadBody(SocialBody):
     through_id: int = Field(ge=0, le=MAX_ID, strict=True)
 
 
+class InviteBody(SocialBody):
+    user_id: int = Field(ge=1, le=MAX_ID, strict=True)
+    room_code: StrictStr = Field(min_length=6, max_length=6, pattern=r'^[A-Za-z0-9]{6}$')
+
+
 @router.get('')
 def inbox(actor: int = Depends(get_current_user_id)):
-    return friends.snapshot(actor)
+    # 邀请与好友/消息同一份快照下发，社交页一次轮询就能看到。
+    return {**friends.snapshot(actor), 'invites': room_invites.pending(actor)['items']}
 
 
 @router.get('/summary')
 def summary(actor: int = Depends(get_current_user_id)):
-    return friends.summary(actor)
+    return {**friends.summary(actor), 'invite_total': room_invites.count(actor)}
+
+
+@router.get('/invites')
+def invites(actor: int = Depends(get_current_user_id)):
+    return room_invites.pending(actor)
+
+
+@router.post('/invites')
+def invite(body: InviteBody, actor: int = Depends(get_current_user_id)):
+    return room_invites.invite(actor, body.user_id, body.room_code)
+
+
+@router.post('/invites/{invite_id}/decline')
+def decline_invite(invite_id: int = Path(ge=1, le=MAX_ID), actor: int = Depends(get_current_user_id)):
+    return room_invites.decline(actor, invite_id)
 
 
 @router.get('/users')

@@ -74,6 +74,7 @@ def create_room(page, other_page=None):
     page.wait_for_timeout(500)
     goto_tab(page, '房间')
     page.get_by_text('创建', exact=True).first.click()
+    page.get_by_test_id('create-game-picker').click()
     page.get_by_text('军棋', exact=True).last.click()
     page.get_by_text('创建', exact=True).last.click()
     page.get_by_text('房间号', exact=True).wait_for(timeout=15000)

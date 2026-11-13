@@ -206,9 +206,16 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
 
       {/* Actions */}
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.actionItem} onPress={() => navigation.navigate('Competition')}>
+        {/* 每日挑战与排行榜拆成两个入口（游戏页只展示每日挑战）。 */}
+        <TouchableOpacity style={styles.actionItem}
+          onPress={() => navigation.navigate('Competition', { tab: 'daily' })}>
+          <Ionicons name="flash-outline" size={20} color={colors.text} style={styles.actionIcon} />
+          <Text style={styles.actionText}>每日挑战</Text><Text style={styles.actionArrow}>›</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.actionItem}
+          onPress={() => navigation.navigate('Competition', { tab: 'boards' })}>
           <Ionicons name="podium-outline" size={20} color={colors.text} style={styles.actionIcon} />
-          <Text style={styles.actionText}>每日挑战与排行榜</Text><Text style={styles.actionArrow}>›</Text>
+          <Text style={styles.actionText}>排行榜</Text><Text style={styles.actionArrow}>›</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionItem} onPress={onNavigateToHistory}>
           <Ionicons name="time-outline" size={20} color={colors.text} style={styles.actionIcon} />

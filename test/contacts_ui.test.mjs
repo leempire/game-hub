@@ -47,7 +47,10 @@ function mount(file, props, overrides) {
     './ui': { AppModal: 'Modal', FormInput: 'Input' }, '../ui': { AppModal: 'Modal', Card: 'Card' },
     './SocialCards': { PersonCard: 'Person', SocialButton: 'Button' },
     '../SocialCards': { PersonCard: 'Person', SocialButton: 'Button', SocialEmpty: 'Empty' },
-    './theme': theme, '../theme': theme, ...overrides };
+    './theme': theme, '../theme': theme,
+    '../games': { gameTitle: key => key },
+    '../api': { joinRoom: async (_token, code) => ({ code }) },
+    ...overrides };
   const exports = {};
   runInNewContext(source(file), { exports, require: key => { assert.ok(key in modules, key); return modules[key]; }, Error });
   const walk = node => {
@@ -96,5 +99,35 @@ test('friend management requires confirmation and blocks duplicate mutations', a
   assert.equal(view.has('social-confirm'), true);
   view.press('social-confirm'); view.press('social-confirm'); assert.equal(blocks, 1);
   resolve({ ok: true }); await flush(); assert.equal(view.has('social-manage-sheet'), false); assert.equal(refreshes, 1);
+  view.unmount();
+});
+
+test('room invitation joins through the normal room API and can be dismissed', async () => {
+  let poll, refreshes = 0;
+  const joins = [], declines = [], navigations = [];
+  const invite = { id: 7, inviter: { id: 2, username: 'friend', nickname: null },
+    room: { code: 'ABC123', name: '周末房', game: 'gomoku', status: 'waiting', players: 1, max_players: 2 },
+    created_at: '2026-11-13T00:00:00Z' };
+  const api = { displayContact: p => p.nickname || p.username,
+    getSocial: async () => ({ friends: [], incoming: [], outgoing: [], blocked: [], unread_total: 0, invites: [invite] }),
+    declineRoomInvite: async (_token, id) => { declines.push(id); return { ok: true }; } };
+  const view = mount('screens/SocialTab.tsx', {}, { '../contacts': api,
+    '../api': { joinRoom: async (_token, code) => { joins.push(code); return { code }; } },
+    '../auth': { useAuth: () => ({ token: 't' }) },
+    '@react-navigation/native': { useIsFocused: () => true,
+      useNavigation: () => ({ navigate: (name, params) => navigations.push({ name, params }) }) },
+    '../useForegroundPolling': { __esModule: true, default: (_, task) => { poll = task; return () => { refreshes++; }; } },
+    '../ContactSearchModal': { __esModule: true, default: 'Search' } });
+  view.render(); await poll(() => true);
+  assert.equal(view.has('social-invite-7'), true);
+  view.press('social-invite-join-7'); await flush();
+  assert.deepEqual(joins, ['ABC123']);
+  // 导航回调在 vm 上下文里创建，跨 realm 的对象不能直接 deepEqual。
+  assert.equal(navigations.length, 1);
+  assert.equal(navigations[0].name, 'Room');
+  assert.equal(navigations[0].params.code, 'ABC123');
+  view.press('social-invite-decline-7'); await flush();
+  assert.deepEqual(declines, [7]);
+  assert.equal(refreshes, 2);
   view.unmount();
 });

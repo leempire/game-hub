@@ -63,7 +63,8 @@ export type RootStackParamList = {
   Stasis: { code: string };
   Admin: undefined;
   History: undefined;
-  Competition: undefined;
+  /** 每日挑战与排行榜是两个入口（游戏页只展示每日挑战，我的页各一条）。 */
+  Competition: { tab?: 'daily' | 'boards' } | undefined;
   SharedReplay: { token: string };
   Watch: { code: string };
   Chat: { userId: number };
@@ -178,7 +179,11 @@ function MainTabs() {
   useForegroundPolling(`social-badge:${token}`, async valid => {
     if (!token) return;
     const summary = await getSocialSummary(token);
-    if (valid()) setBadge({ token, count: summary.unread_total + summary.incoming_total, stale: false });
+    if (valid()) setBadge({
+      token,
+      count: summary.unread_total + summary.incoming_total + summary.invite_total,
+      stale: false,
+    });
   }, () => {
     // Retain the last known count on transient errors; the social page supplies retry UI.
     setBadge(value => ({ token, count: value.token === token ? value.count : 0, stale: true }));
@@ -218,7 +223,7 @@ function MainTabs() {
       />
       <Tab.Screen name="Social" component={SocialTab}
         options={{ title: '社交', tabBarBadge: unread ? (unread > 99 ? '99+' : unread) : undefined,
-          tabBarAccessibilityLabel: badge.stale ? '社交，未读数量暂未更新' : `社交${unread ? `，${unread}条未读或好友申请` : ''}` }} />
+          tabBarAccessibilityLabel: badge.stale ? '社交，未读数量暂未更新' : `社交${unread ? `，${unread}条未读、申请或房间邀请` : ''}` }} />
       <Tab.Screen
         name="Profile"
         component={ProfileTabWrapper}

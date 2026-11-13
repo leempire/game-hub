@@ -84,6 +84,7 @@ def main():
 
         goto_tab(pa, '房间')
         pa.get_by_text('创建', exact=True).first.click()
+        pa.get_by_test_id('create-game-picker').click()
         pa.get_by_text('飞行棋', exact=True).last.click()
         pa.get_by_text('创建', exact=True).last.click()
         pa.get_by_text('房间号', exact=True).wait_for(timeout=15000)

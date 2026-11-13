@@ -44,6 +44,21 @@ def create_schema(conn):
             through_id INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(owner_id,peer_id), CHECK(owner_id != peer_id)
         );
+        CREATE TABLE IF NOT EXISTS room_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_code TEXT NOT NULL,
+            inviter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            invitee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            status TEXT NOT NULL CHECK(status IN ('pending','declined','expired')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            CHECK(inviter_id != invitee_id)
+        );
+        -- 同一房间对同一个人只保留一条待答邀请（换个好友再邀就更新这条）。
+        CREATE UNIQUE INDEX IF NOT EXISTS room_invites_pending
+            ON room_invites(room_code,invitee_id) WHERE status='pending';
+        CREATE INDEX IF NOT EXISTS room_invites_inbox ON room_invites(invitee_id,status,id);
+        CREATE INDEX IF NOT EXISTS room_invites_rate ON room_invites(inviter_id,created_at);
     """
     for statement in statements.split(';'):
         if statement.strip():

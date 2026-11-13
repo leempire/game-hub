@@ -361,9 +361,11 @@ def test_lightweight_summary_matches_inbox_through_read_remove_and_ban(client):
         assert response.status_code == 200
         value = response.json()
         full = inbox(client, b)
-        assert value == {'unread_total': full['unread_total'], 'incoming_total': len(full['incoming'])}
+        assert value == {'unread_total': full['unread_total'],
+                         'incoming_total': len(full['incoming']),
+                         'invite_total': len(full['invites'])}
         return value
-    assert summary() == {'unread_total': 1, 'incoming_total': 1}
+    assert summary() == {'unread_total': 1, 'incoming_total': 1, 'invite_total': 0}
     client.post(f"/api/social/chats/{a['id']}/read", headers=b['headers'], json={'through_id': item['id']})
     assert summary()['unread_total'] == 0
     assert send(client, a, b, 2).status_code == 200

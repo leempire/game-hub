@@ -7,7 +7,7 @@ const require = createRequire(new URL('../app/package.json', import.meta.url));
 const React = require('react'), ts = require('typescript');
 const { renderToStaticMarkup } = require('react-dom/server');
 function harness() {
-  const slots = [], effects = [], elements = new Map(), sent = [], reads = [];
+  const slots = [], effects = [], elements = new Map(), sent = [], reads = [], keyboard = new Map();
   let cursor = 0, poll, focused = true, active = true, html = '', rejectSend = false, feedError = false;
   const messages = [{ id: 1, sender_id: 2, client_id: null, body: '<script>hello</script>', created_at: '2026-11-04T00:00:00Z' }];
   const state = initial => { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial;
@@ -28,12 +28,14 @@ function harness() {
   const modules = { react: hooks,
     'react-native': { View: host('div'), Text: host('span'), TextInput: host('textarea'), TouchableOpacity: host('button'),
       KeyboardAvoidingView: host('article'), ActivityIndicator: () => null, Platform: { OS: 'android' },
+      Keyboard: { addListener: (name, fn) => { keyboard.set(name, fn); return { remove: () => keyboard.delete(name) }; } },
       FlatList: props => React.createElement('main', null, props.ListHeaderComponent,
         props.data.length ? props.data.map(item => React.createElement(React.Fragment, { key: item.id }, props.renderItem({ item }))) : props.ListEmptyComponent),
       AppState: { get currentState() { return active ? 'active' : 'background'; }, addEventListener: () => ({ remove() {} }) },
       StyleSheet: { create: value => value } },
     '@react-navigation/native': { useNavigation: () => ({ setOptions() {} }), useFocusEffect: callback => hooks.useEffect(() => focused ? callback() : undefined, [focused]) },
-    'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 0, top: 20 }) },
+    '@react-navigation/elements': { useHeaderHeight: () => 64 },
+    'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 24, top: 20 }) },
     '../auth': { useAuth: () => ({ token: 'token', user: { id: 1 } }) }, '../contacts': contacts,
     '../theme': require('../app/src/theme.ts'), '../ui': { Card: host('section') },
     '../useForegroundPolling': { __esModule: true, default: (_key, task, onError) => {
@@ -57,6 +59,7 @@ function harness() {
     type(value) { this.get('chat-input').onChangeText(value); render(); },
     async poll() { render(); await poll(); render(); }, async settle() { await new Promise(resolve => setImmediate(resolve)); render(); },
     reject(value) { rejectSend = value; }, feedError(value) { feedError = value; },
+    keyboard(name, payload) { keyboard.get(name)?.(payload); render(); },
     focus(value) { focused = value; render(); }, foreground(value) { active = value; },
     sent, reads, get html() { return html; }, unmount() { slots.forEach(slot => slot?.cleanup?.()); } };
 }
@@ -69,6 +72,18 @@ test('chat screen wires draft, send, plain text message bubbles and read receipt
   assert.ok(h.get('chat-message-2')); assert.match(h.html, /已读/); assert.deepEqual(h.reads, [1]);
   h.unmount();
 });
+test('chat composer hugs the keyboard and restores the safe-area gap after hide', async () => {
+  const h = harness(); h.render();
+  const padding = () => h.get('chat-composer').style
+    .reduce((value, entry) => entry && 'paddingBottom' in entry ? entry.paddingBottom : value, null);
+  assert.equal(padding(), 24);
+  h.keyboard('keyboardDidShow', { endCoordinates: { height: 300 } });
+  assert.equal(padding(), 8);
+  h.keyboard('keyboardDidHide');
+  assert.equal(padding(), 24);
+  h.unmount();
+});
+
 test('failed UI send preserves text for same-identity retry and revoked friendship disables composer', async () => {
   const h = harness(); await h.poll(); h.reject(true); h.type('请重试');
   h.press('chat-send'); await h.settle(); assert.equal(h.get('chat-input').value, '请重试'); assert.ok(h.get('chat-send-error'));

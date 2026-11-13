@@ -6,9 +6,17 @@ export interface MessagePreview { id: number; sender_id: number; body: string; c
 export interface DirectMessage extends MessagePreview { client_id: string | null }
 export interface ContactFriend extends ContactProfile { unread_count: number; last_message: MessagePreview | null }
 export interface ContactRequest extends ContactProfile { created_at: string }
+/** 一条好友房间邀请。房间字段是服务端裁剪后的公开视图，**不含密码**。 */
+export interface RoomInviteRoom {
+  code: string; name: string; game: string;
+  status: 'waiting' | 'playing'; players: number; max_players: number;
+}
+export interface RoomInvite {
+  id: number; inviter: ContactProfile; room: RoomInviteRoom; created_at: string;
+}
 export interface SocialSnapshot {
   friends: ContactFriend[]; incoming: ContactRequest[]; outgoing: ContactRequest[];
-  blocked: ContactProfile[]; unread_total: number;
+  blocked: ContactProfile[]; unread_total: number; invites?: RoomInvite[];
 }
 export interface ContactSearch extends ContactProfile { relation: 'none' | 'friend' | 'incoming' | 'outgoing' }
 export interface ChatPage { peer: ContactProfile; items: DirectMessage[]; has_more: boolean; peer_read_through: number }
@@ -23,8 +31,15 @@ async function request<T>(token: string, path: string, options: RequestInit = {}
   } finally { clearTimeout(timer); }
 }
 export const displayContact = (person: ContactProfile) => person.nickname || person.username;
-export const getSocialSummary = (token: string) => request<{ unread_total: number; incoming_total: number }>(token, '/summary');
+export const getSocialSummary = (token: string) =>
+  request<{ unread_total: number; incoming_total: number; invite_total: number }>(token, '/summary');
 export const getSocial = (token: string) => request<SocialSnapshot>(token, '');
+export const inviteFriendToRoom = (token: string, userId: number, roomCode: string) =>
+  request<{ ok: boolean; invite_id: number }>(token, '/invites', {
+    method: 'POST', body: JSON.stringify({ user_id: userId, room_code: roomCode }),
+  });
+export const declineRoomInvite = (token: string, inviteId: number) =>
+  request<{ ok: boolean }>(token, `/invites/${inviteId}/decline`, { method: 'POST' });
 export const searchContacts = (token: string, username: string) =>
   request<{ items: ContactSearch[] }>(token, `/users?q=${encodeURIComponent(username.trim())}`);
 export const requestFriend = (token: string, userId: number) => request<{ status: string }>(token, '/requests', {

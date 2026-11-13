@@ -1,8 +1,9 @@
 /** Friend-only plain text conversation. Server access is checked on every request. */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text,
-  TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Keyboard, KeyboardAvoidingView, StyleSheet,
+  Text, TextInput, TouchableOpacity, View } from 'react-native';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import { useHeaderHeight } from '@react-navigation/elements';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../auth';
@@ -29,12 +30,30 @@ function Message({ value, mine, read }: { value: DirectMessage; mine: boolean; r
 function Conversation({ token, actor, peer }: { token: string; actor: number; peer: number }) {
   const nav = useNavigation();
   const insets = useSafeAreaInsets();
+  // 键盘避让的偏移量必须等于导航头高度：`KeyboardAvoidingView` 的 frame 从头部
+  // 下方开始，而键盘坐标是整屏坐标，不减掉头部会少抬一整个头的高度 ——
+  // Android 边到边（edge-to-edge）下 adjustResize 不再缩窗口，输入框就被压在
+  // 键盘下面。Expo 文档明确要求把 `useHeaderHeight()` 传给 keyboardVerticalOffset。
+  const headerHeight = useHeaderHeight();
   const [model] = useState(() => new ChatTimeline(token, actor, peer, () => AppState.currentState === 'active'));
   const [state, setState] = useState(model.state);
   const [awayFromBottom, setAwayFromBottom] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const list = useRef<FlatList<DirectMessage>>(null);
   const anchor = useRef(new BottomAnchor());
   useEffect(() => model.subscribe(setState), [model]);
+  // 键盘弹起/收起：收起时保留底部安全区，弹起时让输入栏紧贴键盘（不再多留一条
+  // 手势条的空白），并把视野带回最新消息。
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+      anchor.current.follow();
+      setAwayFromBottom(false);
+      scrollToLatest(list.current);
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   useFocusEffect(useCallback(() => {
     model.setActive(true);
     const listener = AppState.addEventListener('change', () => model.invalidate());
@@ -56,7 +75,7 @@ function Conversation({ token, actor, peer }: { token: string; actor: number; pe
   };
   const older = () => { anchor.current.pause(); setAwayFromBottom(true); void model.loadOlder(); };
   return <KeyboardAvoidingView testID="chat-screen" style={styles.page}
-    behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 44 : 0}>
+    behavior="padding" keyboardVerticalOffset={headerHeight}>
     <View style={styles.status}>
       <Text style={styles.note} testID={state.ready ? 'chat-ready' : 'chat-connecting'}>
         {state.peer ? `@${state.peer.username} · 好友私聊` : '好友私聊'}
@@ -86,7 +105,7 @@ function Conversation({ token, actor, peer }: { token: string; actor: number; pe
     {awayFromBottom && <TouchableOpacity testID="chat-jump-latest" style={styles.jump} onPress={jump} accessibilityRole="button">
       <Text style={styles.link}>回到最新消息</Text>
     </TouchableOpacity>}
-    <View style={[styles.composer, { paddingBottom: Math.max(spacing.sm, insets.bottom) }]}>
+    <View testID="chat-composer" style={[styles.composer, { paddingBottom: keyboardVisible ? spacing.sm : Math.max(spacing.sm, insets.bottom) }]}>
       {!!state.sendError && <Text testID="chat-send-error" accessibilityRole="alert" style={styles.error}>{state.sendError}</Text>}
       <View style={styles.inputRow}>
         <TextInput testID="chat-input" accessibilityLabel="聊天内容" value={state.draft} onChangeText={value => model.changeDraft(value)}
