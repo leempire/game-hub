@@ -61,6 +61,7 @@ function harness() {
     '../roomSettings': { RoomSettingsRow: () => null, RoomSettingsSheet: () => null,
       settingsSummary: () => '', settingValueLabel: () => '' },
     '../help': { GameHelpButton: () => null }, '../games': { gameTitle: game => game },
+    '../InviteFriendsModal': { __esModule: true, default: () => null },
   };
   const exports = {};
   const source = ts.transpileModule(readFileSync(new URL('../app/src/screens/RoomScreen.tsx', import.meta.url), 'utf8'), {

@@ -107,7 +107,7 @@ def checks(api, database):
         sent = history(alice, bid)['items'][0]
         expect(a.get_by_test_id(f'chat-message-{sent["id"]}')).to_contain_text('你好')
         wait_ui(lambda: inbox(bob)['unread_total'] == 1)
-        expect(b.locator('[aria-label="社交，1条未读或好友申请"]')).to_be_visible(timeout=15000)
+        expect(b.locator('[aria-label="社交，1条未读、申请或房间邀请"]')).to_be_visible(timeout=15000)
         b.get_by_test_id('social-segment-friends').click()
         b.get_by_test_id(f'social-chat-{aid}').click()
         expect(b.get_by_test_id(f'chat-message-{sent["id"]}')).to_contain_text('<b>你好</b>')

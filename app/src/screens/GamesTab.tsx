@@ -195,9 +195,11 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
           onJoin={() => setShowJoinModal(true)}
           onBrowse={onNavigateToRooms}
         />
-        <TouchableOpacity style={styles.competitionLink} onPress={() => navigation.navigate('Competition')} accessibilityRole="button">
-          <Ionicons name="podium-outline" size={20} color={colors.primary} />
-          <Text style={styles.competitionText}>每日挑战 · 排行榜</Text>
+        {/* 游戏页只保留「每日挑战」；排行榜入口在「我的」里，两者互不挤占。 */}
+        <TouchableOpacity style={styles.competitionLink}
+          onPress={() => navigation.navigate('Competition', { tab: 'daily' })} accessibilityRole="button">
+          <Ionicons name="flash-outline" size={20} color={colors.primary} />
+          <Text style={styles.competitionText}>每日挑战</Text>
           <Text style={styles.competitionText}>›</Text>
         </TouchableOpacity>
         <RecentGames

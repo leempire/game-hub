@@ -12,6 +12,7 @@ import { useModalBackGuard } from '../backGuard';
 import { colors, spacing, radius, fontSize } from '../theme';
 import { notify } from '../utils';
 import { RoomSettingsRow, RoomSettingsSheet } from '../roomSettings';
+import InviteFriendsModal from '../InviteFriendsModal';
 import { GameHelpButton } from '../help';
 import GameIntro from '../GameIntro';
 import { createPractice } from '../social';
@@ -52,6 +53,8 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   // 同样必须在 `if (loading)` 提前返回之前。
   const [swapFrom, setSwapFrom] = useState<{ id: number; name: string } | null>(null);
   const [swapWaitTo, setSwapWaitTo] = useState<number | null>(null);
+  // 邀请好友进房（等待大厅、无密码、未满员时出现）
+  const [showInvite, setShowInvite] = useState(false);
   useModalBackGuard(swapFrom !== null, () => setSwapFrom(null));
   // WS sync 到达后 REST 快照即为陈旧数据（如 connected），不再覆盖实时状态
   const syncedRef = useRef(false);
@@ -304,6 +307,9 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
     ? false
     : (isLudo || isUno || isStasis) ? room.players.length < 2 : !isFull;
   const canStart = allReady && !needMorePlayers;
+  // 邀请好友：只在能进人的等待房出现。密码房 / 挑战房 / 练习房服务端也会拒，
+  // 这里先不显示按钮，免得用户点开才看到一句「不能邀请」。
+  const canInvite = isLobbyStatus && !isFull && !room.has_password && !room.practice && !room.challenge;
 
   // 全部支持人机的游戏都提供三档；合作游戏中代表队友执行力。
   // botDifficulty 的 useState 在组件顶部（提前返回之前），这里只做取值与展示。
@@ -398,52 +404,54 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
         <Text style={styles.sectionTitle}>
           玩家 ({room.players.length}/{room.max_players})
         </Text>
-        {room.players.map((p: RoomPlayer) => (
-          <View key={p.id} style={styles.playerRow}>
-            <View style={styles.playerHeader}>
-              <View style={styles.playerInfo}>
-                <Text numberOfLines={1} style={[styles.playerName, showOffline && !p.connected && styles.playerDisconnected]}>
-                  {p.nickname || p.username}
-                </Text>
-                <View style={styles.playerMeta}>
-                  {p.is_host && <Text style={styles.hostBadge}>房主</Text>}
-                  {p.is_bot && <Text style={styles.botBadge}>
-                    {BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? '普通'}难度
-                  </Text>}
-                </View>
-              </View>
-              <View style={styles.playerStatus}>
-                {showOffline && !p.connected && <Text style={[styles.statusPill, styles.disconnectedPill]}>断线</Text>}
-                {!p.is_bot && p.ready && <Text style={[styles.statusPill, styles.readyPill]}>已准备</Text>}
-                {!p.is_bot && !p.ready && !p.is_host && <Text style={[styles.statusPill, styles.unreadyPill]}>未准备</Text>}
-              </View>
-            </View>
-            {isLobbyStatus && p.id !== user?.id && <View style={styles.playerBadges}>
+        {room.players.map((p: RoomPlayer) => {
+          // 所有玩家（含房主、人机、自己）都只占**一行**：换位 / 移除收成 44pt
+          // 图标按钮贴在行尾，不再另起一行按钮区。人机卡片以前比真人高出整整一行。
+          const canSwap = isLobbyStatus && p.id !== user?.id;
+          const canRemove = isHost && p.is_bot && isLobbyStatus;
+          const waiting = swapWaitTo === p.id;
+          return (
+            <View key={p.id} style={styles.playerRow}>
+              <Text numberOfLines={1} style={[styles.playerName, showOffline && !p.connected && styles.playerDisconnected]}>
+                {p.nickname || p.username}
+              </Text>
+              {p.is_host && <Text style={styles.hostBadge}>房主</Text>}
+              {p.is_bot && <Text style={styles.botBadge}>
+                {BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? '普通'}难度
+              </Text>}
+              <View style={styles.playerSpacer} />
+              {showOffline && !p.connected && <Text style={[styles.statusPill, styles.disconnectedPill]}>断线</Text>}
+              {!p.is_bot && p.ready && <Text style={[styles.statusPill, styles.readyPill]}>已准备</Text>}
+              {!p.is_bot && !p.ready && !p.is_host && <Text style={[styles.statusPill, styles.unreadyPill]}>未准备</Text>}
               {/* 换位（v1.16）：座位就是玩家列表里的下标，开局时决定先手 / 出牌顺序。
                   **只在大厅里出现**（对局中座位已锁死，服务端也会拒）。 */}
-              {isLobbyStatus && p.id !== user?.id && (
+              {canSwap && (
                 <TouchableOpacity
                   testID={`swap-seat-${p.id}`}
-                  style={[styles.rowBtn, swapWaitTo === p.id ? styles.pendingBtn : styles.swapSeatBtn]}
+                  accessibilityRole="button"
+                  accessibilityLabel={waiting ? `等待同意与${p.nickname || p.username}换位` : `与${p.nickname || p.username}换位`}
+                  accessibilityState={{ busy: waiting }}
+                  style={[styles.iconAction, waiting && styles.iconActionPending]}
                   onPress={() => handleSwapRequest(p)}
                 >
-                  <Text style={[styles.rowBtnText, swapWaitTo === p.id ? styles.pendingBtnText : styles.swapSeatBtnText]}>
-                    {swapWaitTo === p.id ? '等待同意' : '换位'}
-                  </Text>
+                  <Ionicons name={waiting ? 'time-outline' : 'swap-horizontal'} size={20}
+                    color={waiting ? colors.textMuted : colors.primary} />
                 </TouchableOpacity>
               )}
-              {isHost && p.is_bot && isLobbyStatus && (
+              {canRemove && (
                 <TouchableOpacity
                   testID={`remove-bot-${p.id}`}
-                  style={[styles.rowBtn, styles.removeBotBtn]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`移除人机${p.nickname || p.username}`}
+                  style={[styles.iconAction, styles.iconActionDanger]}
                   onPress={() => handleRemoveBot(p.id)}
                 >
-                  <Text style={[styles.rowBtnText, styles.removeBotBtnText]}>移除</Text>
+                  <Ionicons name="trash-outline" size={18} color={colors.danger} />
                 </TouchableOpacity>
               )}
-            </View>}
-          </View>
-        ))}
+            </View>
+          );
+        })}
 
         {/* Actions */}
         <View style={styles.actions}>
@@ -498,6 +506,12 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
               <Text style={styles.addBotBtnText}>添加人机</Text>
             </TouchableOpacity>
           )}
+          {canInvite && (
+            <TouchableOpacity testID="room-invite-open" style={[styles.actionBtn, styles.inviteBtn]}
+              onPress={() => setShowInvite(true)}>
+              <Text style={styles.inviteBtnText}>邀请好友</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={[styles.actionBtn, styles.leaveBtn]} onPress={handleLeave}>
             <Text style={styles.leaveBtnText}>退出房间</Text>
           </TouchableOpacity>
@@ -510,6 +524,14 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
         onClose={() => setSettingsOpen(false)}
         onPick={(key, value) => socketRef.current?.roomSetting(key, value)}
       />
+      {token && (
+        <InviteFriendsModal
+          visible={showInvite}
+          token={token}
+          code={code}
+          onClose={() => setShowInvite(false)}
+        />
+      )}
       {/* 换位请求（v1.16）：别人要和我换座位，我点头才真的换。
           接 `useModalBackGuard`（在组件顶部）—— 返回键只关这个弹窗。 */}
       <Modal
@@ -609,22 +631,24 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   playerRow: {
-    gap: spacing.sm,
+    // **一行放完**：昵称 + 身份徽标 + 状态胶囊 + 动作图标。房主 / 真人 / 人机
+    // 用同一套高度，人机不再因为「换位 + 移除」两个文字按钮而撑成两行。
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: 56,
     backgroundColor: colors.card,
     borderRadius: radius.md,
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
     marginBottom: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  playerHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  playerInfo: { flex: 1, minWidth: 0, gap: spacing.xs },
-  playerMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  playerStatus: { flexDirection: 'row', gap: spacing.xs, flexShrink: 0 },
-  playerName: { fontSize: fontSize.md, color: colors.text, fontWeight: '600' },
+  playerName: { flexShrink: 1, minWidth: 0, fontSize: fontSize.md, color: colors.text, fontWeight: '600' },
+  playerSpacer: { flex: 1 },
   playerDisconnected: { textDecorationLine: 'line-through', color: colors.textMuted },
   hostBadge: {
-    alignSelf: 'flex-start',
     backgroundColor: colors.warning,
     paddingHorizontal: spacing.sm,
     paddingVertical: 1,
@@ -637,6 +661,7 @@ const styles = StyleSheet.create({
   botBadge: {
     fontSize: fontSize.xs,
     color: colors.textSecondary,
+    flexShrink: 0,
   },
   difficultyRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -652,27 +677,21 @@ const styles = StyleSheet.create({
   difficultyChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   difficultyChipText: { fontSize: fontSize.sm, color: colors.text, fontWeight: '600' },
   difficultyChipTextActive: { color: colors.white },
-  // 行内动作按钮（换位 / 移除）：**同一颗按钮的两种语义** —— 同高、同圆角、同边框
-  // 粗细、同内边距，只有颜色与文字不同。它们并排出现在同一个玩家行里，形状一致才
-  // 读得出是一个按钮组（旧版是「一颗 44pt 的空框 + 一颗 17pt 的红药丸」，两码事）。
-  // **44pt 高**（HIG 主控件下限）：这是等待大厅里最常用的两条动作，不跟着状态胶囊缩。
-  rowBtn: {
-    minHeight: 44,
-    minWidth: 60,
+  // 行内动作按钮（换位 / 移除）：图标按钮，**44×44 触控目标**（HIG 下限）。
+  // 「等待同意」靠图标（swap → time）与颜色两重变化表达，不是死按钮 ——
+  // 再点一次就是重新发请求。图标按钮让整张玩家卡回到一行高。
+  iconAction: {
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: spacing.sm + 2,
     borderRadius: radius.md,
     borderWidth: 1,
+    borderColor: colors.primary,
     backgroundColor: colors.bg,
   },
-  rowBtnText: { fontSize: fontSize.sm, fontWeight: '600' },
-  swapSeatBtn: { borderColor: colors.primary },
-  swapSeatBtnText: { color: colors.primary },
-  // 「等待同意」是**已发出、还没结果**的待答态：降一档成中性色，不再和可点的
-  // 「换位」抢眼（仍然可点 —— 点了就是再发一次请求，不是死按钮）。
-  pendingBtn: { borderColor: colors.borderStrong, backgroundColor: colors.card },
-  pendingBtnText: { color: colors.textMuted },
+  iconActionPending: { borderColor: colors.borderStrong, backgroundColor: colors.card },
+  iconActionDanger: { borderColor: colors.danger },
   swapBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -702,8 +721,6 @@ const styles = StyleSheet.create({
   swapRejectText: { color: colors.text, fontSize: fontSize.md, fontWeight: '600' },
   swapAccept: { backgroundColor: colors.primary },
   swapAcceptText: { color: colors.white, fontSize: fontSize.md, fontWeight: '600' },
-  removeBotBtn: { borderColor: colors.danger },
-  removeBotBtnText: { color: colors.danger },
   addBotBtn: {
     backgroundColor: colors.bg,
     borderWidth: 1,
@@ -714,8 +731,16 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     fontWeight: '600',
   },
-  // 次要操作独立一行，保留完整触控面积，避免与昵称和状态争抢宽度。
-  playerBadges: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  inviteBtn: {
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  inviteBtnText: {
+    color: colors.text,
+    fontSize: fontSize.md,
+    fontWeight: '600',
+  },
   // 状态胶囊：**标签比按钮小一档**（22 高 vs 44 高）是常见的层级表达，所以它只居中、
   // 不跟着按钮一起长高。`lineHeight` 写死是为了让高度不随平台默认行高漂移。
   statusPill: {
