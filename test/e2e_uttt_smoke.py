@@ -201,9 +201,9 @@ def browser_checks(api):
         for difficulty in ("easy", "normal", "hard"):
             host.get_by_test_id(f"bot-difficulty-{difficulty}").click()
             host.get_by_text("添加人机", exact=True).click()
-            host.get_by_text("移除", exact=True).wait_for()
+            host.locator('[data-testid^="remove-bot-"]').first.wait_for()
             if difficulty == "hard":
-                host.get_by_text("换位", exact=True).first.click()
+                host.locator('[data-testid^="swap-seat-"]').first.click()
                 host.wait_for_timeout(400)
             latest[0] = {}
             host.get_by_text("开始游戏", exact=True).click()
@@ -220,7 +220,7 @@ def browser_checks(api):
             host.get_by_test_id("uttt-surrender").click()
             host.get_by_test_id("uttt-confirm-danger").click()
             back(host)
-            host.get_by_text("移除", exact=True).click()
+            host.locator('[data-testid^="remove-bot-"]').last.click()
             host.get_by_text("添加人机", exact=True).wait_for()
         print("PASS 4: 三档人机真实应招、换座后人机先手、结算回房可继续", flush=True)
         host.goto(BASE + "/history")
