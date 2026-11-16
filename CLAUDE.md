@@ -56,6 +56,8 @@ app/                    # Expo 客户端（RN + Web）
     ├── help.tsx        # 游戏规则帮助系统（GAME_HELP 内容库 + GameHelpButton）
     ├── icons.tsx       # react-native-svg 矢量图标组件
     ├── games.tsx       # 客户端游戏目录：名称、简介、分类与图标入口的唯一来源
+    ├── choice.tsx      # 通用「当前值 + 弹窗选择」字段与游戏候选网格（建房 / 排行榜共用）
+    ├── InviteFriendsModal.tsx # 房间页邀请好友弹窗（列好友、逐个发邀请）
     ├── api.ts          # HTTP 客户端（注册/登录/房间/历史/版本检查）
     ├── socket.ts       # 房间 WS 客户端
     ├── auth.tsx        # 登录态 Context
@@ -85,7 +87,8 @@ server/
     ├── security.py     # JWT + 密码哈希
     ├── friends.py      # 账号好友申请/管理/拉黑和社交摘要
     ├── direct_messages.py # 持久化好友私聊、幂等发送、分页与已读游标
-    ├── social_schema.py# 好友、拉黑、消息和已读表的幂等schema
+    ├── social_schema.py# 好友、拉黑、消息、已读和房间邀请表的幂等schema
+    ├── room_invites.py # 好友房间邀请：持久化、按房间现状校验、失效清理
     ├── spectating.py   # UNO/深空独立只读WS、用户绑定许可与服务端公开字段白名单
     ├── practice.py     # 四款私人练习，统计/榜单/历史排除 practice=1
     ├── room_manager.py # 房间生命周期：创建/加入/准备/开始/断线保座(120s)/对局结束回调
@@ -195,6 +198,12 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   服务端把 `swap_request` 转给对方弹窗确认。四种结果各回一句 `swap_result.message`，
   **一条都不静默**。待答请求存 `room["swap_requests"]`（不进 `room_to_dict`），
   发起人退房或开局时作废。
+- **好友房间邀请**（v1.24）：等待大厅成员可逐个邀请好友，受邀者在「社交」页加入或忽略。
+  邀请只是「请朋友来」的记录，**入房仍走普通 `join_room`**，密码/满员/开局规则不复制
+  第二份；`room_invites.py` 额外挡密码房、挑战房、练习房、非成员发起。同一房间对同一人
+  只保留一条待答邀请（部分唯一索引 + UPSERT）；**列表读取时按房间现状重新校验**，
+  房间解散/开局/满员、解除好友或拉黑后标 `expired`，不留下僵尸红点。底栏角标计入
+  `invite_total`。
 - **游戏级设置一律「进房之后再选」**（v1.13/v1.15）：`POST /api/rooms` 只收游戏类型；
   房主在等待大厅里改，服务端校验「只有房主 / 只有 `waiting`」，然后**广播一条 `lobby`
   给全房**（只回给房主的话，别人看到的还是旧值）。
@@ -277,6 +286,13 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
 - 结算回房用 `navigation.popTo("Room", {code})`，覆盖深链进入而导航栈里没有房间的情况；查看战绩先完成同样的保座返回，再进入 History。
 - 房间页的 REST 自愈、WS sync 与 game_start 共用一次入局门闩，聚焦重置；导航回调存在 ref 中，不能因 wrapper 内联函数变化重建 Socket。深链先完成入房再连 WS，REST 返回不得覆盖之后到达的权威状态。
 - 表单使用 `ui.tsx` 的 `AppModal` / `FormInput` / `Card`。`AppModal` 自带返回保护、键盘避让和可滚动容器，调用方不重复注册同一弹窗。阴影统一 `theme.shadow`，遮罩统一 `colors.overlay`。
+- **底部输入栏的 Android 键盘避让**（v1.24）：Expo SDK 54+ 在 Android 15 上默认
+  edge-to-edge，`adjustResize` 不再缩窗口。`KeyboardAvoidingView` **两个平台都用
+  `behavior="padding"`**，并把 `useHeaderHeight()`（`@react-navigation/elements`）传给
+  `keyboardVerticalOffset` —— 不减导航头高度会少抬一整个头。聊天页还监听
+  `keyboardDidShow/DidHide`，弹起时把输入栏底部安全区降到普通间距（紧贴键盘），
+  收起恢复 `insets.bottom`。**这类问题只有真机 APK 能复现**，浏览器/无头测试只能靠
+  mock `Keyboard.addListener` 锁住接线；验收必须装新 APK 在真机点输入框。
 
 ### 返回操作（backGuard.tsx）
 
@@ -551,6 +567,12 @@ curl -s http://127.0.0.1:50541/api/app/version
   主组件只挂状态与回调（`StasisScreen` 2709 → 1369 是最彻底的例子）。
 - **测试断言的可靠性**：数棋子/元素不要靠「方形按钮里有没有子元素」这类启发式，
   用 `testID`（`stone-x-y` / `bs-<mode>-x-y` 等）。
+- **把文字按钮改成图标按钮 = 测试契约变更**（v1.24）：`get_by_text('换位')` 这类选择器
+  会失效，改用稳定 `testID` 或 `aria-label`（RNW 把 `accessibilityLabel` 映射成
+  `aria-label`）。`inner_text()` 解析玩家列表时要过滤 Ionicons 的私用区字形
+  （U+E000–U+F8FF），否则会多出一个假玩家名。建房游戏收进折叠选择器后，E2E 必须先点
+  `create-game-picker` 再点游戏名；只测默认游戏（五子棋）的脚本可能「碰巧通过」。
+  改按钮形态后先 `rg` 旧文案，逐个换选择器并重跑受影响脚本。
 - **对局屏触控目标**：主要操作按钮统一 `paddingVertical: spacing.sm + 6`（≈47px，
   HIG 建议主控件 ≥44pt）；2048 方向键固定 48×48。棋盘格子做不到 44pt 的，
   靠第二条输入路径补偿，具体取舍见各游戏设计文档。
