@@ -17,7 +17,10 @@ def apk_path() -> str:
 
 def download_url() -> str:
     base = config.get("public_base", "").rstrip("/")
-    return f"{base}/media/app-release/{APK_FILENAME}"
+    # 带上版本号做 cache-busting：文件名固定为 gamehub-latest.apk，浏览器/中间代理
+    # 可能缓存旧包；顺带让访问日志能看出客户端下的是哪一版。
+    version_code = config.get("app", {}).get("version_code", 0)
+    return f"{base}/media/app-release/{APK_FILENAME}?v={version_code}"
 
 
 @router.get("/version")
