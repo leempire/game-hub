@@ -11,7 +11,10 @@ import { updateNickname, changePassword, fetchMyStats, MyStats } from '../api';
 import { colors, spacing, radius, fontSize, shadow } from '../theme';
 import { notify, formatDate } from '../utils';
 import { isNative, isMobileWeb } from '../platform';
-import { checkLatestVersion, downloadAndInstallApk, getCurrentVersion, VersionInfo } from '../appUpdate';
+import {
+  checkLatestVersion, downloadApk, installApk, getCurrentVersion,
+  describeDownloadError, DownloadCancelledError, DownloadProgress, VersionInfo,
+} from '../appUpdate';
 import { ProfileStatsCard } from '../profileStats';
 import { API_BASE } from '../config';
 
@@ -35,7 +38,10 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
   const [submitting, setSubmitting] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<VersionInfo | null>(null);
+  const downloadHandleRef = useRef<ReturnType<typeof downloadApk> | null>(null);
   const [stats, setStats] = useState<MyStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const isFocused = useIsFocused();
@@ -83,8 +89,9 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
         notify('已是最新', `当前版本 v${current.versionName}`);
         return;
       }
-      // 更新弹窗打开前清掉上一次的下载错误
-      setModalError(null);
+      // 更新弹窗打开前清掉上一次的下载错误与进度
+      setDownloadError(null);
+      setDownloadProgress(null);
       setUpdateInfo(info);
     } catch (err) {
       notify('检查更新失败', (err as Error).message);
@@ -94,22 +101,67 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
   };
 
   const handleDownloadUpdate = async () => {
-    if (!updateInfo) return;
-    setModalError(null);
+    if (!updateInfo || downloading) return;
+    setDownloadError(null);
+    setDownloadProgress(null);
     setDownloading(true);
+    const handle = downloadApk(updateInfo.download_url, updateInfo.version_code, setDownloadProgress);
+    downloadHandleRef.current = handle;
     try {
-      await downloadAndInstallApk(updateInfo.download_url);
+      const fileUri = await handle.promise;
+      // 包已到手：先收起弹窗再拉起安装器，安装界面不被弹窗压住
       setUpdateInfo(null);
+      setDownloading(false);
+      setDownloadProgress(null);
+      try {
+        await installApk(fileUri);
+      } catch (err) {
+        notify('安装失败', (err as Error).message || '无法拉起系统安装器');
+      }
     } catch (err) {
-      setModalError((err as Error).message);
+      if (err instanceof DownloadCancelledError) {
+        setDownloadError('已取消下载。已下载的部分会保留，点「继续下载」从断点继续。');
+      } else {
+        setDownloadError(describeDownloadError(err));
+      }
     } finally {
+      downloadHandleRef.current = null;
       setDownloading(false);
     }
+  };
+
+  const handleCancelDownload = () => {
+    downloadHandleRef.current?.cancel();
+  };
+
+  // 兜底：应用内下载屡次失败时，交给系统浏览器/下载管理器（它支持断点与重试）
+  const handleDownloadInBrowser = () => {
+    if (!updateInfo?.download_url) return;
+    void Linking.openURL(updateInfo.download_url);
   };
 
   const handleDownloadApp = () => {
     Linking.openURL(`${API_BASE}/api/app/latest`);
   };
+
+  // 页面卸载时停掉下载（已下载的部分保留，下次续传）
+  useEffect(() => () => { downloadHandleRef.current?.cancel(); }, []);
+
+  const downloadLabel = (() => {
+    if (!downloading) return '立即下载';
+    const percent = downloadProgress?.percent ?? -1;
+    return percent >= 0 ? `下载中 ${percent}%` : '下载中...';
+  })();
+
+  const progressLabel = (() => {
+    if (!downloadProgress) return '正在连接服务器…';
+    const written = (downloadProgress.written / 1024 / 1024).toFixed(1);
+    if (downloadProgress.total > 0) {
+      const total = (downloadProgress.total / 1024 / 1024).toFixed(1);
+      return `${written} / ${total} MB（${downloadProgress.percent}%）`;
+    }
+    return `已下载 ${written} MB`;
+  })();
 
   if (!user || !token) {
     return (
@@ -261,7 +313,7 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
           >
             <Ionicons name="cloud-download-outline" size={20} color={colors.text} style={styles.actionIcon} />
             <Text style={styles.actionText}>
-              {downloading ? '下载中...' : checkingUpdate ? '检查中...' : '检查更新'}
+              {downloading ? downloadLabel : checkingUpdate ? '检查中...' : '检查更新'}
             </Text>
             <Text style={styles.actionArrow}>›</Text>
           </TouchableOpacity>
@@ -348,7 +400,13 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
       </AppModal>
 
       {/* Update confirm modal */}
-      <AppModal visible={!!updateInfo} onClose={() => { if (!downloading) setUpdateInfo(null); }}>
+      <AppModal visible={!!updateInfo} onClose={() => {
+        if (downloading) {
+          notify('正在下载', '下载完成前请先点「取消下载」');
+          return;
+        }
+        setUpdateInfo(null);
+      }}>
       <Text style={styles.modalTitle}>发现新版本</Text>
       <Text style={styles.updateVersionText}>
         v{updateInfo?.version_name}
@@ -356,23 +414,44 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
       <Text style={styles.updateTip}>
         当前版本 v{getCurrentVersion().versionName}，是否立即下载安装？
       </Text>
-      {modalError ? <Text style={styles.modalError} accessibilityRole="alert">{modalError}</Text> : null}
-      <TouchableOpacity
-        style={[styles.modalBtn, styles.modalBtnPrimary, downloading && styles.modalBtnDisabled]}
-        onPress={handleDownloadUpdate}
-        disabled={downloading}
-      >
-        <Text style={styles.modalBtnPrimaryText}>
-          {downloading ? '下载中...' : '立即下载'}
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.modalBtn, styles.modalBtnSecondary, downloading && styles.modalBtnDisabled]}
-        onPress={() => setUpdateInfo(null)}
-        disabled={downloading}
-      >
-        <Text style={styles.modalBtnSecondaryText}>稍后再说</Text>
-      </TouchableOpacity>
+      {downloading ? (
+        <View style={styles.progressBlock}>
+          <View
+            testID="update-download-progress"
+            style={styles.progressTrack}
+            accessibilityRole="progressbar"
+            accessibilityValue={{
+              min: 0,
+              max: 100,
+              now: Math.max(0, downloadProgress?.percent ?? 0),
+            }}
+          >
+            <View style={[styles.progressFill, { width: `${Math.max(2, downloadProgress?.percent ?? 0)}%` }]} />
+          </View>
+          <Text style={styles.progressText}>{progressLabel}</Text>
+          <Text style={styles.progressHint}>下载中断会自动续传，请保持网络连接</Text>
+        </View>
+      ) : null}
+      {downloadError ? <Text style={styles.modalError} accessibilityRole="alert">{downloadError}</Text> : null}
+      {downloading ? (
+        <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSecondary]} onPress={handleCancelDownload}>
+          <Text style={styles.modalBtnSecondaryText}>取消下载</Text>
+        </TouchableOpacity>
+      ) : (
+        <>
+          <TouchableOpacity style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={handleDownloadUpdate}>
+            <Text style={styles.modalBtnPrimaryText}>{downloadError ? '继续下载' : '立即下载'}</Text>
+          </TouchableOpacity>
+          {downloadError ? (
+            <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSecondary]} onPress={handleDownloadInBrowser}>
+              <Text style={styles.modalBtnSecondaryText}>用浏览器下载</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity style={[styles.modalBtn, styles.modalBtnSecondary]} onPress={() => setUpdateInfo(null)}>
+            <Text style={styles.modalBtnSecondaryText}>稍后再说</Text>
+          </TouchableOpacity>
+        </>
+      )}
           </AppModal>
 
       {/* Logout confirm modal */}
@@ -479,6 +558,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: spacing.xs,
   },
+  progressBlock: { alignSelf: 'stretch', gap: spacing.xs, marginTop: spacing.xs },
+  progressTrack: {
+    height: 6, borderRadius: 3, backgroundColor: colors.disabled, overflow: 'hidden',
+  },
+  progressFill: { height: '100%', borderRadius: 3, backgroundColor: colors.primary },
+  progressText: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },
+  progressHint: { fontSize: fontSize.xs, color: colors.textMuted, textAlign: 'center' },
   updateTip: {
     fontSize: fontSize.sm,
     color: colors.textSecondary,
