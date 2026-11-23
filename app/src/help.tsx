@@ -21,7 +21,15 @@ interface HelpEntry {
   sections: HelpSection[];
 }
 
-export const GAME_HELP: Record<GameKey, HelpEntry> = {
+export const GAME_HELP: Record<GameKey | 'lighthouse', HelpEntry> = {
+  lighthouse: {
+    title: '潮汐灯塔玩法',
+    sections: [
+      { heading: '修复海岛', body: '启动发电机获得零件，点亮灯塔后用信号台获得航运券。安装蓄电组可同时为两台设施供电。' },
+      { heading: '开通航线', body: '修复码头后装载补给出航。到港和交付订单可获得海图，用于升级设施。完成十二条航线即可全线通航。' },
+      { heading: '离线生产', body: '进度保存在账号里。回归时最多结算 24 小时生产，航船按实际航程到港。' },
+    ],
+  },
   spider: {
     title: '蜘蛛纸牌规则',
     sections: [
@@ -455,7 +463,7 @@ export const GAME_HELP: Record<GameKey, HelpEntry> = {
 };
 
 interface GameHelpButtonProps {
-  game: GameKey;
+  game: keyof typeof GAME_HELP;
   size?: number;
 }
 
