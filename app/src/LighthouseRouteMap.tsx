@@ -20,10 +20,10 @@ function points(route: number[][]) {
   return route.map(port => port.join(',')).join(' ');
 }
 
-export default function LighthouseRouteMap({ completed, sailing }: { completed: number; sailing: boolean }) {
+export default function LighthouseRouteMap({ completed, sailing, height }: { completed: number; sailing: boolean; height: number }) {
   const current = ports[completed];
   return (
-    <Svg width="100%" height={190} viewBox="0 0 320 180" accessible={false}>
+    <Svg width="100%" height={height} viewBox="0 0 320 180" accessible={false}>
       <Rect width="320" height="180" rx="10" fill="#10262e" />
       {shorelines.map(path => <Path key={path} d={path} fill="#28464a" stroke="#3b6060" strokeWidth="1" />)}
       <Polyline points={points([origin, ...ports])} fill="none" stroke="#7c9a9c" strokeWidth="1.5" strokeDasharray="3 4" />

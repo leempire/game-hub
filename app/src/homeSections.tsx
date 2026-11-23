@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from './theme';
-import { GAMES, GAME_CATEGORIES, gameShort, type GameCategoryKey } from './games';
+import { GAMES, HOME_GAME_CATEGORIES, gameShort, type GameCategoryKey } from './games';
 
 /**
  * 主页顶部三块：主 CTA / 最近玩过 / 搜索与分类筛选。
@@ -75,7 +75,7 @@ export function GameFilters({ query, onChangeQuery, category, onChangeCategory }
 }) {
   const chips: Array<{ key: CategoryFilter; name: string }> = [
     { key: 'all', name: '全部' },
-    ...GAME_CATEGORIES.map((c) => ({ key: c.key as CategoryFilter, name: c.name })),
+    ...HOME_GAME_CATEGORIES.map((c) => ({ key: c.key as CategoryFilter, name: c.name })),
   ];
   return (
     <View style={styles.filters}>

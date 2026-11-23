@@ -25,7 +25,7 @@ export type GameKey =
   | 'gomoku' | 'minesweeper' | 'reversi' | 'battleship' | 'dots' | 'ludo'
   | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt';
 
-export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop';
+export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop' | 'single';
 
 export interface GameEntry {
   key: GameKey;
@@ -110,3 +110,20 @@ export function gameShort(key: string): string {
 export function gameIonicon(key: string): React.ComponentProps<typeof Ionicons>['name'] {
   return BY_KEY[key]?.ionicon ?? 'ellipse';
 }
+
+export const HOME_GAME_CATEGORIES: typeof GAME_CATEGORIES = [
+  ...GAME_CATEGORIES,
+  { key: 'single', name: '单机游戏', blurb: '一个人玩，随时续玩' },
+];
+
+export type HomeGameEntry = Omit<GameEntry, 'key'> & { key: GameKey | 'lighthouse' };
+
+export const HOME_GAMES: HomeGameEntry[] = [
+  ...GAMES,
+  {
+    key: 'lighthouse', title: '潮汐灯塔', short: '潮汐灯塔',
+    desc: '修复海岛灯塔，经营群岛航线', badge: '1 人 · 放置经营',
+    category: 'single', ionicon: 'boat-outline',
+    Icon: ({ size = 44 }) => <Ionicons name="boat-outline" size={size} color="#b17b35" />,
+  },
+];
