@@ -126,6 +126,20 @@ def _create_tables(conn: sqlite3.Connection):
     participants.create_schema(conn)
     competition_records.create_schema(conn)
     social_schema.create_schema(conn)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS lighthouse_saves (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            state TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS lighthouse_actions (
+            user_id INTEGER NOT NULL REFERENCES lighthouse_saves(user_id) ON DELETE CASCADE,
+            operation_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            PRIMARY KEY (user_id, operation_id)
+        )
+    """)
 
 
 def seed_admin(username: str, password_hash: str, salt: str):

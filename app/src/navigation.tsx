@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
@@ -34,6 +34,7 @@ import { getSocialSummary } from './contacts';
 import useForegroundPolling from './useForegroundPolling';
 import AdminScreen from './screens/AdminScreen';
 import HistoryScreen from './screens/HistoryScreen';
+import LighthouseScreen from './screens/LighthouseScreen';
 import CompetitionScreen from './screens/CompetitionScreen';
 import SharedReplayScreen from './screens/SharedReplayScreen';
 import SpectatorScreen from './screens/SpectatorScreen';
@@ -45,6 +46,7 @@ import { colors } from './theme';
 export type RootStackParamList = {
   Auth: undefined;
   MainTabs: undefined;
+  Lighthouse: undefined;
   Room: { code: string };
   Gomoku: { code: string };
   Reversi: { code: string };
@@ -478,6 +480,16 @@ export default function AppNavigation() {
       ) : (
         <>
           <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="Lighthouse" component={LighthouseScreen}
+            options={({ navigation }) => ({
+              headerShown: true,
+              title: '潮汐灯塔',
+              headerStyle: { backgroundColor: colors.card },
+              headerLeft: () => <Pressable accessibilityRole="button" accessibilityLabel="返回游戏大厅"
+                style={loadingStyles.lighthouseBack} onPress={() => navigation.popTo('MainTabs')}>
+                <Ionicons name="chevron-back" size={24} color={colors.primary} />
+              </Pressable>,
+            })} />
           <Stack.Screen
             name="Room"
             component={RoomScreenWrapper}
@@ -582,6 +594,7 @@ export default function AppNavigation() {
 }
 
 const loadingStyles = StyleSheet.create({
+  lighthouseBack: { minWidth: 48, minHeight: 48, justifyContent: 'center' },
   container: {
     flex: 1,
     backgroundColor: colors.primary,

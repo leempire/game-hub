@@ -202,6 +202,12 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
           <Text style={styles.competitionText}>每日挑战</Text>
           <Text style={styles.competitionText}>›</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.competitionLink}
+          onPress={() => navigation.navigate('Lighthouse')} accessibilityRole="button">
+          <Ionicons name="boat-outline" size={20} color={colors.primary} />
+          <Text style={styles.competitionText}>潮汐灯塔 · 单人放置</Text>
+          <Text style={styles.competitionText}>›</Text>
+        </TouchableOpacity>
         <RecentGames
           games={recent}
           onPick={(key) => {
