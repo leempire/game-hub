@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.gamehub.app",
-      "versionCode": 42,
+      "versionCode": 43,
       "adaptiveIcon": {
         "backgroundColor": "#4338CA",
         "foregroundImage": "./assets/android-icon-foreground.png",
