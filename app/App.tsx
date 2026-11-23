@@ -37,6 +37,7 @@ const LINKING = {
       Stasis: 'stasis/:code',
       History: 'history',
       Competition: 'competition',
+      Lighthouse: 'lighthouse',
       SharedReplay: 'replay/:token',
       Admin: 'admin',
     },
