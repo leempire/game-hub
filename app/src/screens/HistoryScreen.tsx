@@ -1,3 +1,5 @@
+import { abyssResults } from '../abyss';
+import AbyssResult from '../AbyssResult';
 // 历史战绩页面：列表 + 点击展开棋盘快照详情。
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -7,15 +9,15 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import RecordShareActions from '../RecordShareActions';
 import { useAuth } from '../auth';
-import { fetchMyHistory, GameRecord, HistoryResult, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
+import { fetchMyHistory, GameRecord, HistoryResult, AbyssSnapshot, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
-import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon } from '../icons';
+import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
 import { makeLayout } from '../luzhanqiBoard';
 import {
-  colors, spacing, radius, fontSize, g2048Tile, ludoColors, gameSurfaces, shadow,
+  abyssColors, colors, spacing, radius, fontSize, g2048Tile, ludoColors, gameSurfaces, shadow,
   playerColors, battleshipShipColors, battleshipWater, withAlpha,
   reversiBoard, dotsInk,
   xiangqiBoard, xiangqiLine, xiangqiFace, xiangqiRed, xiangqiBlack,
@@ -96,6 +98,7 @@ export default function HistoryScreen() {
   };
 
   const renderGameIcon = (game: string) => {
+    if (game === 'abyss') return <AbyssIcon size={36} />;
     if (game === 'uttt') return <UltimateTicTacToeIcon size={36} />;
     if (game === 'spider') return <SpiderIcon size={36} />;
     if (game === 'gomoku') return <GomokuIcon size={36} />;
@@ -156,7 +159,7 @@ export default function HistoryScreen() {
                   {rec.players.map((p) => {
                     const difficulty = p.ai_difficulty && { easy: '简单', normal: '普通', hard: '困难' }[p.ai_difficulty];
                     return `${p.nickname || p.username}${difficulty ? ' · ' + difficulty : ''}`;
-                  }).join(' vs ')}
+                  }).join(rec.game === 'abyss' ? ' / ' : ' vs ')}
                 </Text>
               </View>
               <Text style={styles.arrow}>{expanded ? '∨' : '›'}</Text>
@@ -173,7 +176,7 @@ export default function HistoryScreen() {
                     </View>
                   ))}
                 </View>
-                <BoardSnapshot rec={rec} />
+                <BoardSnapshot rec={rec} viewerId={user?.id} />
                 <RecordShareActions token={token} recordId={rec.id} />
               </View>
             )}
@@ -199,7 +202,7 @@ export default function HistoryScreen() {
 }
 
 // Inline board snapshot renderer
-export function BoardSnapshot({ rec }: { rec: GameRecord }) {
+export function BoardSnapshot({ rec, viewerId }: { rec: GameRecord; viewerId?: number }) {
   const { width } = useWindowDimensions();
   const snap = rec.snapshot;
   // 棋类逐步回放：总手数来自服务端快照里的 moves（老战绩没有 → 0，不显示控制条）
@@ -270,6 +273,13 @@ export function BoardSnapshot({ rec }: { rec: GameRecord }) {
   }
   if (view.game === 'ludo') {
     return <LudoSnapshot snap={view} players={rec.players} />;
+  }
+  if (view.game === 'abyss') {
+    const dive: AbyssSnapshot = view;
+    return <View style={styles.abyssSummary}>
+      <Text style={styles.abyssTitle}>{dive.result ? abyssResults[dive.result] : '对局已结束'}</Text>
+      <AbyssResult game={dive} uid={viewerId} />
+    </View>;
   }
   if (view.game === 'uttt') {
     return <View testID="uttt-history" style={{ alignItems: 'center' }}>
@@ -1308,6 +1318,8 @@ const ludoSnapStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  abyssSummary: { backgroundColor: abyssColors.panel, borderRadius: 8, padding: 10, gap: 8 },
+  abyssTitle: { color: abyssColors.text, fontSize: 17, fontWeight: '700' },
   container: { padding: spacing.md, paddingBottom: spacing.xxl },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
   errorText: { color: colors.danger, fontSize: fontSize.lg },

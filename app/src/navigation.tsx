@@ -27,6 +27,7 @@ import UltimateTicTacToeScreen from './screens/UltimateTicTacToeScreen';
 import TetrisScreen from './screens/TetrisScreen';
 import UnoScreen from './screens/UnoScreen';
 import StasisScreen from './screens/StasisScreen';
+import AbyssScreen from './screens/AbyssScreen';
 import ProfileTab from './screens/ProfileTab';
 import SocialTab from './screens/SocialTab';
 import ChatScreen from './screens/ChatScreen';
@@ -40,7 +41,7 @@ import SharedReplayScreen from './screens/SharedReplayScreen';
 import SpectatorScreen from './screens/SpectatorScreen';
 // 对局页标题也取目录表（`games.tsx`）—— 标题写第二遍就是「改名漏一处」的来源
 import { gameTitle } from './games';
-import { colors } from './theme';
+import { abyssColors, colors } from './theme';
 
 // Navigation types
 export type RootStackParamList = {
@@ -63,6 +64,7 @@ export type RootStackParamList = {
   Tetris: { code: string };
   Uno: { code: string };
   Stasis: { code: string };
+  Abyss: { code: string };
   Admin: undefined;
   History: undefined;
   /** 每日挑战与排行榜是两个入口（游戏页只展示每日挑战，我的页各一条）。 */
@@ -300,6 +302,8 @@ function RoomScreenWrapper({ route, navigation }: { route: any; navigation: any 
           navigation.navigate('Tetris', { code: c });
         } else if (game === 'uno') {
           navigation.navigate('Uno', { code: c });
+        } else if (game === 'abyss') {
+          navigation.navigate('Abyss', { code: c });
         } else if (game === 'stasis') {
           navigation.navigate('Stasis', { code: c });
         } else {
@@ -385,6 +389,18 @@ function UnoScreenWrapper({ route, navigation }: { route: any; navigation: any }
       onLeave={() => navigation.goBack()}
     />
   );
+}
+
+function AbyssScreenWrapper({ route, navigation }: { route: any; navigation: any }) {
+  const { code } = route.params;
+  const backToRoom = () => {
+    const state = navigation.getState();
+    const prior = state.routes[state.index - 1];
+    if (prior?.name === 'Room' && prior.params?.code === code) navigation.goBack();
+    else navigation.replace('Room', { code });
+  };
+  return <AbyssScreen code={code} onBack={backToRoom}
+    onExit={() => navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] })} />;
 }
 
 // Stasis screen wrapper
@@ -563,6 +579,11 @@ export default function AppNavigation() {
             name="Uno"
             component={UnoScreenWrapper}
             options={{ headerShown: true, title: gameTitle('uno'), headerStyle: { backgroundColor: colors.card } }}
+          />
+          <Stack.Screen
+            name="Abyss"
+            component={AbyssScreenWrapper}
+            options={{ headerShown: true, title: gameTitle('abyss'), headerTintColor: abyssColors.text, headerStyle: { backgroundColor: abyssColors.deep } }}
           />
           <Stack.Screen
             name="Stasis"

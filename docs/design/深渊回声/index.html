@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>深渊回声 · 战斗美术原型</title>
+<link rel="stylesheet" href="style.css">
+<main>
+  <header>
+    <div class="identity"><span class="mark" aria-hidden="true">◈</span><div><p>GAME HUB / 美术原型</p><h1>深渊回声</h1></div></div>
+    <button id="restart">开始试潜</button>
+  </header>
+  <section class="arena" aria-label="战斗预览">
+    <canvas id="battle" aria-label="沉没回收站战场"></canvas>
+    <div class="hud"><div><span>潜水服</span><strong id="health">100 / 100</strong><meter id="hp" aria-label="潜水服耐久" min="0" max="100" value="100"></meter></div><div><span id="sector">沉没回收站</span><strong id="time">01:15</strong></div><div><span id="level">等级 1</span><strong id="xpText">0 / 10 XP</strong><progress id="xp" aria-label="升级经验" value="0" max="10"></progress></div></div>
+    <div id="status" class="status" aria-live="polite"><strong>沉没回收站</strong><span>回收蓝色信标，在潮汐涌入前守住潜区。</span></div>
+  </section>
+  <p class="controls">WASD / 方向键移动 · 触屏拖动 · 武器自动攻击</p>
+  <section class="equipment" aria-labelledby="arsenal-title">
+    <div class="section-heading"><h2 id="arsenal-title">试潜装备</h2><p>选择武器，比较不同的攻击范围和命中特效。</p></div>
+    <div id="arsenal"></div>
+  </section>
+</main>
+<script src="art.js"></script>
+<script src="preview.js"></script>
+</html>

@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon,
   Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon,
-  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon,
+  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon,
 } from './icons';
 
 /**
@@ -23,7 +23,7 @@ import {
 /** 服务端的 `game` 值。帮助系统 `GAME_HELP` 也拿它当键（少一个游戏会编译不过）。 */
 export type GameKey =
   | 'gomoku' | 'minesweeper' | 'reversi' | 'battleship' | 'dots' | 'ludo'
-  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt';
+  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt' | 'abyss';
 
 export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop' | 'single';
 
@@ -89,6 +89,8 @@ export const GAMES: GameEntry[] = [
   { key: 'minesweeper', title: '扫雷', short: '扫雷', desc: '同盘竞速排雷，比谁挖得多',
     badge: '1–4 人 · 竞速', category: 'solo', ionicon: 'warning-outline', Icon: MineIcon },
 
+  { key: 'abyss', title: '深渊回声', short: '深渊回声', desc: '潜入沉没回收站，合力打退深海怪潮',
+    badge: '1–4 人 · 合作', category: 'coop', ionicon: 'water-outline', Icon: AbyssIcon },
   { key: 'stasis', title: '深空休眠', short: '深空休眠', desc: '实时合作守舱，打死静默体',
     badge: '2–6 人 · 合作', category: 'coop', ionicon: 'planet', Icon: StasisIcon },
 ];

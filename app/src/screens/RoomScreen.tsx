@@ -303,7 +303,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const canAddBot = isHost && !isFull && isLobbyStatus && supportsBots;
   // 人数要求：扫雷 1 人即可开（单机）；2048 / 俄罗斯方块 1-4 人各自独立盘
   // （1 人即可开）；飞行棋 / UNO 2-4 人、深空休眠 2-6 人（≥2 可开，对齐 max_players）；其余须满员
-  const needMorePlayers = isMine || is2048 || isTetris || room.game === 'spider'
+  const needMorePlayers = isMine || is2048 || isTetris || room.game === 'spider' || room.game === 'abyss'
     ? false
     : (isLudo || isUno || isStasis) ? room.players.length < 2 : !isFull;
   const canStart = allReady && !needMorePlayers;
@@ -355,7 +355,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           </View>
         </TouchableOpacity>
 
-        <GameIntro game={room.game} userId={user?.id} practice={room.practice} onPractice={async () => {
+        <GameIntro game={room.game} userId={user?.id} practice={room.practice} onPractice={room.game === 'abyss' ? undefined : async () => {
           if (!token) throw new Error('请先登录');
           const result = await createPractice(token, room.game);
           if (focusedRef.current) navigation.replace('Room', { code: result.code });

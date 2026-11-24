@@ -523,3 +523,21 @@ export const fontSize = {
   xxl: 28,
   title: 32,
 };
+
+export const abyssColors = {
+  deep: '#07161C', panel: '#102B31', edge: '#46746E', text: '#ECF8EF',
+  muted: '#A3C5BF', signal: '#91F0DF', beacon: '#91E7FF', shadow: '#051215',
+  suit: '#AABEB0', brass: '#DCB581', visor: '#2D686D',
+  needlefish: '#B9DB78', jelly: '#A3B2FF', angler: '#F0A369',
+  drifter: '#64B8A9', eel: '#AD86CB', crab: '#CA825F', elite: '#DA9B6C', warden: '#E387A8',
+  rivet: '#F4C27F', arc: '#B1ADFF', ring: '#72F2D9', spore: '#D6E68D',
+  charge: '#FF9380', harpoon: '#87DDFF',
+  // 12 把基础武器 + 12 个进化的图形色。全部在 deep(#07161C) 上保持高亮度，
+  // 用于小尺寸弹道/特效时满足 WCAG 1.4.11 的 3:1 图形对比要求。
+  whip: '#FFB27A', axe: '#D9A066', cross: '#EAD27A', bible: '#9FE3B0',
+  rune: '#7FD1AE', pentagram: '#E39BC8', chest: '#E8C46A',
+  bloody_tear: '#E06B6B', holy_wand: '#FFF1A8', thousand_edge: '#BFE9FF',
+  death_spiral: '#B77A55', heaven_sword: '#FFE68A', unholy_vespers: '#B5F0C0',
+  hellfire: '#FF7A5C', soul_eater: '#9AE6A8', la_borra: '#6FD6C7',
+  no_future: '#6EE7FF', thunder_loop: '#C9B8FF', gorgeous_moon: '#FFB8E1',
+};

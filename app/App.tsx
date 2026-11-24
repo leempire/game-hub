@@ -35,6 +35,7 @@ const LINKING = {
       Tetris: 'tetris/:code',
       Uno: 'uno/:code',
       Stasis: 'stasis/:code',
+      Abyss: 'abyss/:code',
       History: 'history',
       Competition: 'competition',
       Lighthouse: 'lighthouse',

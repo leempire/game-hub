@@ -7,6 +7,11 @@ import { AppModal } from './ui';
 import { colors, fontSize, radius, spacing } from './theme';
 
 const GUIDES: Record<string, { title: string; body: string }[]> = {
+  abyss: [
+    { title: '拖动移动，武器自动开火', body: '在战场任意位置按住并拖动。电脑也可以用方向键或 WASD。边移动边和怪群保持距离。' },
+    { title: '捡信标，选强化', body: '走近蓝色信标可为全队积攒经验。升级时有 6 秒选择。装备页会告诉你武器还缺什么才能用宝箱进化。' },
+    { title: '躲开警示圈，打倒守卫', body: '守卫会在对局末段登场。看到十字落点或压强脉冲时，先离开警示圈。靠近倒地队友两秒可救起。击倒守卫并活到计时结束即可完成回收。' },
+  ],
   stasis: [
     { title: '先找舱室躺下', body: '开局用摇杆进入空舱室，在休眠舱旁点「躺下」。躺下后开始产资源，整局不能起身。' },
     { title: '守住门，再扩建', body: '点击本舱空格建炮台，点击门和床升级。升床有门等级门槛，升级费用和可用操作都显示在面板中。' },
@@ -29,10 +34,11 @@ const GUIDES: Record<string, { title: string; body: string }[]> = {
   ],
 };
 export default function GameIntro({ game, userId, practice, onPractice }: {
-  game: string; userId?: number; practice?: boolean; onPractice: () => Promise<void>;
+  game: string; userId?: number; practice?: boolean; onPractice?: () => Promise<void>;
 }) {
   const focused = useIsFocused();
   const steps = GUIDES[game];
+  const canPractice = !!onPractice && !practice;
   const key = `gamehub:guide:v1:${userId}:${game}`;
   const [visible, setVisible] = useState(false);
   const [step, setStep] = useState(0);
@@ -52,7 +58,7 @@ export default function GameIntro({ game, userId, practice, onPractice }: {
     void AsyncStorage.setItem(key, 'seen').catch(() => {});
   };
   const start = async () => {
-    if (lock.current) return;
+    if (!onPractice || lock.current) return;
     lock.current = true; setBusy(true); setError(null);
     try { await onPractice(); close(); }
     catch (cause) { setError((cause as Error).message); }
@@ -63,7 +69,7 @@ export default function GameIntro({ game, userId, practice, onPractice }: {
       <TouchableOpacity style={styles.secondary} onPress={() => { setStep(0); setVisible(true); }}>
         <Text style={styles.secondaryText}>新手指引</Text>
       </TouchableOpacity>
-      {!practice && <TouchableOpacity style={styles.secondary} disabled={busy} testID="start-practice"
+      {canPractice && <TouchableOpacity style={styles.secondary} disabled={busy} testID="start-practice"
         onPress={() => void start()}><Text style={styles.secondaryText}>{busy ? '正在进入…' : '打一局人机练习'}</Text></TouchableOpacity>}
     </View>
     {practice && <Text style={styles.hint}>私人练习局 · 不计入历史战绩、统计和排行榜</Text>}
@@ -74,9 +80,9 @@ export default function GameIntro({ game, userId, practice, onPractice }: {
       <Text style={styles.body}>{steps[step].body}</Text>
       <TouchableOpacity style={styles.primary} testID="guide-next" onPress={() => {
         if (step + 1 < steps.length) setStep(value => value + 1); else close();
-      }}><Text style={styles.onPrimary}>{step + 1 < steps.length ? '下一步' : '开始游戏'}</Text></TouchableOpacity>
+      }}><Text style={styles.onPrimary}>{step + 1 < steps.length ? '下一步' : game === 'abyss' ? '返回房间' : '开始游戏'}</Text></TouchableOpacity>
       <TouchableOpacity style={styles.secondary} testID="guide-skip" disabled={busy} onPress={close}><Text style={styles.secondaryText}>跳过</Text></TouchableOpacity>
-      {!practice && <TouchableOpacity style={styles.secondary} disabled={busy} onPress={() => void start()}>
+      {canPractice && <TouchableOpacity style={styles.secondary} disabled={busy} onPress={() => void start()}>
         <Text style={styles.secondaryText}>{busy ? '正在进入…' : '打一局人机练习（不计战绩）'}</Text>
       </TouchableOpacity>}
       {!!error && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
