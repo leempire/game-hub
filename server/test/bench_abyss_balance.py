@@ -1,7 +1,7 @@
 """深渊回声固定步进平衡基准。仓库根运行 PYTHONPATH=server python3 server/test/bench_abyss_balance.py。
 
-代理根据邻近敌人、墙距和掉落选择走位，能快速拾取经验。结果用于比较数值改动，
-真人操作与沟通成本需要实战另测。
+代理根据邻近敌人、墙距和掉落选择走位，能快速拾取经验。可用
+--pick-delay 模拟选卡用时。结果用于比较数值，真人操作和沟通成本需要实战另测。
 """
 import argparse
 import math
@@ -61,8 +61,10 @@ def direction(gs, p):
     return max(DIRECTIONS, key=score)
 
 def run_match(args):
-    count, seed, minutes, pace, *map_sizes = args
-    map_size = map_sizes[0] if map_sizes else "medium"
+    count, seed, minutes, pace, *settings = args
+    map_size = settings[0] if settings else "medium"
+    pick_delay = settings[1] if len(settings) > 1 else 0
+    pick_delay_ticks = math.ceil(pick_delay / abyss.STEP)
     gs = abyss.create(
         [{'id': uid, 'username': str(uid)} for uid in range(count)],
         seed, duration=minutes * 60, xp_pace=pace, map_size=map_size,
@@ -70,16 +72,21 @@ def run_match(args):
     warden_defeated_at = None
     resolved_attacks = set()
     last_upgrade_at = 0
+    offered_frame = 0
+    timed_out_picks = 0
     level = gs['level']
     while not gs['result']:
         for p in gs['players'].values():
-            if p['choices']:
+            if p['choices'] and gs['frame'] - offered_frame >= pick_delay_ticks:
                 abyss.pick(gs, p['id'], gs['level'], choose_upgrade(p, p['choices']))
-            if p['hp'] and gs['frame'] % TICKS == 0:
+            elif p['choices'] and gs['pick_until'] == gs['frame'] + 1:
+                timed_out_picks += 1
+            if p['hp'] and not gs['pick_until'] and gs['frame'] % TICKS == 0:
                 abyss.move(gs, p['id'], *direction(gs, p))
         abyss.advance(gs)
         if gs['level'] != level:
             level = gs['level']
+            offered_frame = gs['frame']
             last_upgrade_at = round(gs['elapsed'] * abyss.STEP)
         if gs['boss'] and not gs['boss_dead']:
             warden = next(enemy for enemy in gs['enemies'] if enemy['kind'] == 'warden')
@@ -95,6 +102,9 @@ def run_match(args):
         'weapon_slots': [len(p['weapons']) for p in gs['players'].values()],
         'evolutions': [sum(weapon in data.EVOLUTIONS for weapon in p['weapons']) for p in gs['players'].values()],
         'seconds': round(gs['elapsed'] * abyss.STEP), 'level': gs['level'], 'kills': gs['kills'],
+        'pick_delay_seconds': pick_delay, 'elapsed_with_pauses': round(gs['frame'] * abyss.STEP, 2),
+        'upgrade_pause_seconds': round((gs['frame'] - gs['elapsed']) * abyss.STEP, 2),
+        'timed_out_picks': timed_out_picks,
         'warden_fight_seconds': warden_defeated_at, 'warden_attacks_resolved': len(resolved_attacks),
         'team_chests': len({event['frame'] for event in gs['chest_events']}),
         'hp': [round(p['hp']) for p in gs['players'].values()],
@@ -105,11 +115,15 @@ if __name__ == '__main__':
     parser.add_argument("--minutes", nargs="+", type=int, choices=(12, 20, 30), default=[12])
     parser.add_argument("--pace", nargs="+", choices=("standard", "fast", "slow"), default=["standard"])
     parser.add_argument("--map-size", nargs="+", choices=abyss.MAP_SIZES, default=["medium"])
+    parser.add_argument("--pick-delay", nargs="+", type=float, default=[0], metavar="SECONDS",
+                        help="模拟每名代理选卡用时，默认立即选择")
     args = parser.parse_args()
+    if any(not math.isfinite(delay) or delay < 0 for delay in args.pick_delay):
+        parser.error("--pick-delay 需要非负有限秒数")
     paces = {"standard": 1, "fast": .8, "slow": 1.2}
     matches = [
-        (count, seed, minutes, paces[pace], map_size)
-        for map_size in args.map_size for minutes in args.minutes for pace in args.pace
+        (count, seed, minutes, paces[pace], map_size, delay)
+        for map_size in args.map_size for minutes in args.minutes for pace in args.pace for delay in args.pick_delay
         for count in range(1, 5) for seed in (11, 29, 47)
     ]
     with ProcessPoolExecutor(max_workers=4) as pool:

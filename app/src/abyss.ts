@@ -133,6 +133,7 @@ export interface AbyssPlayer {
   protection_ms?: number;
   down: number;
   rescue: number;
+  rescuer?: number;
   weapons: Partial<Record<AbyssWeapon, number>>;
   passives: Partial<Record<AbyssPassive, number>>;
   choices: AbyssChoice[];
@@ -189,13 +190,13 @@ export interface AbyssState {
   orbits: [number, AbyssWeapon, number, number, number, number][];
   auras: [number, AbyssWeapon, number, number, number][];
   effects: {
-    id: number; weapon: AbyssWeapon | 'chest' | 'rescue'; kind?: string; until: number;
-    points?: XY[]; x?: number; y?: number; r?: number;
+    id: number; weapon: AbyssWeapon | 'chest' | 'rescue' | 'defeat'; kind?: string; start?: number; until: number;
+    points?: XY[]; x?: number; y?: number; r?: number; angle?: number; target?: number; shot?: number;
   }[];
 }
 
 export function abyssVibrationDuration(
-  previous: AbyssState, current: AbyssState, uid: number, sinceLastMs: number,
+  previous: AbyssState, current: AbyssState, uid: number, sinceLastMs: number, supportsShortPulse: boolean,
 ): number {
   const gap = current.frame - previous.frame;
   if (gap <= 0 || gap > 20 || previous.result) return 0;
@@ -208,7 +209,8 @@ export function abyssVibrationDuration(
   if (!previous.boss && current.boss) return 65;
   const attack = current.warden_attack;
   if (attack && !attack.impact && attack.id !== previous.warden_attack?.id) return 40;
-  return me.hp < before.hp && sinceLastMs >= 700 ? 25 : 0;
+  if (me.hp < before.hp) return sinceLastMs >= 700 ? 25 : 0;
+  return supportsShortPulse && me.kills - before.kills >= 2 && sinceLastMs >= 850 ? 16 : 0;
 }
 
 export type AbyssSummary = Pick<AbyssState, 'result'> &

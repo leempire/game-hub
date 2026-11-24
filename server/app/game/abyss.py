@@ -22,9 +22,12 @@ STEP = .05
 DEFAULT_DURATION = 720
 FULL_MILESTONE_DURATION = 1800
 FRAMES_PER_SECOND = 20
+UPGRADE_CHOICE_TICKS = 10 * FRAMES_PER_SECOND
 RESCUE_RADIUS = 52
 RESCUE_TICKS = 2 * FRAMES_PER_SECOND
 ORBIT_HIT_TICKS = 34
+MAX_LOOT = 160
+BASE_MAGNET_RADIUS = 58
 PROJECTILE_IMPACT_TAIL = 4
 WARDEN_IMPACT_TICKS = 8
 WARDEN_RECOVERY_TICKS = 74
@@ -223,8 +226,20 @@ def _effect(gs, weapon, kind="ring", life=7, **shape):
         shape["points"] = [[round(x), round(y)] for x, y in shape["points"]]
     gs["effects"].append({
         "id": _id(gs), "weapon": weapon, "kind": kind,
-        "until": gs["frame"] + life, **shape,
+        "start": gs["frame"], "until": gs["frame"] + life, **shape,
     })
+
+
+def _defeat_effect(gs, enemy):
+    boss = enemy["kind"] in ("elite", "warden")
+    if not boss:
+        frame, count = gs.get("defeat_bursts", (-1, 0))
+        count = count if frame == gs["frame"] else 0
+        if count >= 8:
+            return
+        gs["defeat_bursts"] = (gs["frame"], count + 1)
+    _effect(gs, "defeat", "defeat", life=12 if boss else 7,
+            x=enemy["x"], y=enemy["y"], r=enemy["radius"] + 4, target=enemy["id"])
 
 
 def _spawn_chest(gs, x, y):
@@ -234,11 +249,17 @@ def _spawn_chest(gs, x, y):
 def _drop_loot(gs, enemy, units):
     if units <= 0:
         return
-    if len(gs["loot"]) >= 160:
-        closest = min(gs["loot"], key=lambda item: _gap(item, enemy))
-        closest["xp"] += units
-    else:
-        gs["loot"].append({"id": _id(gs), "x": enemy["x"], "y": enemy["y"], "xp": units})
+    loot = gs["loot"]
+    if len(loot) >= MAX_LOOT:
+        closest = min(loot, key=lambda item: _gap(item, enemy))
+        if _gap(closest, enemy) <= BASE_MAGNET_RADIUS:
+            closest["xp"] += units
+            return
+        # Free a slot in the older drops so distant players can collect at the kill site.
+        oldest = loot.pop(0)
+        neighbor = min(loot, key=lambda item: _gap(item, oldest))
+        neighbor["xp"] += oldest["xp"]
+    loot.append({"id": _id(gs), "x": enemy["x"], "y": enemy["y"], "xp": units})
 
 
 def _damage(gs, owner, enemy, damage, *, src=None, knockback=0.0, crit=False,
@@ -268,6 +289,7 @@ def _damage(gs, owner, enemy, damage, *, src=None, knockback=0.0, crit=False,
             _effect(gs, "bloody_tear", "heal", life=10, x=owner["x"], y=owner["y"], r=26)
     if enemy["hp"] > 0:
         return False
+    _defeat_effect(gs, enemy)
     gs["kills"] += 1
     if owner:
         owner["kills"] += 1
@@ -322,34 +344,68 @@ def _shot(gs, owner, weapon, stats, x, y, vx, vy, *, kind, life, delay=0,
     })
 
 
+def _reachable_enemies(enemies, origin, speed, radius, flight_ticks):
+    flight_time = flight_ticks * STEP
+    return [enemy for enemy in enemies
+            if _gap(enemy, origin) <= (speed + enemy["speed"]) * flight_time + radius + enemy["radius"]]
+
+
 def _retarget(gs, shot):
     """多段发射的后续弹丸在真正出手时重新锁定最近敌人（VS 的行为）。"""
     owner = gs["players"].get(shot["owner"])
     if not owner:
-        return
+        return False
     enemies = [enemy for enemy in gs["enemies"] if enemy["hp"] > 0]
+    speed = math.hypot(shot["vx"], shot["vy"]) or 320
+    shot["x"], shot["y"] = owner["x"], owner["y"]
+    if _bounds(gs)[0] is None:
+        travel = (shot["return_at"] - 1) if shot["return_at"] is not None else shot["life"]
+        enemies = _reachable_enemies(enemies, owner, speed, shot["r"], travel)
+        if not enemies:
+            return False
     if not enemies:
-        return
+        return True
     target = min(enemies, key=lambda enemy: _gap(enemy, owner))
     angle = math.atan2(target["y"] - owner["y"], target["x"] - owner["x"])
-    speed = math.hypot(shot["vx"], shot["vy"]) or 320
     shot["vx"], shot["vy"] = math.cos(angle) * speed, math.sin(angle) * speed
     shot["angle"] = angle
+    return True
 
 
 def _frames(seconds):
     return max(1, round(seconds / STEP))
 
 
+TARGETED_PROJECTILES = {
+    "wand": (320, 1.4, 8, None),
+    "cross": (280, 1.9, 18, .6),
+    "fire": (240, 1.8, 16, None),
+}
+
+
 # ── 武器开火 ────────────────────────────────────────────────
 
 
 def _fire(gs, p, weapon, level):
-    width, height = _bounds(gs)
     spec = data.WEAPONS[weapon]
-    stats = data.weapon_stats(weapon, level, p["stats"])
     behavior = spec["behavior"]
     enemies = [enemy for enemy in gs["enemies"] if enemy["hp"] > 0]
+    projectile = TARGETED_PROJECTILES.get(behavior)
+    if projectile and not enemies:
+        return
+    width, height = _bounds(gs)
+    stats = data.weapon_stats(weapon, level, p["stats"])
+    if projectile:
+        base_speed, flight_seconds, base_radius, return_seconds = projectile
+        speed = base_speed * stats["speed"]
+        life = _frames(flight_seconds)
+        radius = base_radius * stats["area"]
+        return_at = None if return_seconds is None else _frames(return_seconds)
+        if width is None:
+            flight_ticks = life if return_at is None else return_at - 1
+            enemies = _reachable_enemies(enemies, p, speed, radius, flight_ticks)
+            if not enemies:
+                return
     interval = _frames(stats["interval"])
     amount = max(1, int(stats["amount"]))
     duration = _frames(stats["duration"])
@@ -375,16 +431,13 @@ def _fire(gs, p, weapon, level):
             _effect(gs, weapon, "whip", life=7, x=p["x"], y=p["y"] + offset, r=reach)
 
     elif behavior == "wand":
+        target = min(enemies, key=lambda enemy: _gap(enemy, p))
+        angle = math.atan2(target["y"] - p["y"], target["x"] - p["x"])
         for index in range(amount):
-            if not enemies:
-                break
-            target = min(enemies, key=lambda enemy: _gap(enemy, p))
-            angle = math.atan2(target["y"] - p["y"], target["x"] - p["x"])
-            speed = 320 * stats["speed"]
             _shot(gs, p, weapon, stats, p["x"], p["y"],
                   math.cos(angle) * speed, math.sin(angle) * speed,
-                  kind="bolt", life=_frames(1.4), delay=index * interval,
-                  pierce=int(stats["pierce"]), radius=8 * stats["area"],
+                  kind="bolt", life=life, delay=index * interval,
+                  pierce=int(stats["pierce"]), radius=radius,
                   retarget=True)
 
     elif behavior == "knife":
@@ -407,17 +460,14 @@ def _fire(gs, p, weapon, level):
                   gravity=420)
 
     elif behavior == "cross":
+        target = min(enemies, key=lambda enemy: _gap(enemy, p))
+        angle = math.atan2(target["y"] - p["y"], target["x"] - p["x"])
         for index in range(amount):
-            if not enemies:
-                break
-            target = min(enemies, key=lambda enemy: _gap(enemy, p))
-            angle = math.atan2(target["y"] - p["y"], target["x"] - p["x"])
-            speed = 280 * stats["speed"]
             _shot(gs, p, weapon, stats, p["x"], p["y"],
                   math.cos(angle) * speed, math.sin(angle) * speed,
-                  kind="cross", life=_frames(1.9), delay=index * interval,
-                  pierce=data.INFINITE_PIERCE, radius=18 * stats["area"],
-                  return_at=_frames(.6), retarget=True)
+                  kind="cross", life=life, delay=index * interval,
+                  pierce=data.INFINITE_PIERCE, radius=radius,
+                  return_at=return_at, retarget=True)
 
     elif behavior == "bible":
         p["orbits"][weapon] = {
@@ -432,15 +482,12 @@ def _fire(gs, p, weapon, level):
 
     elif behavior == "fire":
         for index in range(amount):
-            if not enemies:
-                break
             target = gs["rng"].choice(enemies)
             angle = math.atan2(target["y"] - p["y"], target["x"] - p["x"])
-            speed = 240 * stats["speed"]
             _shot(gs, p, weapon, stats, p["x"], p["y"],
                   math.cos(angle) * speed, math.sin(angle) * speed,
-                  kind="fire", life=_frames(1.8), delay=index * interval,
-                  pierce=int(stats["pierce"]), radius=16 * stats["area"])
+                  kind="fire", life=life, delay=index * interval,
+                  pierce=int(stats["pierce"]), radius=radius)
 
     elif behavior == "garlic":
         radius = 65 * stats["area"]
@@ -550,7 +597,36 @@ def _grant_xp(gs, p, units):
 # ── 每帧推进 ────────────────────────────────────────────────
 
 
-def _projectile_contacts(enemies, max_enemy_radius, shot, start_x, start_y):
+class _ProjectileTargets:
+    """Index horizontal bands during the projectile phase of a crowded tick."""
+
+    band_width = 96
+
+    def __init__(self, enemies):
+        self.order = {enemy["id"]: index for index, enemy in enumerate(enemies)}
+        self.bands = {}
+        for enemy in enemies:
+            self.bands.setdefault(self.band(enemy["x"]), {})[enemy["id"]] = enemy
+
+    def band(self, x):
+        return math.floor(x / self.band_width)
+
+    def candidates(self, left, right):
+        for band in range(self.band(left), self.band(right) + 1):
+            occupants = self.bands.get(band)
+            if occupants:
+                yield from occupants.values()
+
+    def moved(self, enemy, old_x):
+        previous = self.band(old_x)
+        current = self.band(enemy["x"])
+        if previous != current:
+            enemy_id = enemy["id"]
+            del self.bands[previous][enemy_id]
+            self.bands.setdefault(current, {})[enemy_id] = enemy
+
+
+def _projectile_contacts(enemies, max_enemy_radius, shot, start_x, start_y, targets=None):
     """Return first contact times along the current movement segment."""
     end_x, end_y = shot["x"], shot["y"]
     dx, dy = end_x - start_x, end_y - start_y
@@ -563,7 +639,8 @@ def _projectile_contacts(enemies, max_enemy_radius, shot, start_x, start_y):
     bottom = max(start_y, end_y) + padding
     hit = shot["hit"]
     contacts = []
-    for enemy in enemies:
+    candidates = enemies if targets is None else targets.candidates(left, right)
+    for enemy in candidates:
         x = enemy["x"]
         if not left <= x <= right:
             continue
@@ -587,7 +664,11 @@ def _projectile_contacts(enemies, max_enemy_radius, shot, start_x, start_y):
             if first <= 1:
                 contacts.append((first, enemy))
     if len(contacts) > 1:
-        contacts.sort(key=lambda contact: contact[0])
+        if targets is None:
+            contacts.sort(key=lambda contact: contact[0])
+        else:
+            # Simultaneous collisions keep roster order across bands.
+            contacts.sort(key=lambda contact: (contact[0], targets.order[contact[1]["id"]]))
     return contacts
 
 
@@ -596,12 +677,17 @@ def _step_shots(gs):
     alive_players = gs["players"]
     enemies = gs["enemies"]
     max_enemy_radius = max((enemy["radius"] for enemy in enemies), default=0) if gs["shots"] else 0
+    targets = None
+    indexed = len(enemies) * len(gs["shots"]) >= 2500
+    if indexed:
+        centers = [enemy["x"] for enemy in enemies]
+        indexed = max(centers) - min(centers) >= 3 * _ProjectileTargets.band_width
     remaining = []
     for shot in gs["shots"]:
         if shot["delay"] > 0:
             shot["delay"] -= 1
-            if shot["delay"] == 0 and shot.get("retarget"):
-                _retarget(gs, shot)
+            if shot["delay"] == 0 and shot.get("retarget") and not _retarget(gs, shot):
+                continue
             remaining.append(shot)
             continue
         shot["age"] += 1
@@ -645,6 +731,7 @@ def _step_shots(gs):
                 _area_damage(gs, owner, shot["x"], shot["y"],
                              60 * shot["r"] / max(1, 14), shot["explode"],
                              weapon=shot["weapon"], knockback=1)
+                targets = None
         elif width is not None and (shot["x"] < -90 or shot["x"] > width + 90
                                     or shot["y"] < -90 or shot["y"] > height + 90):
             dead = True
@@ -654,26 +741,41 @@ def _step_shots(gs):
             if math.hypot(owner["x"] - shot["x"], owner["y"] - shot["y"]) < 28:
                 dead = True
         if not dead and enemies:
-            for time, enemy in _projectile_contacts(enemies, max_enemy_radius, shot, start_x, start_y):
+            if indexed and targets is None:
+                targets = _ProjectileTargets(enemies)
+                # A tightly packed horde is cheaper to scan in roster order.
+                if len(targets.bands) < 4:
+                    indexed = False
+                    targets = None
+            for time, enemy in _projectile_contacts(enemies, max_enemy_radius, shot, start_x, start_y, targets):
                 x = start_x + (shot["x"] - start_x) * time
                 y = start_y + (shot["y"] - start_y) * time
                 mult = _roll(gs, shot)
+                old_x = enemy["x"] if targets is not None else None
                 _damage(gs, owner, enemy, shot["damage"] * mult, src=(x, y),
                         knockback=shot["knockback"], crit=mult > 1, heal=shot["heal_on_crit"])
-                if width is None and shot["explode"] and owner and not shot["hit"]:
+                if targets is not None and old_x is not None and enemy["x"] != old_x:
+                    targets.moved(enemy, old_x)
+                first_hit = not shot["hit"]
+                if width is None and shot["explode"] and owner and first_hit:
                     burst_at = (x, y)
                 shot["hit"].add(enemy["id"])
+                terminal = shot["pierce"] <= 1
+                contact = {"shot": shot["id"]} if terminal else {}
                 if shot["kind"] == "fire":
-                    _effect(gs, shot["weapon"], "burst", life=6, x=x, y=y, r=34)
-                if shot["pierce"] <= 1:
-                    if shot["kind"] != "fire":
-                        _effect(gs, shot["weapon"], "impact", life=5, x=x, y=y, r=18 if mult > 1 else 12)
+                    _effect(gs, shot["weapon"], "burst", life=6, x=x, y=y, r=34, **contact)
+                elif first_hit or terminal:
+                    size = 20 if mult > 1 else 16 if shot["r"] >= 14 else 12
+                    _effect(gs, shot["weapon"], "impact", life=5, x=x, y=y, r=size,
+                            angle=round(math.atan2(shot["y"] - start_y, shot["x"] - start_x), 3), **contact)
+                if terminal:
                     dead = True
                     break
                 shot["pierce"] -= 1
         if burst_at is not None:
             _area_damage(gs, owner, *burst_at, 60 * shot["r"] / 14, shot["explode"],
                          weapon=shot["weapon"], knockback=1)
+            targets = None
         if shot["age"] == 5 or bounced or shot["returning"]:
             shot.pop("launch", None)
         if bounced:
@@ -769,7 +871,7 @@ def _step_orbits(gs):
 
 
 def _collect(gs, alive, *, online_ids=None):
-    magnets = [(p, p["x"], p["y"], (58 * p["stats"]["magnet"]) ** 2) for p in alive]
+    magnets = [(p, p["x"], p["y"], (BASE_MAGNET_RADIUS * p["stats"]["magnet"]) ** 2) for p in alive]
     remaining = []
     for item in gs["loot"]:
         target = None
@@ -954,7 +1056,7 @@ def _offer(gs, *, online_ids=None):
             if offline or p["choices"] == ["salvage"]:
                 pick(gs, p["id"], gs["level"], p["choices"][0])
     if any(p["choices"] for p in gs["players"].values()):
-        gs["pick_until"] = gs["frame"] + 120
+        gs["pick_until"] = gs["frame"] + UPGRADE_CHOICE_TICKS
         for uid in gs["players"]:
             stop(gs, uid)
     else:
@@ -1152,6 +1254,7 @@ def advance(gs, *, online_ids=None):
             p["rescue"] = 0
             continue
         p["rescue"] += 1
+        p["rescuer"] = closest["id"]
         if p["rescue"] >= RESCUE_TICKS:
             p.update(hp=35, down=0, rescue=0, invincible=elapsed + 30)
             _effect(gs, "rescue", "rescue", life=14, x=p["x"], y=p["y"], r=54)
@@ -1318,6 +1421,7 @@ def snapshot(gs):
                if p["hp"] and p["invincible"] > gs["elapsed"] and not gs["result"] else {}),
             "down": max(0, math.ceil((p["down"] - gs["elapsed"]) * STEP)),
             "rescue": p["rescue"], "weapons": dict(p["weapons"]),
+            **({"rescuer": p["rescuer"]} if p["rescue"] and not p["out"] and "rescuer" in p else {}),
             "passives": dict(p["passives"]), "choices": list(p["choices"]),
             "choice_changes": _choice_changes(p),
             "new_weapon_stats": _new_weapon_stats(p),
@@ -1326,7 +1430,7 @@ def snapshot(gs):
                 for choice in p["choices"] if choice in REPAIR_AMOUNTS
             }} if p["hp"] and any(choice in REPAIR_AMOUNTS for choice in p["choices"]) else {}),
             "evolution_requirements": _evolution_requirements(p),
-            **({"damage_dealt": round(p["damage_dealt"], 1)} if gs["result"] and "damage_dealt" in p else {}),
+            **({"damage_dealt": round(p["damage_dealt"], 1)} if "damage_dealt" in p else {}),
             "kills": p["kills"], "xp_collected": p.get("xp_collected", 0), "rescues": p.get("rescues", 0),
             "move_speed": round(data.PLAYER_SPEED * p["stats"]["move_speed"]),
             "stats": {

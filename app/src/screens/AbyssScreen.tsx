@@ -228,7 +228,7 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
     previousGame.current = liveConnection ? game : null;
     if (!vibration || !liveConnection || user?.id === undefined || !previous || !game) return;
     const now = performance.now();
-    const duration = abyssVibrationDuration(previous, game, user.id, now - lastVibration.current);
+    const duration = abyssVibrationDuration(previous, game, user.id, now - lastVibration.current, Platform.OS === 'android');
     if (!duration) return;
     Vibration.vibrate(duration);
     lastVibration.current = now;
@@ -258,8 +258,8 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
     }
     const x = drag.current[0] + Number(right) - Number(left);
     const y = drag.current[1] + Number(down) - Number(up);
-    const length = Math.max(1, Math.hypot(x, y));
-    input.current = [x / length, y / length];
+    const length = Math.hypot(x, y);
+    input.current = length > 1e-6 ? [x / length, y / length] : [0, 0];
     if (send) sendInput(preserveTap);
   }, [sendInput]);
 
@@ -313,6 +313,8 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
   const canSwitchSpectator = watchable.length > 1;
   const spectatorKeys = canSwitchSpectator && inPlay && !game?.choice_seconds
     && !inventory && !audioVisible && !confirm;
+  const upgradeKeys = inPlay && !!game?.choice_seconds && !!me?.choices.length
+    && !inventory && !audioVisible && !confirm;
   function changeWatchedDiver(step: number) {
     setWatchedId(current => {
       const index = Math.max(0, watchable.findIndex(player => player.id === current));
@@ -320,8 +322,23 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
     });
   }
 
+  const choose = useCallback((choice: AbyssChoice) => {
+    const ws = socket.current;
+    if (!inPlay || !game?.choice_seconds || !me?.choices.includes(choice) || !ws?.isConnected
+      || submittedChoice.current) return;
+    submittedChoice.current = { level: game.level, sentAt: performance.now() };
+    setPendingChoice(choice);
+    ws.send({ type: 'abyss_pick', level: game.level, choice });
+  }, [game, inPlay, me]);
+
   useWebHeldKeys(
     (key, repeated) => {
+      if (upgradeKeys && /^[1-4]$/.test(key)) {
+        const item = me?.choices[Number(key) - 1];
+        if (!item) return false;
+        if (!repeated) choose(item);
+        return true;
+      }
       if (spectatorKeys) {
         const previous = key === 'arrowleft' || key === 'a';
         const next = key === 'arrowright' || key === 'd';
@@ -340,7 +357,7 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
       if (held.current.delete(key)) updateInput(true, true);
     },
     clearInput,
-    active || spectatorKeys,
+    active || spectatorKeys || upgradeKeys,
   );
 
   function stopDrag(preserveTap = false) {
@@ -370,14 +387,15 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
     const dy = touch.pageY - origin.y;
     const wasMoving = drag.current.some(Boolean);
     const distance = Math.hypot(dx, dy);
-    // Ignore small finger shifts at the origin, then ramp to full speed at 42 px.
-    const strength = Math.min(1, Math.max(0, (distance - 4) / 38));
-    if (!wasMoving && !strength) return;
-    drag.current = strength ? [dx / distance * strength, dy / distance * strength] : [0, 0];
-    stick.thumb.setValue({ x: drag.current[0] * 28, y: drag.current[1] * 28 });
+    const moving = distance > 4;
+    if (!wasMoving && !moving) return;
+    // Thumb displacement is visual. Outside the dead zone, movement uses a unit direction.
+    drag.current = moving ? [dx / distance, dy / distance] : [0, 0];
+    const thumbOffset = Math.min(1, Math.max(0, (distance - 4) / 38)) * 28;
+    stick.thumb.setValue({ x: drag.current[0] * thumbOffset, y: drag.current[1] * thumbOffset });
 
     const wait = dragSendInterval - (performance.now() - lastInputSend.current);
-    const send = wasMoving !== !!strength || wait <= 0;
+    const send = wasMoving !== moving || wait <= 0;
     updateInput(send);
     // Send the final direction even if the finger stays still after a quick turn.
     if (!send && pendingInput.current === undefined) {
@@ -412,15 +430,6 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
     }
   }
 
-  const choose = useCallback((choice: AbyssChoice) => {
-    const ws = socket.current;
-    if (!inPlay || !game?.choice_seconds || !me?.choices.includes(choice) || !ws?.isConnected
-      || submittedChoice.current) return;
-    submittedChoice.current = { level: game.level, sentAt: performance.now() };
-    setPendingChoice(choice);
-    ws.send({ type: 'abyss_pick', level: game.level, choice });
-  }, [game, inPlay, me]);
-
   const networkStatus = !connected ? '正在重连…' : stalled ? '战场同步中断，正在恢复…'
     : delayed && watchSnapshots ? '网络延迟，等待战场更新…' : null;
   const finished = !!game?.result || waiting;
@@ -443,11 +452,12 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
   const insideRescue = !!nearestRescue && rescueDistance < abyssRescue.radius;
   const rescueTicks = me?.hp ? insideRescue ? nearestRescue?.rescue ?? 0 : 0 : me?.rescue ?? 0;
   const rescuePercent = Math.floor(rescueTicks * 10 / abyssRescue.ticks) * 10;
+  const rescuer = me?.rescuer === undefined ? undefined : game?.players.find(player => player.id === me.rescuer);
   const rescueNotice = me?.hp
-    ? insideRescue ? `保持在救援圈内 · ${rescuePercent}% · 剩 ${nearestRescue?.down ?? 0}s`
+    ? insideRescue ? `救援 ${nearestRescue?.name} · ${rescuePercent}% · 剩 ${nearestRescue?.down ?? 0}s`
       : nearestRescue ? `靠近 ${nearestRescue.name} · 进入救援圈` : null
     : me?.out ? (watchedDiver ? `观战中 · ${watchedDiver.name}${offlinePeers.has(watchedDiver.id) ? '（离线）' : ''}` : '观战中') : me && (rescueTicks
-      ? `队友正在救援 · ${rescuePercent}% · 剩 ${me.down}s`
+      ? `${rescuer?.name ?? '队友'}正在救援 · ${rescuePercent}% · 剩 ${me.down}s`
       : `待救援 ${me.down}s · 等待队友靠近`);
   const showArenaNotice = !!game && !finished && !game.choice_seconds && !!(networkStatus || rescueNotice);
   const rescueSeconds = me?.hp ? nearestRescue?.down : me && !me.out ? me.down : undefined;
@@ -576,15 +586,16 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
             </> : <>
               <Text style={styles.title}>
                 {me?.choices.length ? `选择强化 · ${game?.choice_seconds}s`
-                  : choosingNames ? `等待队友 · ${game?.choice_seconds}s` : '即将恢复战斗'}
+                  : choosingNames ? `等待 ${choosingTeammates.length} 名队友 · ${game?.choice_seconds}s` : '即将恢复战斗'}
               </Text>
+              {Platform.OS === 'web' && upgradeKeys && <Text style={styles.label}>按数字键选择强化</Text>}
               {!!networkStatus && <Text testID="abyss-network-status" accessibilityLiveRegion="polite" style={styles.warning}>{networkStatus}</Text>}
               {pendingChoice && me?.choices.length ? (
                 <Text testID="abyss-pick-pending" accessibilityLiveRegion="polite" style={styles.label}>
                   已提交 {abyssItemInfo(pendingChoice).title}，等待确认…
                 </Text>
               ) : null}
-              {me?.choices.length ? me.choices.map(choice => {
+              {me?.choices.length ? me.choices.map((choice, index) => {
                 const info = abyssItemInfo(choice);
                 const rank = abyssLevelOf(me, choice);
                 const changes = me.choice_changes?.[choice];
@@ -596,7 +607,10 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
                 const suffix = info.kind === 'utility' ? '' : rank ? ` Lv.${rank} → ${rank + 1}` : ' 新';
                 return <Pressable key={choice} testID={`abyss-choice-${choice}`} style={[styles.choice, pendingChoice === choice && styles.selectedChoice]}
                   accessibilityRole="button" onPress={() => choose(choice)} disabled={!inPlay || pendingChoice !== null}>
-                  <Text style={styles.text}>{info.title}{suffix}</Text>
+                  <View style={styles.choiceTitle}>
+                    {Platform.OS === 'web' && <Text style={styles.choiceKey}>{index + 1}</Text>}
+                    <Text style={styles.text}>{info.title}{suffix}</Text>
+                  </View>
                   <Text style={styles.label}>{repair
                     ? repair[0] === repair[1] ? '耐久已满' : `耐久 ${repair[0]} → ${repair[1]}`
                     : detail}</Text>
@@ -608,6 +622,9 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
               }) : <>
                 {!!choosingNames && <Text testID="abyss-choice-waiting" accessibilityLiveRegion="polite" style={styles.label}>
                   待选择：{choosingNames}
+                </Text>}
+                {!!choosingNames && <Text style={styles.label}>
+                  {me?.hp ? '你已完成选择。' : ''}全员选完或倒计时结束后继续战斗。
                 </Text>}
                 {me && !me.hp && !me.out && <Text style={styles.label}>倒地中，等待队友救援</Text>}
               </>}
@@ -621,24 +638,29 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
         </View>}
       </View>}
     </View>
-    <View style={styles.footer}>
-      <View style={styles.equipment}>
-        <Text style={styles.label}>{me ? `武器 ${weaponEntries.length}/6 · 被动 ${passiveEntries.length}/6 · 打捞分 ${game?.salvage ?? 0}` : '等待同步'}</Text>
-        <Text style={styles.label}>{Platform.OS === 'web'
-          ? canSwitchSpectator ? '← / → 切换观战队友' : 'WASD / 方向键或拖动移动'
-          : '在战场内拖动移动'}</Text>
+    <View testID="abyss-footer" style={[styles.footer, size.width >= 520 && styles.footerWide]}>
+      <Text testID="abyss-footer-status" style={[styles.label, styles.footerStatus]}>
+        {me ? `武器 ${weaponEntries.length}/6 · 被动 ${passiveEntries.length}/6 · 打捞分 ${game?.salvage ?? 0}` : '等待同步'}
+      </Text>
+      <View style={styles.footerActions}>
+        <Text testID="abyss-footer-hint" style={[styles.label, styles.footerHint]}
+          accessibilityLabel={Platform.OS === 'web'
+            ? canSwitchSpectator ? '左右方向键切换观战队友' : '拖动、WASD 或方向键移动'
+            : '拖动移动'}>{Platform.OS === 'web'
+          ? canSwitchSpectator ? '← / → 切换队友' : '拖动·WASD·↑↓←→'
+          : '拖动移动'}</Text>
+        <AbyssAudio game={game} uid={user?.id} live={liveConnection} inPlay={inPlay}
+          visible={audioVisible} onVisibilityChange={showAudio}
+          vibration={vibration} onToggleVibration={toggleVibration} />
+        <Pressable testID="abyss-inventory" style={[styles.plain, !!game?.choice_seconds && styles.disabled]}
+          accessibilityRole="button" accessibilityLabel={readyEvolutions.length
+            ? `装备，可用宝箱进化为${readyEvolutions.join('、')}` : '装备'}
+          disabled={!!game?.choice_seconds} onPress={showInventory}>
+          <Text style={styles.text}>装备{!!readyEvolutions.length && <Text testID="abyss-evolution-ready"
+            style={styles.evolutionReady}> ↑</Text>}</Text>
+        </Pressable>
+        <Pressable testID="abyss-leave" style={styles.plain} accessibilityRole="button" onPress={() => setConfirm(true)}><Text style={styles.text}>离开</Text></Pressable>
       </View>
-      <AbyssAudio game={game} uid={user?.id} live={liveConnection} inPlay={inPlay}
-        visible={audioVisible} onVisibilityChange={showAudio}
-        vibration={vibration} onToggleVibration={toggleVibration} />
-      <Pressable testID="abyss-inventory" style={[styles.plain, !!game?.choice_seconds && styles.disabled]}
-        accessibilityRole="button" accessibilityLabel={readyEvolutions.length
-          ? `装备，可用宝箱进化为${readyEvolutions.join('、')}` : '装备'}
-        disabled={!!game?.choice_seconds} onPress={showInventory}>
-        <Text style={styles.text}>装备{!!readyEvolutions.length && <Text testID="abyss-evolution-ready"
-          style={styles.evolutionReady}> ↑</Text>}</Text>
-      </Pressable>
-      <Pressable testID="abyss-leave" style={styles.plain} accessibilityRole="button" onPress={() => setConfirm(true)}><Text style={styles.text}>离开</Text></Pressable>
     </View>
     <AppModal visible={inventory} onClose={() => setInventory(false)} cardStyle={styles.sheet} testID="abyss-inventory-modal">
       <Text style={styles.title}>装备与属性</Text>
@@ -708,6 +730,9 @@ const styles = StyleSheet.create({
   hud: { flexDirection: 'row', padding: 8, gap: 6 },
   readout: { flex: 1, padding: 7, gap: 3, borderWidth: 1, borderColor: c.edge, borderRadius: 8, backgroundColor: c.panel },
   label: { color: c.muted, fontSize: 13 },
+  choiceTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  choiceKey: { color: c.signal, fontSize: 13, fontWeight: '700', minWidth: 20, textAlign: 'center',
+    borderWidth: 1, borderColor: c.edge, borderRadius: 4 },
   value: { color: c.signal, fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
   stick: { position: 'absolute', top: -42, left: -42, width: 84, height: 84, borderRadius: 42,
     borderWidth: 1.5, borderColor: c.edge, backgroundColor: c.shadow + '66',
@@ -727,10 +752,13 @@ const styles = StyleSheet.create({
   wardenWarning: { borderColor: c.charge },
   warningFill: { backgroundColor: c.charge },
   bossFill: { height: 5, backgroundColor: c.warden },
-  footer: { flexDirection: 'row', paddingHorizontal: 8, alignItems: 'center', gap: 8 },
-  equipment: { flex: 1, padding: 6, gap: 2 },
+  footer: { paddingHorizontal: 12, paddingTop: 6 },
+  footerWide: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', columnGap: 12, paddingTop: 0 },
+  footerStatus: { paddingHorizontal: 2 },
+  footerActions: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', columnGap: 4 },
+  footerHint: { flex: 1, paddingHorizontal: 2 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  notice: { position: 'absolute', bottom: 14, alignSelf: 'center', borderRadius: 8, backgroundColor: c.panel, padding: 8 },
+  notice: { position: 'absolute', bottom: 14, alignSelf: 'center', maxWidth: '92%', borderRadius: 8, backgroundColor: c.panel, padding: 8 },
   spectatorSwitch: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   arenaNotices: { position: 'absolute', top: 8, alignSelf: 'center', alignItems: 'center', maxWidth: '92%', gap: 6 },
   arenaBanner: { borderRadius: 8, backgroundColor: c.panel, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6 },

@@ -391,7 +391,8 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
             （以前五处各是一排芯片，光这一块就占了两百来行；UNO 的 3 个档位 + 7 条
             房规一铺开，整页就很难看。）非房主也能点开看当前设置，只是抽屉里不能改。 */}
         {settings.length > 0 && (
-          <RoomSettingsRow items={settings} onOpen={() => setSettingsOpen(true)} />
+          <RoomSettingsRow items={settings} maxItems={room.game === 'abyss' ? 3 : undefined}
+            onOpen={() => setSettingsOpen(true)} />
         )}
         {room.has_password && (
           <View style={styles.infoRow}>

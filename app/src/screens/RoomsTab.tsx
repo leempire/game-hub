@@ -253,7 +253,7 @@ export default function RoomsTab({ onNavigateToRoom, onNavigateToWatch }: Props)
               const names = room.players
                 .map((p) => p.nickname || p.username)
                 .join(' · ');
-              const summary = settingsSummary(room.settings ?? []);
+              const summary = settingsSummary(room.settings ?? [], room.game === 'abyss' ? 3 : undefined);
               const statusText = room.status === 'playing'
                 ? (isMember ? '对局中 · 可重连' : canWatch ? '对局中 · 可观战' : '对局中 · 仅重连')
                 : full ? '已满' : '等待中';

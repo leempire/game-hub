@@ -133,7 +133,7 @@ def test_rescue_choice_timeout_and_final_boss():
     p["choices"] = ["rivet"]
     assert abyss.pick(gs, 1, 2, "rivet")
     assert p["weapons"]["rivet"] == 2
-    for _ in range(120):
+    for _ in range(abyss.UPGRADE_CHOICE_TICKS):
         abyss.advance(gs)
     assert not q["choices"]
     gs["elapsed"] = 13199
@@ -152,6 +152,29 @@ def test_supported_room_sizes(client, count, expected):
             view = _recv(socket, "abyss_state")["game"]
             assert view["next_xp"] == expected
         assert rm.get_room(code)["status"] == "playing"
+
+
+@pytest.mark.parametrize("weapon", ["rivet", "holy_wand", "cross", "heaven_sword", "charge", "hellfire"])
+@pytest.mark.parametrize("map_size", ["medium", "endless"])
+def test_targeted_weapon_does_not_spend_its_cooldown_without_a_target(weapon, map_size):
+    gs = abyss.create([{"id": 1, "username": "Diver"}], 42, map_size=map_size)
+    diver = gs["players"][1]
+    diver["weapons"] = {weapon: 1}
+    diver["cycles"].clear()
+    gs["spawn_budget"] = -100
+    if map_size == "endless":
+        abyss._spawn(gs, "drifter", diver)
+        gs["enemies"][-1].update(x=diver["x"] - 4000, y=diver["y"], speed=0)
+    abyss.advance(gs)
+    assert not gs["shots"] and weapon not in diver["cycles"]
+
+    abyss._spawn(gs, "drifter", diver)
+    gs["enemies"][-1].update(x=diver["x"] + 150, y=diver["y"], speed=0)
+    abyss.advance(gs)
+    assert gs["shots"][0]["weapon"] == weapon
+    assert gs["shots"][0]["vx"] > 0
+    cooldown = data.weapon_stats(weapon, 1, diver["stats"])["cooldown"]
+    assert diver["cycles"][weapon] == gs["elapsed"] + round(cooldown / abyss.STEP)
 
 
 def _weapon_trial(weapon, evolved=False):
@@ -698,6 +721,47 @@ def test_upgrade_pause_discards_held_and_late_movement_until_battle_resumes():
     assert diver["x"] < stopped_at
 
 
+def test_upgrade_auto_picks_first_choice_after_ten_seconds(monkeypatch):
+    gs = abyss.create([{"id": 1, "username": "Diver"}], 42)
+    diver = gs["players"][1]
+    monkeypatch.setattr(abyss, "_choices_for", lambda *_: ["rivet", "repair"])
+    gs["xp"] = abyss.threshold(gs)
+    abyss.advance(gs)
+    elapsed = gs["elapsed"]
+    assert abyss.snapshot(gs)["choice_seconds"] == 10
+
+    for _ in range(199):
+        abyss.advance(gs)
+    assert gs["elapsed"] == elapsed
+    assert abyss.snapshot(gs)["choice_seconds"] == 1
+    assert diver["weapons"]["rivet"] == 1
+
+    abyss.advance(gs)
+    assert abyss.snapshot(gs)["choice_seconds"] == 0
+    assert gs["elapsed"] == elapsed + 1
+    assert diver["weapons"]["rivet"] == 2
+
+
+def test_rescue_progress_tracks_the_nearest_online_teammate_without_reset():
+    gs = abyss.create([{"id": uid, "username": str(uid)} for uid in (1, 2, 3)], 42)
+    first, second, target = gs["players"].values()
+    target.update(x=700, y=500, hp=0, down=300)
+    first.update(x=710, y=500)
+    second.update(x=730, y=500)
+    abyss.advance(gs, online_ids={1, 2, 3})
+    downed = abyss.snapshot(gs)["players"][2]
+    assert (downed["rescue"], downed["rescuer"]) == (1, 1)
+
+    abyss.advance(gs, online_ids={2, 3})
+    downed = abyss.snapshot(gs)["players"][2]
+    assert (downed["rescue"], downed["rescuer"]) == (2, 2)
+
+    second["x"] = 760
+    abyss.advance(gs, online_ids={2, 3})
+    downed = abyss.snapshot(gs)["players"][2]
+    assert downed["rescue"] == 0 and "rescuer" not in downed
+
+
 @pytest.mark.parametrize("disconnect_at_offer", [False, True])
 def test_offline_diver_gets_default_upgrade_without_holding_the_team(disconnect_at_offer):
     gs = abyss.create([{"id": 1, "username": "Lead"}, {"id": 2, "username": "Mate"}], 42)
@@ -800,6 +864,59 @@ def test_projectile_radius_rejection_preserves_tangent_hits_and_pierce_order():
     assert not gs["shots"]
 
 
+def test_crowded_projectiles_keep_tie_order_after_knockback_crosses_a_band():
+    gs = abyss.create([{"id": 1, "username": "Diver"}], 42, map_size="endless")
+    diver = gs["players"][1]
+    positions = [(100, 21), (94, 0), (84, 0), *((x, 400) for x in range(-1700, 1700, 30))]
+    for x, y in positions:
+        abyss._spawn(gs, "drifter", diver)
+        gs["enemies"][-1].update(x=x, y=y, hp=100)
+    stats = data.weapon_stats("rivet", 1, diver["stats"])
+    # The first shot pushes the target from the preceding band into the second shot's reach.
+    abyss._shot(gs, diver, "rivet", {**stats, "knockback": 2}, 90, 0, 0, 0,
+                kind="rivet", life=10, pierce=1, radius=5)
+    abyss._shot(gs, diver, "rivet", stats, 126, 0, 0, 0,
+                kind="rivet", life=10, pierce=1, radius=12)
+    # A stationary shot overlapping two bands must still hit the first roster entry.
+    abyss._shot(gs, diver, "rivet", stats, 96, 9, 0, 0,
+                kind="rivet", life=10, pierce=1, radius=5)
+    for _ in range(24):
+        abyss._shot(gs, diver, "rivet", stats, 0, 100, 0, 0, kind="rivet", life=10, delay=2)
+    abyss._step_shots(gs)
+    assert [enemy["hp"] for enemy in gs["enemies"][:3]] == [90, 80, 100]
+
+
+@pytest.mark.parametrize(("crit", "radius"), [(0, 16), (1, 20)])
+def test_piercing_hit_emits_directional_impact_before_projectile_is_consumed(crit, radius):
+    gs = abyss.create([{"id": 1, "username": "Diver"}], 42)
+    diver = gs["players"][1]
+    abyss._spawn(gs, "drifter", diver)
+    gs["enemies"][-1].update(x=600, y=524, hp=100)
+    stats = {**data.weapon_stats("axe", 1, diver["stats"]), "crit": crit}
+    abyss._shot(gs, diver, "axe", stats, 600, 500, 0, 600,
+                kind="axe", life=10, pierce=3, radius=16)
+    abyss._step_shots(gs)
+    assert gs["shots"][0]["pierce"] == 2
+    [impact] = gs["effects"]
+    assert (impact["kind"], impact["x"], impact["y"], impact["r"]) == ("impact", 600, 500, radius)
+    assert impact["angle"] == pytest.approx(pi / 2, abs=.001)
+    assert abyss.snapshot(gs)["players"][0]["damage_dealt"] > 0
+
+
+def test_defeat_bursts_cap_normal_kills_without_suppressing_boss():
+    gs = abyss.create([{"id": 1, "username": "Diver"}], 42)
+    diver = gs["players"][1]
+    for kind in ["drifter"] * 10 + ["warden"]:
+        abyss._spawn(gs, kind, diver)
+        enemy = gs["enemies"][-1]
+        assert abyss._damage(gs, diver, enemy, enemy["hp"])
+    view = abyss.snapshot(gs)
+    bursts = [effect for effect in view["effects"] if effect["kind"] == "defeat"]
+    assert view["kills"] == 11 and len(bursts) == 9
+    assert bursts[-1]["r"] == abyss.ENEMIES["warden"][2] + 4
+    assert bursts[-1]["until"] == 12 and gs["boss_dead"]
+
+
 def test_moving_water_settles_at_owner_and_resumes_following():
     gs = abyss.create([{'id': 1, 'username': 'Diver'}], 42)
     diver = gs['players'][1]
@@ -856,6 +973,29 @@ def test_enemy_moves_toward_nearest_diver_and_stops_at_the_target():
     assert enemy['angle'] == pytest.approx(pi / 2)
     abyss.advance(gs)
     assert (enemy['x'], enemy['y']) == (700, 505)
+
+
+def test_full_beacon_pool_keeps_distant_drop_local_and_conserves_experience():
+    gs = abyss.create([{'id': i, 'username': str(i)} for i in (1, 2)], 42, map_size='endless')
+    first, second = gs['players'].values()
+    first.update(x=0, y=0)
+    second.update(x=3000, y=0)
+    for i in range(abyss.MAX_LOOT):
+        abyss._drop_loot(gs, {'x': i, 'y': 0}, 1)
+
+    oldest, neighbor = gs['loot'][:2]
+    abyss._drop_loot(gs, first, 2)
+    assert gs['loot'][0] is oldest and oldest['xp'] == 3
+    abyss._drop_loot(gs, second, 5)
+    assert len(gs['loot']) == abyss.MAX_LOOT
+    assert gs['loot'][0] is neighbor and neighbor['xp'] == 4
+    assert sum(item['xp'] for item in gs['loot']) == abyss.MAX_LOOT + 7
+
+    abyss._collect(gs, [second])
+    assert second['xp_collected'] == 5
+    assert first['xp_collected'] == 0
+    assert gs['xp'] == 5
+    assert sum(item['xp'] for item in gs['loot']) == abyss.MAX_LOOT + 2
 
 
 def test_beacon_targets_nearest_diver_within_their_magnet_range():
@@ -995,13 +1135,15 @@ def test_delayed_projectile_faces_its_new_target_in_first_visible_snapshot():
     stats = data.weapon_stats('cross', 1, diver['stats'])
     abyss._shot(gs, diver, 'cross', stats, 600, 500, 300, 0,
                 kind='cross', life=20, delay=1, retarget=True)
+    diver['x'] = 620
+    gs['enemies'][0]['x'] = 620
     assert not abyss.snapshot(gs)['shots']
     abyss._step_shots(gs)
     shot, = abyss.snapshot(gs)['shots']
-    assert shot[2:5] == [600, 500, round(pi / 2, 2)]
+    assert shot[2:5] == [620, 500, round(pi / 2, 2)]
     abyss._step_shots(gs)
     shot, = abyss.snapshot(gs)['shots']
-    assert shot[2:5] == [600, 515, round(pi / 2, 2)]
+    assert shot[2:5] == [620, 515, round(pi / 2, 2)]
 
 
 def test_reflection_allows_repeat_hit_on_the_new_leg_only():
@@ -1045,6 +1187,7 @@ def test_short_impact_remains_in_snapshots_for_the_delayed_render_timeline():
     for _ in range(8):
         abyss.advance(gs)
     impact, = abyss.snapshot(gs)["effects"]
+    assert (impact["start"], impact["until"]) == (0, 5)
     assert gs["frame"] == 8 and impact["until"] == 5
     abyss.advance(gs)
     assert not abyss.snapshot(gs)["effects"]

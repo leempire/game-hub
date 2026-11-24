@@ -40,13 +40,27 @@ const Floor = memo(function Floor({ left, top, zoom, width, height, worldWidth, 
     }} />;
   }
 
-  const tiles = [];
   const { width: tileWidth, height: tileHeight } = abyssWorld;
-  for (let row = Math.floor(top / tileHeight); row < Math.ceil((top + height) / tileHeight); row++) {
-    for (let col = Math.floor(left / tileWidth); col < Math.ceil((left + width) / tileWidth); col++) {
-      tiles.push(<Image key={`${row}:${col}`} source={floorImage} resizeMode="stretch" style={{
-        position: 'absolute', left: (col * tileWidth - left) * zoom, top: (row * tileHeight - top) * zoom,
-        width: tileWidth * zoom, height: tileHeight * zoom,
+  const originX = Math.floor(left / tileWidth) * tileWidth;
+  const originY = Math.floor(top / tileHeight) * tileHeight;
+  const columns = Math.ceil((left + width - originX) / tileWidth);
+  const rows = Math.ceil((top + height - originY) / tileHeight);
+  return <View testID="abyss-floor-tiles" style={{
+    position: 'absolute', left: 0, top: 0, width: columns * tileWidth * zoom, height: rows * tileHeight * zoom,
+    transform: [{ translateX: (originX - left) * zoom }, { translateY: (originY - top) * zoom }],
+  }}>
+    <FloorTiles columns={columns} rows={rows} width={tileWidth * zoom} height={tileHeight * zoom} />
+  </View>;
+});
+
+const FloorTiles = memo(function FloorTiles({ columns, rows, width, height }: {
+  columns: number; rows: number; width: number; height: number;
+}) {
+  const tiles = [];
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      tiles.push(<Image key={`${row}:${column}`} source={floorImage} resizeMode="stretch" style={{
+        position: 'absolute', left: column * width, top: row * height, width, height,
       }} />);
     }
   }
@@ -132,8 +146,24 @@ function ShotArt({ weapon }: { weapon: AbyssWeapon }) {
 
 const ShotDefinitions = memo(function ShotDefinitions({ prefix }: { prefix: string }) {
   return <Defs>
-    {Array.from(shotWeapons, weapon =>
-      <G key={weapon} id={`${prefix}-shot-${weapon}`}><ShotArt weapon={weapon} /></G>)}
+    <G id={`${prefix}-defeat`}>
+      <Circle r="12" fill={c.signal} fillOpacity=".22" stroke={c.beacon} strokeWidth="1.7" />
+      <Path d="M0-18v7M18 0h-7M0 18v-7M-18 0h7M-12-12l4 4m20-4-4 4m4 20-4-4m-20 4 4-4"
+        stroke={c.signal} strokeWidth="2" strokeLinecap="round" />
+      <Path d="M0-7L5 0L0 7L-5 0Z" fill={c.text} />
+    </G>
+    {Array.from(shotWeapons, weapon => {
+      const color = weaponColor(weapon);
+      return <React.Fragment key={weapon}>
+        <G id={`${prefix}-shot-${weapon}`}><ShotArt weapon={weapon} /></G>
+        {[false, true].map(heavy => <G key={Number(heavy)} id={`${prefix}-impact-${weapon}-${Number(heavy)}`}>
+          {heavy && <Path d="M0-11C11-11 17-6 17 0S11 11 0 11" fill="none" stroke={color} strokeWidth="2" />}
+          <Path d="M-12 0H-3M3 0H17M2-3L11-10M2 3L11 10M-2-3L-6-8M-2 3L-6 8"
+            fill="none" stroke={color} strokeWidth={heavy ? 3.5 : 2.8} strokeLinecap="round" />
+          <Path d="M-5 0L0-4L8 0L0 4Z" fill={c.text} />
+        </G>)}
+      </React.Fragment>;
+    })}
   </Defs>;
 });
 
@@ -167,10 +197,17 @@ const Beacon = memo(function Beacon({ href, x, y }: { href: string; x: number; y
 
 type CombatEffect = AbyssState['effects'][number];
 
+function effectOpacity(effect: CombatEffect, frame: number) {
+  const legacyLife = effect.kind === 'rescue' || effect.kind === 'chest' ? 14 : effect.kind === 'impact' ? 5 : 7;
+  const start = effect.start ?? effect.until - legacyLife;
+  if ((effect.start !== undefined || effect.kind === 'impact') && frame < start) return 0;
+  return clamp((effect.until - frame) / Math.max(1, effect.until - start), 0, 1);
+}
+
 function describeEffect(effect: CombatEffect) {
   const x = effect.x ?? 0;
   const y = effect.y ?? 0;
-  const radius = Math.max(10, effect.r ?? 0) + 5;
+  const radius = Math.max(10, (effect.r ?? 0) * (effect.kind === 'impact' || effect.kind === 'defeat' ? 1.55 : 1)) + 5;
   if (!effect.points?.length) {
     return { effect, minX: x - radius, maxX: x + radius, minY: y - radius, maxY: y + radius };
   }
@@ -185,8 +222,45 @@ function describeEffect(effect: CombatEffect) {
   return { effect, points, minX: minX - 5, maxX: maxX + 5, minY: minY - 5, maxY: maxY + 5 };
 }
 
-function Effect({ effect, points, fade, reduceMotion }: {
-  effect: CombatEffect; points?: string; fade: number; reduceMotion: boolean;
+type DrawnEffect = ReturnType<typeof describeEffect>;
+type EffectBounds = Pick<DrawnEffect, 'minX' | 'maxX' | 'minY' | 'maxY'>;
+
+function groupImpactSparks(effects: DrawnEffect[]) {
+  const byRegion = new Map<string, EffectBounds & { entries: DrawnEffect[] }>();
+  for (const entry of effects) {
+    const { effect } = entry;
+    if (effect.kind !== 'impact') continue;
+    const key = `${effect.start}:${effect.until}:${Math.floor((effect.x ?? 0) / 480)}:${Math.floor((effect.y ?? 0) / 480)}`;
+    const group = byRegion.get(key);
+    if (group) {
+      group.entries.push(entry);
+      group.minX = Math.min(group.minX, entry.minX);
+      group.maxX = Math.max(group.maxX, entry.maxX);
+      group.minY = Math.min(group.minY, entry.minY);
+      group.maxY = Math.max(group.maxY, entry.maxY);
+    } else {
+      const { minX, maxX, minY, maxY } = entry;
+      byRegion.set(key, { entries: [entry], minX, maxX, minY, maxY });
+    }
+  }
+  return [...byRegion].filter(([, group]) => group.entries.length >= 12);
+}
+
+function impactSprite(prefix: string, effect: CombatEffect, scale: number, opacity?: number) {
+  const weapon = shotWeapons.has(effect.weapon as AbyssWeapon) ? effect.weapon : 'rivet';
+  return <Use key={effect.id} testID={`abyss-projectile-impact-${effect.id}`} opacity={opacity}
+    href={`#${prefix}-impact-${weapon}-${Number((effect.r ?? 0) >= 16)}`}
+    transform={`translate(${effect.x ?? 0} ${effect.y ?? 0}) rotate(${(effect.angle ?? 0) * radians}) scale(${scale})`} />;
+}
+
+const GroupedSparks = memo(function GroupedSparks({ prefix, entries, reduceMotion }: {
+  prefix: string; entries: DrawnEffect[]; reduceMotion: boolean;
+}) {
+  return <>{entries.map(({ effect }) => impactSprite(prefix, effect, (effect.r ?? 0) / 12 * (reduceMotion ? 1 : .85)))}</>;
+});
+
+function Effect({ prefix, effect, points, fade, reduceMotion }: {
+  prefix: string; effect: CombatEffect; points?: string; fade: number; reduceMotion: boolean;
 }) {
   const color = weaponColor(effect.weapon);
   const kind = effect.kind ?? 'ring';
@@ -217,11 +291,13 @@ function Effect({ effect, points, fade, reduceMotion }: {
     </G>;
   }
   if (kind === 'impact') {
-    const scale = r / 12 * (reduceMotion ? 1 : 1 - .35 * fade);
-    return <Path testID={`abyss-projectile-impact-${effect.id}`}
-      d="M-12 0H-5M5 0H12M0-12V-5M0 5V12M-6-6L-3-3M3 3L6 6"
-      transform={`translate(${x} ${y}) scale(${scale})`}
-      fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" opacity={fade} />;
+    const scale = r / 12 * (reduceMotion ? 1 : .72 + .32 * (1 - fade * fade));
+    return impactSprite(prefix, effect, scale, fade);
+  }
+  if (kind === 'defeat') {
+    const scale = r / 15 * (reduceMotion ? 1 : .8 + .45 * (1 - fade * fade));
+    return <Use testID={`abyss-defeat-${effect.id}`} href={`#${prefix}-defeat`} opacity={fade}
+      transform={`translate(${x} ${y}) scale(${scale})`} />;
   }
   if (kind === 'rescue') {
     const radius = reduceMotion ? r : mix(23, r, 1 - fade * fade);
@@ -243,6 +319,14 @@ function Effect({ effect, points, fade, reduceMotion }: {
     return <G testID={`abyss-effect-${effect.id}`} opacity={fade}>
       <Circle cx={x} cy={y} r={radius} fill="none" stroke={color} strokeWidth="8" />
       <Circle cx={x} cy={y} r={radius * .82} fill="none" stroke={c.text} strokeWidth="2" opacity=".65" />
+    </G>;
+  }
+  if (kind === 'burst' && (effect.weapon === 'charge' || effect.weapon === 'hellfire')) {
+    return <G opacity={fade}>
+      <Circle testID={`abyss-effect-${effect.id}`} cx={x} cy={y} r={radius}
+        fill={color} fillOpacity=".27" stroke={color} strokeWidth="5" />
+      <Circle cx={x} cy={y} r={radius * .78} fill="none" stroke={c.text}
+        strokeWidth="2" strokeOpacity=".7" strokeDasharray="6 5" />
     </G>;
   }
   return <Circle testID={`abyss-effect-${effect.id}`} cx={x} cy={y} r={Math.max(4, radius)}
@@ -296,6 +380,10 @@ const orbitKey = (owner: number, weapon: AbyssWeapon, index: number) => `orbit-$
 
 function indexSnapshot(game: AbyssState) {
   const players = new Map(game.players.map(player => [player.id, player]));
+  let overlayLimit = game.warden_attack ? snapshotFreshnessMs : 0;
+  for (const player of game.players) {
+    if (player.protected) overlayLimit = Math.max(overlayLimit, player.protection_ms ?? 0);
+  }
   const orbits = new Map(game.orbits.map(([owner, weapon, x, y, hitRadius, index]) => {
     const position = players.get(owner)?.position ?? [x, y];
     const dx = x - position[0];
@@ -304,6 +392,7 @@ function indexSnapshot(game: AbyssState) {
   }));
   return {
     game,
+    overlayLimit,
     enemies: new Map(game.enemies.map(enemy => [enemy[0], enemy])),
     players,
     shots: new Map(game.shots.map(shot => [shot[0], shot])),
@@ -525,9 +614,8 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
       const pickupOpacity = hitOpacity === 0 ? clamp(1 - (now - pickupAt) / pickupIndicatorMs, 0, 1) : 0;
       const position = local.current;
       const latestFrame = latest.game.frame;
-      const timedOverlay = latest.game.warden_attack || latest.game.players.some(player =>
-        player.protected && player.protection_ms !== undefined);
-      const overlayAge = timedOverlay ? sampleAge : 0;
+      // Protection expires against elapsed time even after movement prediction has stopped.
+      const overlayAge = clamp(now - receivedAt, 0, latest.overlayLimit);
       if (published && published.from === from && published.to === to && published.fraction === fraction
         && published.latestFrame === latestFrame && published.sampleAge === overlayAge
         && published.position?.[0] === position?.[0] && published.position?.[1] === position?.[1]
@@ -545,16 +633,52 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
 
   const drawing = animating ? frame : null;
   const scene = drawing?.to.game ?? game;
-  const effects = useMemo(() => scene.effects.map(describeEffect), [scene.effects]);
+  const previous = drawing?.from;
+  const next = drawing?.to;
+  const previousEffects = drawing?.from.game.effects;
+  const effects = useMemo(() => {
+    const current = scene.effects;
+    if (!previousEffects?.length || previousEffects === current) return current.map(describeEffect);
+    const currentIds = new Set(current.map(effect => effect.id));
+    // The next snapshot can omit effects that still exist at the interpolated frame.
+    return [...previousEffects.filter(effect => !currentIds.has(effect.id)), ...current].map(describeEffect);
+  }, [previousEffects, scene.effects]);
+  const impactGroups = useMemo(() => groupImpactSparks(effects), [effects]);
+  const groupedImpactIds = useMemo(
+    () => new Set(impactGroups.flatMap(([, group]) => group.entries.map(({ effect }) => effect.id))),
+    [impactGroups],
+  );
+  const { departingEnemies, shotContacts } = useMemo(() => {
+    const departures = new Map<number, CombatEffect>();
+    const contacts = new Map<number, CombatEffect>();
+    if (previous && next && previous !== next) {
+      for (const effect of next.game.effects) {
+        if (effect.kind === 'defeat' && effect.target !== undefined && previous.enemies.has(effect.target)
+          && !next.enemies.has(effect.target)) departures.set(effect.target, effect);
+        if (effect.shot !== undefined && previous.shots.has(effect.shot) && !next.shots.has(effect.shot)) {
+          contacts.set(effect.shot, effect);
+        }
+      }
+    }
+    return { departingEnemies: departures, shotContacts: contacts };
+  }, [previous, next]);
+  const visibleEnemies = useMemo(() => {
+    if (!previous || departingEnemies.size === 0) return scene.enemies;
+    return [...scene.enemies, ...previous.game.enemies.filter(enemy => departingEnemies.has(enemy[0]))];
+  }, [departingEnemies, previous, scene.enemies]);
+  const visibleShots = useMemo(() => {
+    if (!previous || shotContacts.size === 0) return scene.shots;
+    return [...scene.shots, ...previous.game.shots.filter(shot => shotContacts.has(shot[0]))];
+  }, [shotContacts, previous, scene.shots]);
   const wardenAttack = game.result ? null : game.warden_attack;
   const snapshotAge = drawing?.latestFrame === game.frame ? drawing.sampleAge : 0;
+  const attackAge = Math.min(snapshotAge, snapshotFreshnessMs);
   if (!size.width || !size.height) return null;
   const regularZoom = Math.min(1, size.width / 520, size.height / 440);
   const zoom = worldWidth === null || worldHeight === null ? regularZoom
     : Math.max(regularZoom, size.width / worldWidth, size.height / worldHeight);
   const width = size.width / zoom;
   const height = size.height / zoom;
-  const previous = drawing?.from;
   const fraction = drawing?.fraction ?? 1;
   const sceneTime = previous ? mix(previous.game.frame, scene.frame, fraction) : scene.frame;
   const me = game.players.find(p => p.id === uid);
@@ -566,6 +690,19 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
   const top = worldHeight === null ? centerY - height / 2 : clamp(centerY - height / 2, 0, Math.max(0, worldHeight - height));
   const visible = (x: number, y: number, padding = 75) => x > left - padding && x < left + width + padding
     && y > top - padding && y < top + height + padding;
+  const effectInView = ({ minX, maxX, minY, maxY }: EffectBounds) =>
+    maxX >= left && minX <= left + width && maxY >= top && minY <= top + height;
+  // A distant teammate's screen-clearing weapon also hits enemies around this viewport.
+  let distantNovaOpacity = 0;
+  let distantNovaColor: string = c.signal;
+  for (const entry of effects) {
+    if (entry.effect.kind !== 'nova' || effectInView(entry)) continue;
+    const opacity = effectOpacity(entry.effect, sceneTime);
+    if (opacity > distantNovaOpacity) {
+      distantNovaOpacity = opacity;
+      distantNovaColor = weaponColor(entry.effect.weapon);
+    }
+  }
 
   const warningZones = wardenAttack?.zones.filter(([x, y, radius]) => visible(x, y, radius + 4));
 
@@ -576,9 +713,12 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
       <CreatureDefinitions prefix={artPrefix} />
       <ShotDefinitions prefix={artPrefix} />
       <PickupDefinitions prefix={artPrefix} />
+      {distantNovaOpacity > 0 && <Rect testID="abyss-distant-nova" x={4 / zoom} y={4 / zoom}
+        width={Math.max(0, width - 8 / zoom)} height={Math.max(0, height - 8 / zoom)} rx={9 / zoom}
+        fill="none" stroke={distantNovaColor} strokeWidth={5 / zoom} strokeOpacity={distantNovaOpacity * .65} />}
       <G testID="abyss-world" transform={`translate(${-left} ${-top})`}>
         {worldWidth !== null && worldHeight !== null && <Wall width={worldWidth} height={worldHeight} />}
-        {wardenAttack && !!warningZones?.length && <WardenAttack attack={wardenAttack} zones={warningZones} sampleAge={snapshotAge} reduceMotion={reduceMotion} />}
+        {wardenAttack && !!warningZones?.length && <WardenAttack attack={wardenAttack} zones={warningZones} sampleAge={attackAge} reduceMotion={reduceMotion} />}
         {scene.auras.map(([owner, weapon, x, y, r]) => {
           const old = previous?.players.get(owner)?.position;
           const px = owner === uid && ownPosition ? ownPosition[0] : old ? mix(old[0], x, fraction) : x;
@@ -611,21 +751,31 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
         })}
         {scene.chests.filter(([, x, y]) => visible(x, y)).map(([id, x, y]) =>
           <Use key={id} href={`#${artPrefix}-chest`} x={x} y={y} />)}
-        {scene.enemies.map(([id, kind, x, y, angle, hp, max]) => {
+        {visibleEnemies.map(([id, kind, x, y, angle, hp, max]) => {
           const old = previous?.enemies.get(id);
-          const px = old ? mix(old[2], x, fraction) : x, py = old ? mix(old[3], y, fraction) : y;
+          const departure = departingEnemies.get(id);
+          const end = departure ? departure.start ?? scene.frame : scene.frame;
+          if (departure && sceneTime >= end) return null;
+          const leadIn = departure && previous
+            ? clamp((sceneTime - previous.game.frame) / Math.max(1, end - previous.game.frame), 0, 1) : fraction;
+          const px = old ? mix(old[2], departure?.x ?? x, leadIn) : x;
+          const py = old ? mix(old[3], departure?.y ?? y, leadIn) : y;
           if (!visible(px, py)) return null;
           const degrees = (old ? mixAngle(old[4], angle, fraction) : angle) * radians;
-          if (kind !== 'warden' && kind !== 'elite') {
-            const hitScale = !reduceMotion && old && hp < old[5] ? 1 + .16 * Math.sin(Math.PI * fraction) : 1;
-            const recoil = hitScale === 1 ? '' : ` scale(${hitScale} ${1 / hitScale})`;
+          const heavy = kind === 'warden' || kind === 'elite';
+          const hitPulse = !reduceMotion && old && hp < old[5] ? Math.sin(Math.PI * Math.pow(fraction, .38)) : 0;
+          const hitScale = 1 + (heavy ? .12 : .38) * hitPulse;
+          const recoil = hitScale === 1 ? '' : ` scale(${hitScale} ${1 / hitScale})`;
+          if (!heavy) {
             return <Use testID={`abyss-enemy-${id}`} key={id} href={`#${artPrefix}-creature-${kind}`}
               transform={`translate(${px} ${py}) rotate(${degrees})${recoil}`} />;
           }
           return <G key={id} transform={`translate(${px} ${py})`}>
-            {kind === 'warden'
-              ? <G rotation={degrees}><SvgImage href={wardenImage} x={-39} y={-39} width={78} height={78} /></G>
-              : <Use href={`#${artPrefix}-creature-elite`} rotation={degrees} />}
+            <G testID={`abyss-enemy-${id}`} transform={`rotate(${degrees})${recoil}`}>
+              {kind === 'warden'
+                ? <SvgImage href={wardenImage} x={-39} y={-39} width={78} height={78} />
+                : <Use href={`#${artPrefix}-creature-elite`} />}
+            </G>
             <Rect x="-33" y={kind === 'warden' ? -48 : -36} width="66" height="5" rx="2" fill={c.shadow} />
             <Rect x="-33" y={kind === 'warden' ? -48 : -36} width={66 * hp / max} height="5" rx="2" fill={c[kind]} />
           </G>;
@@ -692,10 +842,15 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
               fill={weaponColor(weapon)} stroke={c.shadow} strokeWidth="1.5" />
           </G>;
         })}
-        {scene.shots.map(([id, weapon, x, y, angle, r, launch]) => {
+        {visibleShots.map(([id, weapon, x, y, angle, r, launch]) => {
           const old = previous?.shots.get(id);
-          let px = old ? mix(old[2], x, fraction) : x;
-          let py = old ? mix(old[3], y, fraction) : y;
+          const contact = shotContacts.get(id);
+          const end = contact?.start ?? scene.frame;
+          if (contact && sceneTime >= end) return null;
+          const progress = contact && previous
+            ? clamp((sceneTime - previous.game.frame) / Math.max(1, end - previous.game.frame), 0, 1) : fraction;
+          let px = old ? mix(old[2], contact?.x ?? x, progress) : x;
+          let py = old ? mix(old[3], contact?.y ?? y, progress) : y;
           if (!old && launch && scene.frame > launch[0]) {
             if (sceneTime < launch[0]) return null;
             const progress = (sceneTime - launch[0]) / (scene.frame - launch[0]);
@@ -704,16 +859,29 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
           }
           if (!visible(px, py, Math.max(r * 2.6, 75))) return null;
           return <Shot key={id} prefix={artPrefix} id={id} weapon={weapon} r={r} x={px} y={py}
-            angle={old ? mixAngle(old[4], angle, fraction) : angle} />;
+            angle={old ? mixAngle(old[4], contact?.angle ?? angle, progress) : angle} />;
         })}
-        {effects.map(({ effect, points, minX, maxX, minY, maxY }) => {
-          if (maxX < left || minX > left + width || maxY < top || minY > top + height) return null;
-          const life = effect.kind === 'rescue' || effect.kind === 'chest' ? 14 : effect.kind === 'impact' ? 5 : 7;
-          if (effect.kind === 'impact' && sceneTime < effect.until - life) return null;
-          const fade = clamp((effect.until - sceneTime) / life, 0, 1);
-          return fade > 0 ? <Effect key={effect.id} effect={effect} points={points} fade={fade} reduceMotion={reduceMotion} /> : null;
+        {effects.map(entry => {
+          if (groupedImpactIds.has(entry.effect.id)) return null;
+          if (!effectInView(entry)) return null;
+          const { effect, points } = entry;
+          const fade = effectOpacity(effect, sceneTime);
+          return fade > 0 ? <Effect key={effect.id} prefix={artPrefix} effect={effect} points={points}
+            fade={fade} reduceMotion={reduceMotion} /> : null;
         })}
-        {wardenAttack && !!warningZones?.length && <WardenAttack attack={wardenAttack} zones={warningZones} sampleAge={snapshotAge} reduceMotion={reduceMotion} outline />}
+        {impactGroups.map(([key, group]) => {
+          if (!effectInView(group)) return null;
+          const fade = effectOpacity(group.entries[0].effect, sceneTime);
+          if (fade <= 0) return null;
+          const fullyInView = group.minX >= left && group.maxX <= left + width
+            && group.minY >= top && group.maxY <= top + height;
+          const entries = fullyInView ? group.entries : group.entries.filter(effectInView);
+          if (!entries.length) return null;
+          return <G key={key} testID="abyss-impact-group" opacity={fade}>
+            <GroupedSparks prefix={artPrefix} entries={entries} reduceMotion={reduceMotion} />
+          </G>;
+        })}
+        {wardenAttack && !!warningZones?.length && <WardenAttack attack={wardenAttack} zones={warningZones} sampleAge={attackAge} reduceMotion={reduceMotion} outline />}
         {connected && !game.result && !game.choice_seconds && me && me.hp > 0 && ownPosition &&
           <AbyssObjective game={game} uid={me.id} position={ownPosition} offlinePeers={offlinePeers}
             left={left} top={top} width={width} height={height} zoom={zoom}

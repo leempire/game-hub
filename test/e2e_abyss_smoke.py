@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""临时 E2E：深渊回声 UI 冒烟（建房 / 房规 / 开局 / 升级选择 / 装备面板）。
-
-用完即删；只验证浏览器接线，不替代 server/test/test_abyss.py 的引擎断言。
-"""
+"""深渊回声跨浏览器冒烟。使用 --isolated 可在临时后端运行。"""
+import argparse
+from contextlib import nullcontext
 import os
 import re
 import time
@@ -41,15 +40,31 @@ def body(page):
     return page.locator('body').inner_text()
 
 
-def main():
-    print('=== Web E2E: 深渊回声冒烟 ===')
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+def main(browser_name='chromium', executable_path=None, isolated=False):
+    print(f'=== Web E2E: 深渊回声冒烟 ({browser_name}) ===')
+    if isolated:
+        from e2e_abyss_complete import isolated_backend, use_backend
+        backend = isolated_backend()
+    else:
+        backend = nullcontext((None, None))
+
+    with backend as (origin, in_match), sync_playwright() as p:
+        browser = getattr(p, browser_name).launch(headless=True, executable_path=executable_path)
         ctx = {'viewport': {'width': 390, 'height': 844}}
         pa = browser.new_context(**ctx).new_page()
         pb = browser.new_context(**ctx).new_page()
         for pg in (pa, pb):
             pg.set_default_timeout(15000)
+            if origin:
+                use_backend(pg, origin)
+
+        pa.add_init_script("""(() => {
+          const play = HTMLMediaElement.prototype.play;
+          HTMLMediaElement.prototype.play = function (...args) {
+            if (this.src.includes('recovery-station')) window.abyssSmokeMusic = this;
+            return play.apply(this, args);
+          };
+        })()""")
 
         register(pa, UA)
         register(pb, UB)
@@ -121,14 +136,42 @@ def main():
         assert pa.locator('[data-testid="abyss-confirm-modal"]').count() == 0
         ok('对局中浏览器返回：弹出确认框并可取消')
 
-        pa.get_by_text('选择强化', exact=False).wait_for(timeout=90000)
+        if in_match:
+            from app.game import abyss
+            lead = in_match(code, lambda gs: next(iter(gs['players'])))
+            diver = pb.get_by_test_id(f'abyss-diver-{lead}')
+            before = diver.evaluate('node => node.transform.baseVal.getItem(0).matrix.e')
+            pa.keyboard.down('d')
+            try:
+                pb.wait_for_function("""([id, x]) => {
+                  const node = document.querySelector('[data-testid="abyss-diver-' + id + '"]');
+                  return node?.transform.baseVal.getItem(0).matrix.e > x + 20;
+                }""", arg=[lead, before])
+            finally:
+                pa.keyboard.up('d')
+            ok('队友视角看到了实时移动')
+            in_match(code, lambda gs: gs.update(xp=abyss.threshold(gs)))
+
+        pa.get_by_text('选择强化 ·', exact=False).wait_for(timeout=90000)
         choices = pa.locator('[data-testid^="abyss-choice-"]')
         assert choices.count() >= 3, f'升级候选不足 3 个：{choices.count()}'
         text = body(pa)
         assert '等待队友选择' not in text, '自己的升级候选没有下发'
-        choices.first.click()
-        pa.get_by_text('选择强化', exact=False).wait_for(state='hidden', timeout=15000)
-        ok('升级候选出现并可选择')
+        pa.keyboard.press('1')
+        pb.get_by_text('选择强化 ·', exact=False).wait_for()
+        pb.keyboard.press('1')
+        pa.get_by_test_id('abyss-overlay-scroll').wait_for(state='hidden')
+        ok('双方用数字键选完强化，战斗恢复')
+
+        pa.get_by_test_id('abyss-audio').click()
+        pa.get_by_test_id('abyss-music').click()
+        pa.get_by_test_id('abyss-music-level-loud').click()
+        pa.get_by_test_id('abyss-audio-close').click()
+        pa.wait_for_function("""() => {
+          const music = window.abyssSmokeMusic;
+          return music && !music.paused && music.currentTime > .05 && Math.abs(music.volume - .8) < .0001;
+        }""")
+        ok('配乐按选定档位实际播放')
 
         pa.locator('[data-testid="abyss-inventory"]').click()
         pa.locator('[data-testid="abyss-inventory-modal"]').wait_for(timeout=8000)
@@ -150,4 +193,9 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--browser', choices=('chromium', 'firefox', 'webkit'), default='chromium')
+    parser.add_argument('--executable-path')
+    parser.add_argument('--isolated', action='store_true')
+    args = parser.parse_args()
+    main(args.browser, args.executable_path, args.isolated)

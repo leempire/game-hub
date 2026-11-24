@@ -9,7 +9,7 @@ import { colors, fontSize, radius, spacing } from './theme';
 const GUIDES: Record<string, { title: string; body: string }[]> = {
   abyss: [
     { title: '拖动移动，武器自动开火', body: '在战场任意位置按住并拖动。电脑也可以用方向键或 WASD。边移动边和怪群保持距离。' },
-    { title: '捡信标，选强化', body: '走近蓝色信标可为全队积攒经验。升级时有 6 秒选择。装备页会告诉你武器还缺什么才能用宝箱进化。' },
+    { title: '捡信标，选强化', body: '走近蓝色信标可为全队积攒经验。升级时有 10 秒选择。装备页会告诉你武器还缺什么才能用宝箱进化。' },
     { title: '躲开警示圈，打倒守卫', body: '守卫会在对局末段登场。看到十字落点或压强脉冲时，先离开警示圈。靠近倒地队友两秒可救起。击倒守卫并活到计时结束即可完成回收。' },
   ],
   stasis: [

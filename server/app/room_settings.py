@@ -268,11 +268,11 @@ def _abyss_settings():
             store="abyss_duration", default=720, in_summary=True,
             choices=(
                 {"value": 720, "label": "12 分钟",
-                 "blurb": "紧凑局：两次精英宝箱与一次首领宝箱，成型偏快。"},
+                 "blurb": "守卫在战斗进行到 11:00 时出现。升级选卡暂停战斗计时。"},
                 {"value": 1200, "label": "20 分钟",
-                 "blurb": "中长局：更容易凑齐 6 武器 + 6 被动。"},
+                 "blurb": "守卫在战斗进行到 18:20 时出现。升级选卡暂停战斗计时。"},
                 {"value": 1800, "label": "30 分钟",
-                 "blurb": "完整节奏：对齐《吸血鬼幸存者》镶嵌图书馆的时长。"},
+                 "blurb": "守卫在战斗进行到 27:30 时出现。升级选卡暂停战斗计时。"},
             ),
         ),
         Setting(
@@ -280,7 +280,7 @@ def _abyss_settings():
             store="abyss_xp_pace", default="standard", in_summary=True,
             choices=(
                 {"value": "standard", "label": "标准",
-                 "blurb": "按 VS 三段经验曲线原速升级。"},
+                 "blurb": "使用默认的升级经验门槛。"},
                 {"value": "fast", "label": "快速",
                  "blurb": "升级门槛降低 20%，更快成型。"},
                 {"value": "slow", "label": "慢速",
