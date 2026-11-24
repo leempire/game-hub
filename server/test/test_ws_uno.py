@@ -268,9 +268,28 @@ class TestPlay:
             assert ev["kind"] == "play" and "hand" not in ev
             st = _recv_type(wss[1], "uno_state")
             assert st["hand"] == ["B3", "Y4"]
+            assert set(st["hand_effects"]) == {"B3", "Y4"}
             assert set(st["hand"]) & {"R1", "G2"} == set()
             assert "hands" not in st
             assert st["playable"] == []          # 不是我的回合
+        finally:
+            _close(wss)
+
+    def test_next_seat_tracks_surrender_and_reverse(self, client, temp_db):
+        wss, code, _, _, starts = _setup_game(client, players=4)
+        try:
+            assert all(msg["game"]["next_seat"] == 1 for msg in starts)
+            gs = _force(rm.get_room(code), turn=0, discard="R5")
+            gs["hands"][0] = ["RR", "R1"]
+            gs["hands"][3] = ["R3", "B4"]
+            wss[2].send_json({"type": "surrender"})
+            assert _recv_type(wss[0], "uno_state")["next_seat"] == 1
+
+            wss[0].send_json({"type": "uno_play", "card": "RR"})
+            st = _recv_type(wss[0], "uno_state")
+            assert (st["direction"], st["turn"], st["next_seat"]) == (-1, 3, 1)
+            wss[3].send_json({"type": "uno_play", "card": "R3"})
+            assert _recv_type(wss[0], "uno_state")["turn"] == 1
         finally:
             _close(wss)
 

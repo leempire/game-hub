@@ -900,6 +900,39 @@ def seat_teams(game: dict) -> list[int | None]:
     return [team_of(game, s) for s in range(game["num_players"])]
 
 
+_CARD_EFFECT_TEXT = {
+    "": "任选接下来的颜色",
+    SKIP: "跳过下家一轮",
+    REVERSE: "反转出牌顺序",
+    SKIP_ALL: "跳过其他人，自己再出牌",
+    DISCARD_ALL: "弃掉其余同色牌",
+    ROULETTE: "下家选色，摸到该色后停一轮",
+    TEAM_CARD_KINDS[0]: "选色，队友出牌。接不住你摸 2 张",
+    TEAM_CARD_KINDS[1]: "选色。下家停一轮，和队友各摸 2 张",
+}
+
+
+def _card_effect_text(game: dict, card: str, active_count: int) -> str:
+    kind = card_kind(card)
+    if kind in PENALTY_VALUE:
+        prefix = "选色并反转，" if kind == REV_DRAW4 else "选色，" if kind in WILD_NEEDS_COLOR else ""
+        count = PENALTY_VALUE[kind]
+        if game["rules"]["stack_mode"] == "off":
+            effect = f"{prefix}下家摸 {count} 张并停一轮"
+        else:
+            effect = f"{prefix}下家加罚 {count} 张，可叠加"
+        if kind == WILD4 and game["rules"].get("wild4_challenge") and game["pending_draw"] == 0:
+            effect += "（可质疑）"
+        return effect
+    if kind == REVERSE and active_count <= 2:
+        return "跳过对手，自己再出牌"
+    if _is_swap_play(game, card):
+        return "选一人交换手牌"
+    if _is_rotate_play(game, card):
+        return "所有人把手牌传给下家"
+    return _CARD_EFFECT_TEXT.get(kind, "按颜色或数字接牌")
+
+
 def game_to_sync(game: dict, user_id: int) -> dict:
     """逐人下发：**只给自己的手牌**，别人的只给张数。
 
@@ -908,6 +941,9 @@ def game_to_sync(game: dict, user_id: int) -> dict:
     """
     seat = seat_of(game, user_id)
     hand = list(game["hands"].get(seat, [])) if seat is not None else []
+    active_count = len(active_seats(game))
+    next_seat = (_next_active_seat(game, game["turn"])
+                 if not game["finished"] and active_count > 1 else None)
     return {
         "game": "uno",
         "series": game.get("series"),
@@ -927,6 +963,7 @@ def game_to_sync(game: dict, user_id: int) -> dict:
         # 提示文案说对（「抢出」「7 换手」这些词得知道本局开没开）。
         "rules": dict(game["rules"]),
         "hand": hand,
+        "hand_effects": {card: _card_effect_text(game, card, active_count) for card in dict.fromkeys(hand)},
         "playable": playable_cards(game, seat),
         # 能**抢出**的牌（`jump_in` 房规）。与 `playable` 是两个不同的东西：
         # `playable` 回答「轮到我了能出什么」，`jumpable` 回答「不轮到我时我能抢
@@ -936,6 +973,7 @@ def game_to_sync(game: dict, user_id: int) -> dict:
         "discard_top": game["discard_pile"][-1] if game["discard_pile"] else None,
         "current_color": game["current_color"],
         "turn": game["turn"],
+        "next_seat": next_seat,
         "direction": game["direction"],
         "pending_draw": game["pending_draw"],
         "pending_kind": game["pending_kind"],
@@ -1170,31 +1208,34 @@ def _skip(game: dict, steps: int) -> list[int]:
     [对手, 我]，最终轮到我 → 被跳过的是 [对手]；若直接返回沿途列表会把我自己也算
     进去（文案就成了「跳过了你」）。
     """
-    n = game["num_players"]
     cur = game["turn"]
     walked: list[int] = []
     for _ in range(steps):
-        for _ in range(n):
-            cur = (cur + game["direction"]) % n
-            if cur not in game["out"]:
-                walked.append(cur)
-                break
+        following = _next_active_seat(game, cur)
+        if following is None:
+            break
+        walked.append(following)
+        cur = following
     _advance(game, steps)
     return [s for s in dict.fromkeys(walked) if s != game["turn"]]
 
 
+def _next_active_seat(game: dict, seat: int) -> int | None:
+    n = game["num_players"]
+    for _ in range(n):
+        seat = (seat + game["direction"]) % n
+        if seat not in game["out"]:
+            return seat
+    return None
+
+
 def _advance(game: dict, steps: int = 1):
     """按当前方向前进 steps 个**在局**座位（出局的座位不占位）。"""
-    n = game["num_players"]
     for _ in range(steps):
-        moved = False
-        for _ in range(n):
-            game["turn"] = (game["turn"] + game["direction"]) % n
-            if game["turn"] not in game["out"]:
-                moved = True
-                break
-        if not moved:
-            return   # 没有在局座位了（终局路径会处理）
+        following = _next_active_seat(game, game["turn"])
+        if following is None:
+            return
+        game["turn"] = following
     game["turn_count"] += 1
 
 

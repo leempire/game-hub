@@ -157,7 +157,7 @@ def test_full_uno_room_can_be_watched_without_seat_or_private_cards(client):
             message = recv(watcher, 'watch_sync')
             assert message['read_only'] and message['game']['game'] == 'uno'
             assert len(message['room']['players']) == 4
-            forbidden = {'hand', 'hands', 'draw_pile', 'playable', 'jumpable', 'can_draw',
+            forbidden = {'hand', 'hands', 'hand_effects', 'draw_pile', 'playable', 'jumpable', 'can_draw',
                          'can_pass', 'your_seat', 'your_team', 'wild4_pending', 'guilty'}
             assert not forbidden.intersection(message['game'])
             assert current == before and observer['id'] not in room_ws._connections.get(code, {})
@@ -271,12 +271,14 @@ def test_watcher_receives_real_uno_updates_without_action_fields(client):
         gs['hands'], gs['discard_pile'], gs['current_color'] = {0: ['R1', 'B2'], 1: ['G3', 'Y4']}, ['R5'], 'R'
         ticket = grant(client, code, observer).json()['grant']
         with client.websocket_connect(watch_url(code, observer, ticket)) as watcher:
-            assert recv(watcher, 'watch_sync')['game']['turn'] == 0
+            initial = recv(watcher, 'watch_sync')['game']
+            assert (initial['turn'], initial['next_seat']) == (0, 1)
             sockets[0].send_json({'type': 'uno_play', 'card': 'R1'})
             recv(sockets[0], 'uno_state')
             updated = recv(watcher, 'watch_state')['game']
             assert updated['discard_top'] == 'R1' and updated['hand_counts']['0'] == 1
-            assert updated['turn'] == 1 and 'hand' not in updated and 'playable' not in updated
+            assert (updated['turn'], updated['next_seat']) == (1, 0)
+            assert not {'hand', 'hand_effects', 'playable'} & updated.keys()
 
 
 def test_spectator_send_timeout_is_bounded(monkeypatch):

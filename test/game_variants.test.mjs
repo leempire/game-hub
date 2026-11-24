@@ -114,6 +114,43 @@ s=uno.create_game([1,2]);print(json.dumps(uno.game_to_sync(s,1)))
   });
 }
 
+test('UNO 鼠标悬停和触屏长按都能查看不可出的手牌', () => {
+  const game = {
+    num_players: 2, seat_uids: [1, 2], your_seat: 0, out: [], turn: 1,
+    next_seat: 0, winner: null, finished: false, hand: ['W+RO'], playable: [],
+    hand_effects: { 'W+RO': '下家选色，摸到该色后停一轮' },
+  };
+  const view = mountGame('Uno', game, { game: 'uno' });
+  const card = view.get('u-card-0');
+  card.onHoverIn(); view.render();
+  assert.equal(view.get('u-hand-effect').children, game.hand_effects['W+RO']);
+  card.onHoverOut(); view.render();
+  assert.ok(!view.get('u-hand-effect'));
+  card.onLongPress(); view.render();
+  assert.equal(view.get('u-hand-effect').children, game.hand_effects['W+RO']);
+  card.onPressOut(); view.render();
+  assert.ok(!view.get('u-hand-effect'));
+  assert.deepEqual(view.calls, []);
+});
+
+test('UNO 牌桌箭头按当前座位和服务端下家改变指向', () => {
+  const room = { game: 'uno', status: 'playing', host_id: 1, players: [
+    { id: 1, username: 'host', connected: true }, { id: 2, username: 'peer', connected: true },
+    { id: 3, username: 'third', connected: true },
+  ] };
+  const game = { num_players: 3, seat_uids: [1, 2, 3], your_seat: 0,
+    winner: null, finished: false, out: [], turn: 0, next_seat: 1 };
+  const view = mountGame('Uno', game, { game: 'uno', room });
+  assert.equal(view.get('u-direction-head').name, 'caret-forward');
+  assert.match(view.get('u-direction-arrow').accessibilityLabel, /我.*peer/);
+  const html = view.receive('uno_state', { ...game, turn: 2, next_seat: 0, out: [1] });
+  assert.equal(view.get('u-direction-head').name, 'caret-back');
+  assert.match(view.get('u-direction-arrow').accessibilityLabel, /third.*我/);
+  assert.doesNotMatch(html, /顺时针|逆时针/);
+  view.receive('uno_state', { ...game, finished: true, next_seat: null });
+  assert.ok(!view.get('u-direction-arrow'));
+});
+
 test('19路五子棋触摸命中最末格，禁手合法清单拒绝其他空格', () => {
   const view = mountGame('Gomoku', state(19, { forbidden: true, legal: [[18, 18]] }), { game: 'gomoku' });
   function tap(x, y) {

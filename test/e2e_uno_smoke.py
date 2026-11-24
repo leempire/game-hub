@@ -23,7 +23,7 @@ import time
 import requests
 import websocket as ws_mod
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 from websocket import create_connection
 
 from e2e_room_helpers import remember_guides
@@ -107,6 +107,42 @@ def wait_hand(page, n, timeout=25000):
         arg=n, timeout=timeout)
 
 
+def check_hand_effects(mouse, touch):
+    short_effect = re.compile(r'^.{1,24}$')
+    inactive = mouse.get_by_test_id('u-card-0')
+    inactive.hover(position={'x': 20, 'y': 35})
+    mouse_hint = mouse.get_by_test_id('u-hand-effect')
+    expect(mouse_hint).to_have_text(short_effect)
+    mouse.mouse.move(0, 0)
+    expect(mouse_hint).to_be_hidden()
+    inactive.focus()
+    mouse.keyboard.press('Tab')
+    expect(mouse.get_by_test_id('u-card-1')).to_be_focused()
+    expect(mouse_hint).to_have_text(short_effect)
+    ok('鼠标悬停和键盘聚焦都能查看不可出牌的简短效果')
+
+    playable = touch.locator('[data-testid^="u-play-"]')
+    card = playable.first if playable.count() else touch.get_by_test_id('u-card-0')
+    card.scroll_into_view_if_needed()
+    box = card.bounding_box()
+    seat_before = touch.get_by_test_id('u-turn').inner_text()
+    touch_hint = touch.get_by_test_id('u-hand-effect')
+    client = touch.context.new_cdp_session(touch)
+    client.send('Input.dispatchTouchEvent', {
+        'type': 'touchStart', 'touchPoints': [{'x': box['x'] + 20, 'y': box['y'] + 35}],
+    })
+    try:
+        expect(touch_hint).to_have_text(short_effect)
+    finally:
+        client.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
+        client.detach()
+    expect(touch_hint).to_be_hidden()
+    expect(touch.get_by_test_id('u-turn')).to_have_text(seat_before)
+    assert hand_cards(touch) == 7, '长按松手不应出牌'
+    assert not touch.get_by_test_id('u-color-R').is_visible(), '长按松手不应打开选色框'
+    ok('竖屏触屏长按可查看效果，松手不出牌')
+
+
 def hand_count_of(page, seat):
     """某个座位的手牌**张数**（客户端只拿到张数，拿不到牌面）。
 
@@ -129,7 +165,7 @@ def click_first(page, prefix):
     return True
 
 
-def take_turn(page, prefer_wild=False):
+def take_turn(page, prefer_wild=False, touch=False):
     """轮到的人走一手：有可出的牌就出，否则摸牌（摸到能出的还得过牌）。
 
     `prefer_wild=True` 时**优先打黑牌**（会弹选色框）—— 无怜悯档靠它把
@@ -162,7 +198,10 @@ def take_turn(page, prefer_wild=False):
         if target is None:
             target = plays.first
         label = target.get_attribute('aria-label') or ''
-        target.click()
+        if touch:
+            target.tap(position={'x': 20, 'y': 35})
+        else:
+            target.click()
         page.wait_for_timeout(400)
         if '变色' in label:
             # 黑牌：必须选一个颜色，否则服务端整手拒收
@@ -507,7 +546,7 @@ def main():
             headless=True,
         )
         ctx_args = {'viewport': {'width': 390, 'height': 844}}
-        pa = browser.new_context(**ctx_args).new_page()
+        pa = browser.new_context(**ctx_args, is_mobile=True, has_touch=True).new_page()
         pb = browser.new_context(**ctx_args).new_page()
         pc = browser.new_context(**ctx_args).new_page()
         for pg in (pa, pb, pc):
@@ -561,8 +600,18 @@ def main():
             '不是 B 的回合，B 的按钮应置灰'
         ok('座位 0 先手；非本回合玩家的按钮置灰（不靠隐藏，靠禁用态）')
 
+        arrow = pa.get_by_test_id('u-direction-arrow')
+        expect(arrow).to_have_attribute('aria-label', f'出牌方向从 我 指向 {UB}')
+        expect(pa.get_by_text(f'下家 {UB}', exact=True)).to_be_visible()
+        head = pa.get_by_test_id('u-direction-head').bounding_box()
+        target = pa.get_by_test_id('u-seat-1').bounding_box()
+        assert abs(head['x'] + head['width'] - target['x'] - target['width'] / 2) < 4
+        ok('开局箭头从座位 0 指向实际下家座位 1')
+
+        check_hand_effects(pb, pa)
+
         # A 走一手
-        act = take_turn(pa)
+        act = take_turn(pa, touch=True)
         ok(f'A 走一手（{act}）')
 
         # 回合应当交给下一位：B 的按钮变可点
@@ -571,8 +620,9 @@ def main():
 
         # 牌桌上的状态：颜色、方向、剩余牌堆都渲染出来了
         body_a = pa.locator('body').inner_text()
-        assert '当前颜色' in body_a and '顺时针' in body_a, \
+        assert '当前颜色' in body_a and '顺时针' not in body_a and '逆时针' not in body_a, \
             f'牌桌状态没渲染：{body_a[:200]}'
+        expect(arrow).to_be_visible()
         assert re.search(r'剩 \d+', body_a), '抽牌堆剩余数没显示'
         ok('牌桌状态可见（当前颜色/方向/剩余牌堆）')
 
@@ -589,6 +639,7 @@ def main():
         assert '本局结束' not in pa.locator('body').inner_text(), \
             'B 认输不该终结整局（三人局只出局一人）'
         assert '已出局' in pa.locator('body').inner_text(), 'A 应该看得到 B 已出局'
+        expect(arrow).to_have_attribute('aria-label', f'出牌方向从 {UC} 指向 我')
         ok('B 认输只出局，A/C 的牌局继续')
 
         # B 点返回房间：不该被弹回对局页（出局者仍留在房间名单里）
@@ -605,6 +656,7 @@ def main():
         pa.get_by_text('确认认输', exact=True).wait_for(timeout=5000)
         pa.get_by_text('确认认输', exact=True).click()
         pc.locator('[data-testid="u-result-back"]').wait_for(timeout=10000)
+        expect(pc.get_by_test_id('u-direction-arrow')).to_be_hidden()
         settle = pc.locator('body').inner_text()
         assert '率先出完手牌获胜' in settle or '获胜' in settle, \
             f'结算文案不对：{settle[:200]}'
