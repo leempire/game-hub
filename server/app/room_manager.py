@@ -311,6 +311,19 @@ def _normalize_restored_rules(room: dict) -> None:
         gs["rules"] = uno_rules.normalize(gs["rules"])
 
 
+def _restore_spider(room: dict) -> None:
+    room["max_players"] = 4
+    legacy = room.get("game_state")
+    if room["status"] != "playing" or not legacy or "boards" in legacy:
+        return
+    departed = legacy.pop("departed", [])
+    boards = {p["id"]: deepcopy(legacy) for p in room["players"]}
+    for pid in departed:
+        if pid in boards:
+            spider.apply_action(boards[pid], "end")
+    room["game_state"] = {"boards": boards, "finished": False}
+
+
 def restore_rooms() -> int:
     """热重启：从磁盘恢复全部房间。startup 时 persistence.init() 后调用。
 
@@ -334,7 +347,7 @@ def restore_rooms() -> int:
             continue
         room.pop("rematch_votes", None)  # 旧数据兼容：rematch 已删除
         if room["game"] == "spider":
-            room["max_players"] = 4  # 旧个人存档保留牌序，转为普通房间。
+            _restore_spider(room)
         _normalize_restored_rules(room)
         for p in room.get("players", []):
             if p.get("is_bot"):
@@ -950,63 +963,54 @@ def _start_game_engine(code: str, user_id: int, *, prepared_spider: dict | None 
 
 
 def _start_spider(room: dict, prepared: dict | None = None) -> dict:
-    revision = (room.get("game_state") or {}).get("revision", -1) + 1
-    room["game_state"] = prepared if prepared is not None else spider.create_game(num_players=len(room["players"]))
-    room["game_state"]["revision"] = revision
-    room["game_state"]["departed"] = []
-    room.update(status="playing", game_started_at=_now_iso(), empty_since=None)
+    previous = room.get("game_state") or {}
+    # 续开版本必须跳过上一局所有玩家的版本，迟到的旧操作才能被拒绝。
+    last_revision = max((board["revision"] for board in previous.get("boards", {}).values()),
+                        default=previous.get("revision", -1))
+    initial = prepared if prepared is not None else spider.create_game()
+    initial["revision"] = last_revision + 1
+    gs = {"boards": {p["id"]: deepcopy(initial) for p in room["players"]}, "finished": False}
+    room.update(status="playing", game_state=gs, game_started_at=_now_iso(), empty_since=None)
+    return gs
+
+
+def _settle_spider(room: dict) -> bool:
+    gs = room["game_state"]
+    if all(board["finished"] for board in gs["boards"].values()):
+        gs["finished"] = True
+        _set_game_over(room, "end", "all_finished")
+        return True
     _touch_activity(room)
-    return room["game_state"]
+    return False
 
 
 def spider_action(code: str, user_id: int, data: dict) -> dict:
     room = get_room(code)
     if not room or room["game"] != "spider" or not user_in_game(room, user_id):
         return {"error": "你不在本局蜘蛛纸牌中，请返回房间"}
-    gs = room.get("game_state")
-    if not gs:
-        return {"error": "牌局尚未开始"}
-    if type(data.get("revision")) is not int or data["revision"] != gs["revision"]:
+    board = room["game_state"]["boards"][user_id]
+    if type(data.get("revision")) is not int or data["revision"] != board["revision"]:
         return {"error": "牌局已更新，请按当前牌面操作"}
     action = data.get("action")
-    if action == "end":
-        if room["host_id"] != user_id:
-            return {"error": "只有房主可以结束全队的牌局"}
-        gs["finished"] = True
-        gs["revision"] += 1
-        _set_game_over(room, "end", "abandoned")
-    elif action == "new":
+    if action == "new":
         return {"error": "请返回房间，由房主开始新牌局"}
-    else:
-        if room["status"] != "playing":
-            return {"error": "本局已结束，请开始新牌局"}
-        error = spider.apply_action(gs, action, data.get("source"),
-                                    data.get("index"), data.get("target"))
-        if error:
-            return {"error": error}
-        if gs["finished"]:
-            _set_game_over(room, "cooperative", "completed")
-        else:
-            _touch_activity(room)
-    return {"game": spider.game_to_sync(room["game_state"])}
+    completed = board["completed"]
+    error = spider.apply_action(board, action, data.get("source"), data.get("index"), data.get("target"))
+    if error:
+        return {"error": error}
+    game_over = _settle_spider(room)
+    return {"game": spider.game_to_sync(board), "game_over": game_over,
+            "progress_changed": board["finished"] or board["completed"] != completed}
 
 
 def _leave_spider(room: dict, user_id: int) -> tuple[str, dict]:
-    gs = room["game_state"]
-    departed = gs.setdefault("departed", [])
-    if user_id not in departed and any(p["id"] == user_id for p in room["players"]):
-        departed.append(user_id)
-        gs["revision"] += 1
-    remaining = [p for p in room["players"] if p["id"] not in departed]
-    if not remaining:
-        gs["finished"] = True
-        _set_game_over(room, "end", "abandoned")
-        return "game_over", room
-    if room["host_id"] in departed:
-        room["host_id"] = remaining[0]["id"]
-    _touch_activity(room)
-    _maybe_destroy_or_mark(room)
-    return "removed", room
+    boards = room["game_state"]["boards"]
+    board = boards[user_id]
+    if not board["finished"]:
+        spider.apply_action(board, "end")
+    if room["host_id"] == user_id:
+        room["host_id"] = next((pid for pid, other in boards.items() if not other["finished"]), user_id)
+    return ("game_over" if _settle_spider(room) else "removed"), room
 
 
 def _start_minesweeper(room: dict) -> dict:
@@ -2020,7 +2024,8 @@ def user_in_game(room: dict, user_id: int) -> bool:
     gs = room.get("game_state") or {}
     game = room["game"]
     if game == "spider":
-        return user_id not in gs.get("departed", [])
+        board = gs.get("boards", {}).get(user_id)
+        return board is not None and not board["finished"]
     if game == "minesweeper":
         seat = _get_player_seat(room, user_id)
         return bool(gs.get("players", {}).get(seat, {}).get("alive", True))
@@ -3244,7 +3249,7 @@ def handle_player_disconnect(code: str, user_id: int, loop: asyncio.AbstractEven
     if room["status"] == "waiting":
         _maybe_destroy_or_mark(room)
     elif room["status"] == "playing" and room["game"] == "spider":
-        # 合作接龙允许思考、切后台后续玩；只回收全员离线超过公共 TTL 的空房。
+        # 蜘蛛纸牌允许切后台后续玩；只回收全员离线超过公共 TTL 的空房。
         _maybe_destroy_or_mark(room)
     elif room["status"] == "playing":
         _start_dc_timer(code, user_id, loop)
@@ -3511,8 +3516,10 @@ def get_user_color(room: dict, user_id: int) -> str:
 def room_to_dict(room: dict) -> dict:
     """Convert room to API-serializable dict (without password/internal state)."""
     players = []
+    spider_boards = ((room.get("game_state") or {}).get("boards", {})
+                     if room["game"] == "spider" and room["status"] == "playing" else {})
     for p in room["players"]:
-        players.append({
+        player = {
             "id": p["id"],
             "username": p["username"],
             "nickname": p["nickname"],
@@ -3525,7 +3532,12 @@ def room_to_dict(room: dict) -> dict:
             # 断线重连剩余秒数（仅游戏中且已断线时有值）——客户端据此倒计时，
             # 不要在界面上写死 120：测试会把超时改成 5 秒，写死就对不上了。
             "reconnect_left": reconnect_seconds_left(room, p),
-        })
+        }
+        if p["id"] in spider_boards:
+            board = spider_boards[p["id"]]
+            player["spider_progress"] = {"completed": board["completed"],
+                                         "total_runs": board.get("total_runs", 8), "reason": board["reason"]}
+        players.append(player)
     result = {
         "code": room["code"],
         "name": room["name"],

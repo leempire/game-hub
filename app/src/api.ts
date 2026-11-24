@@ -1,5 +1,5 @@
 import { API_BASE } from './config';
-import type { SpiderSnapshot } from './spider';
+import type { SpiderProgress, SpiderSnapshot } from './spider';
 import type { UnoSeries } from './uno';
 import { parseError } from './utils';
 
@@ -132,6 +132,7 @@ export interface RoomPlayer {
   ai_difficulty?: string | null;
   /** 断线重连剩余秒数；在线或非游戏中为 null。客户端据此倒计时。 */
   reconnect_left?: number | null;
+  spider_progress?: SpiderProgress;
 }
 
 /**

@@ -1,6 +1,8 @@
-"""蜘蛛纸牌普通房间、共享牌桌、冲突、续玩与全队战绩的真实 WS 回归。"""
+"""蜘蛛纸牌独立牌桌、断线续玩与个人战绩的真实 WS 回归。"""
+import asyncio
 from contextlib import ExitStack
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 from starlette.websockets import WebSocketDisconnect
@@ -10,7 +12,7 @@ from app.game import spider
 
 
 @pytest.fixture
-def coop_client(ws_client, monkeypatch, tmp_path):
+def spider_client(ws_client, monkeypatch, tmp_path):
     monkeypatch.setattr(database, "_db_path", str(tmp_path / "spider.db"))
     database.init_db(database._db_path)
     monkeypatch.setattr(security, "_jwt_secret", "spider-protocol-test-secret-for-isolated-db")
@@ -33,10 +35,10 @@ def register(client, name):
     return data["token"], {"Authorization": f"Bearer {data['token']}"}, data["user"]["id"]
 
 
-def recv(ws, kind):
+def recv(ws, kind, matches=lambda _: True):
     for _ in range(20):
         message = ws.receive_json()
-        if message["type"] == kind:
+        if message["type"] == kind and matches(message):
             return message
     raise AssertionError(f"Missing message: {kind}")
 
@@ -57,16 +59,26 @@ def pair(client, stack):
 def start_pair(sockets):
     sockets[1].send_json({"type": "ready"})
     for ws in sockets:
-        recv(ws, "lobby")
+        recv(ws, "lobby", lambda msg: msg["room"]["players"][1]["ready"])
     sockets[0].send_json({"type": "start"})
     views = [recv(ws, "game_start")["game"] for ws in sockets]
     assert views[0] == views[1]
-    assert len(views[0]["columns"]) == 15 and views[0]["total_runs"] == 12
     return views[0]
 
 
-def test_shared_board_conflicts_privacy_and_resume(coop_client):
-    client = coop_client
+def pending_messages(ws):
+    ws.send_json({"type": "ping"})
+    messages = []
+    for _ in range(20):
+        message = ws.receive_json()
+        if message["type"] == "pong":
+            return messages
+        messages.append(message)
+    raise AssertionError("Missing pong")
+
+
+def test_independent_actions_privacy_and_resume(spider_client):
+    client = spider_client
     with ExitStack() as stack:
         room, host, partner, sockets = pair(client, stack)
         code = room["code"]
@@ -81,89 +93,155 @@ def test_shared_board_conflicts_privacy_and_resume(coop_client):
         sockets[0].send_json({"type": "start"})
         recv(sockets[0], "error")
         view = start_pair(sockets)
-        assert sum(v is None for c in view["columns"] for v in c) == 66
         assert not any(key in view for key in ("stock", "history", "face_up"))
         move = view["legal_moves"][0]
-        for ws in sockets:
-            ws.send_json({"type": "spider_action", "action": "move", "revision": 0, **move})
-        first = recv(sockets[0], "spider_state")["game"]
-        second = recv(sockets[1], "spider_state")["game"]
-        assert first == second and first["revision"] == 1 and first["move_count"] == 1
-        assert "更新" in recv(sockets[1], "error")["message"]
-        assert recv(sockets[1], "spider_state")["game"] == first
-        sockets[1].send_json({"type": "spider_action", "action": "undo", "revision": 1})
-        restored = [recv(ws, "spider_state")["game"] for ws in sockets]
-        assert restored[0] == restored[1] and restored[0]["columns"] == view["columns"]
-        sockets[1].send_json({"type": "spider_action", "action": "deal", "revision": 2})
-        dealt = [recv(ws, "spider_state")["game"] for ws in sockets]
-        assert dealt[0] == dealt[1] and dealt[0]["stock_count"] == 60
-        saved = deepcopy(rm.get_room(code)["game_state"])
-        with client.websocket_connect(f"/ws/room/{code}?token={host[0]}") as reconnected:
-            assert recv(reconnected, "sync")["game"] == dealt[0]
-        assert rm.get_room(code)["game_state"] == saved
+        sockets[0].send_json({"type": "spider_action", "action": "move", "revision": 0, **move})
+        moved = recv(sockets[0], "spider_state")["game"]
+        assert moved["revision"] == 1 and moved["columns"] != view["columns"]
+        assert not any("game" in msg for msg in pending_messages(sockets[1]))
+        assert len(view["columns"]) == 10 and view["total_runs"] == 8
+        assert sum(v is None for c in view["columns"] for v in c) == 44
+
+        sockets[1].send_json({"type": "spider_action", "action": "deal", "revision": 0})
+        dealt = recv(sockets[1], "spider_state")["game"]
+        assert dealt["revision"] == 1 and dealt["stock_count"] == 40
+        assert [col[:-1] for col in dealt["columns"]] == view["columns"]
+        assert not any("game" in msg for msg in pending_messages(sockets[0]))
+
+        sockets[0].send_json({"type": "spider_action", "action": "deal", "revision": 0})
+        assert "更新" in recv(sockets[0], "error")["message"]
+        assert recv(sockets[0], "spider_state")["game"] == moved
+        sockets[0].send_json({"type": "spider_action", "action": "undo", "revision": 1})
+        restored = recv(sockets[0], "spider_state")["game"]
+        assert restored["revision"] == 2 and restored["columns"] == view["columns"]
+        with client.websocket_connect(f"/ws/room/{code}?token={partner[0]}") as reconnected:
+            assert recv(reconnected, "sync")["game"] == dealt
         assert client.get(f"/api/rooms/{code}", headers=partner[1]).json()["in_game"]
 
 
-def test_cooperative_win_history_and_lobby_restart(coop_client):
-    client = coop_client
+def test_personal_win_history_and_lobby_restart(spider_client):
+    client = spider_client
     with ExitStack() as stack:
         room, host, partner, sockets = pair(client, stack)
         code = room["code"]
-        start_pair(sockets)
-        gs = rm.get_room(code)["game_state"]
-        gs.update(columns=[list(range(13, 1, -1)), [1]] + [[] for _ in range(13)],
-                  face_up=[0] * 15, stock=[], completed=11)
-        sockets[1].send_json({"type": "spider_action", "action": "move", "revision": 0,
+        initial = start_pair(sockets)
+        board = rm.get_room(code)["game_state"]["boards"][host[2]]
+        board.update(columns=[list(range(13, 1, -1)), [1]] + [[] for _ in range(8)],
+                     face_up=[0] * 10, stock=[], completed=7)
+        sockets[0].send_json({"type": "spider_action", "action": "move", "revision": 0,
                               "source": 1, "index": 0, "target": 0})
-        views = [recv(ws, "spider_state")["game"] for ws in sockets]
-        assert views[0] == views[1] and views[0]["completed"] == 12 and views[0]["finished"]
-        for ws in sockets:
-            assert recv(ws, "game_over")["reason"] == "completed"
-        for player in (host, partner):
-            records = database.get_user_history(player[2])["items"]
-            assert len(records) == 1 and records[0]["snapshot"]["total_runs"] == 12
-            assert [p["result"] for p in records[0]["results"]] == ["win", "win"]
-        sockets[0].send_json({"type": "start"})
-        recv(sockets[0], "error")
-        next_view = start_pair(sockets)
-        assert next_view["revision"] == 2
-        before = deepcopy(rm.get_room(code)["game_state"])
-        sockets[1].send_json({"type": "spider_action", "action": "end", "revision": 2})
-        assert "房主" in recv(sockets[1], "error")["message"]
-        recv(sockets[1], "spider_state")
-        assert rm.get_room(code)["game_state"] == before
-        sockets[0].send_json({"type": "spider_action", "action": "end", "revision": 2})
-        for ws in sockets:
-            assert recv(ws, "spider_state")["game"]["finished"]
-            assert recv(ws, "game_over")["reason"] == "abandoned"
-        assert rm.get_room(code)["status"] == "waiting"
+        won = recv(sockets[0], "spider_state")["game"]
+        assert won["completed"] == 8 and won["finished"]
+        messages = pending_messages(sockets[1])
+        assert not any("game" in msg or msg["type"] == "game_over" for msg in messages)
+        progress = [msg["room"]["players"][0].get("spider_progress") for msg in messages if msg["type"] == "lobby"]
+        assert {"completed": 8, "total_runs": 8, "reason": "completed"} in progress
+        assert database.get_user_history(host[2])["items"] == []
+        with client.websocket_connect(f"/ws/room/{code}?token={host[0]}") as reconnected:
+            sync = recv(reconnected, "sync")
+            assert not sync["in_game"] and sync["game"] == won
+
+        sockets[1].send_json({"type": "spider_action", "action": "deal", "revision": 0})
+        deal = recv(sockets[1], "spider_state")["game"]
+        assert deal["stock_count"] == 40
+        sockets[1].send_json({"type": "spider_action", "action": "end", "revision": 1})
+        ended = recv(sockets[1], "spider_state")["game"]
+        assert ended["finished"] and ended["reason"] == "abandoned"
+        assert recv(sockets[1], "game_over")["reason"] == "all_finished"
+        for player, own_view in ((host, won), (partner, ended)):
+            records = client.get("/api/history/mine", headers=player[1]).json()["items"]
+            assert len(records) == 1
+            record = records[0]
+            assert record["snapshot"]["columns"] == own_view["columns"]
+            assert "boards" not in record["snapshot"]
+            assert [p["result"] for p in record["results"]] == ["win", "end"]
+            share = client.post(f"/api/history/{record['id']}/share", headers=player[1]).json()
+            public = client.get(f"/api/history/shared/{share['token']}").json()
+            assert public["snapshot"]["columns"] == own_view["columns"]
+            assert "boards" not in public["snapshot"]
+
+        with client.websocket_connect(f"/ws/room/{code}?token={host[0]}") as reconnected:
+            assert recv(reconnected, "sync")["game"] is None
+            sockets[0] = reconnected
+            sockets[0].send_json({"type": "start"})
+            recv(sockets[0], "error")
+            next_view = start_pair(sockets)
+            assert next_view["revision"] == 3 and next_view["columns"] == initial["columns"]
+            sockets[1].send_json({"type": "spider_action", "action": "end", "revision": 2})
+            assert "更新" in recv(sockets[1], "error")["message"]
+            assert recv(sockets[1], "spider_state")["game"] == next_view
 
 
-def test_leaving_host_transfers_room_and_partner_continues(coop_client):
+def test_leaving_host_transfers_room_and_partner_continues(spider_client):
     with ExitStack() as stack:
-        room, host, partner, sockets = pair(coop_client, stack)
-        start_pair(sockets)
-        assert coop_client.post(f"/api/rooms/{room['code']}/leave", headers=host[1]).status_code == 200
-        view = recv(sockets[1], "spider_state")["game"]
-        assert host[2] in view["departed"] and not view["finished"]
-        assert recv(sockets[1], "lobby")["room"]["host_id"] == partner[2]
+        room, host, partner, sockets = pair(spider_client, stack)
+        view = start_pair(sockets)
+        assert spider_client.post(f"/api/rooms/{room['code']}/leave", headers=host[1]).status_code == 200
+        lobby = recv(sockets[1], "lobby", lambda msg: msg["room"]["host_id"] == partner[2])["room"]
+        assert lobby["players"][0]["spider_progress"]["reason"] == "abandoned"
         sockets[1].send_json({"type": "spider_action", "action": "deal", "revision": view["revision"]})
-        assert recv(sockets[1], "spider_state")["game"]["stock_count"] == 60
-        assert not coop_client.get(f"/api/rooms/{room['code']}", headers=host[1]).json()["in_game"]
+        assert recv(sockets[1], "spider_state")["game"]["stock_count"] == 40
+        assert not spider_client.get(f"/api/rooms/{room['code']}", headers=host[1]).json()["in_game"]
+        with spider_client.websocket_connect(f"/ws/room/{room['code']}?token={host[0]}") as lobby_ws:
+            assert not recv(lobby_ws, "sync")["in_game"]
+            sockets[1].send_json({"type": "leave"})
+            assert recv(lobby_ws, "game_over")["reason"] == "all_finished"
+            assert recv(lobby_ws, "lobby")["room"]["status"] == "waiting"
+
+
+def test_slow_spider_lobby_cannot_overwrite_round_end(spider_client):
+    host = register(spider_client, "spider_slow_host")
+    peer = register(spider_client, "spider_slow_peer")
+    room = spider_client.post("/api/rooms", json={"game": "spider"}, headers=host[1]).json()
+    code = room["code"]
+    spider_client.post(f"/api/rooms/{code}/join", json={}, headers=peer[1]).raise_for_status()
+    current = rm.get_room(code)
+    current["players"][1]["ready"] = True
+    assert rm.start_game(code, host[2]) is not None
+
+    async def check_broadcasts():
+        blocked, unblock = asyncio.Event(), asyncio.Event()
+        received = []
+
+        async def slow_send(message):
+            blocked.set()
+            await unblock.wait()
+
+        async def send(message):
+            received.append(message["room"]["status"])
+
+        connections = {host[2]: SimpleNamespace(send_json=slow_send),
+                       peer[2]: SimpleNamespace(send_json=send)}
+        ws_module._connections[code] = connections
+        previous_lobby = {"type": "lobby", "room": rm.room_to_dict(current)}
+        delayed = asyncio.create_task(ws_module._broadcast(code, previous_lobby))
+        try:
+            await asyncio.wait_for(blocked.wait(), timeout=2)
+            connections.pop(host[2])  # 旧连接仍在发送，终局走其余连接
+            for account in (host, peer):
+                result = rm.spider_action(code, account[2], {"action": "end", "revision": 0})
+                assert result["game"]["finished"]
+            await ws_module._broadcast(code, {"type": "lobby", "room": rm.room_to_dict(current)})
+        finally:
+            unblock.set()
+            await delayed
+        assert received and set(received) == {"waiting"}
+
+    spider_client.portal.call(check_broadcasts)
 
 
 @pytest.mark.parametrize("count", [1, 2])
-def test_inactive_spider_survives_disconnect_and_resumes(coop_client, count):
-    """思考或切后台不能退出合作牌局；无人在线的旧房仍按公共 TTL 回收。"""
+def test_inactive_spider_survives_disconnect_and_resumes(spider_client, count):
+    """思考或切后台可以续玩，无人在线的旧房仍按公共 TTL 回收。"""
     import time
 
-    players = [register(coop_client, f"spider_idle_{i}") for i in range(count)]
-    room = coop_client.post("/api/rooms", json={"game": "spider"}, headers=players[0][1]).json()
+    players = [register(spider_client, f"spider_idle_{i}") for i in range(count)]
+    room = spider_client.post("/api/rooms", json={"game": "spider"}, headers=players[0][1]).json()
     code = room["code"]
     for player in players[1:]:
-        coop_client.post(f"/api/rooms/{code}/join", json={}, headers=player[1])
+        spider_client.post(f"/api/rooms/{code}/join", json={}, headers=player[1])
     with ExitStack() as stack:
-        sockets = [stack.enter_context(coop_client.websocket_connect(f"/ws/room/{code}?token={p[0]}"))
+        sockets = [stack.enter_context(spider_client.websocket_connect(f"/ws/room/{code}?token={p[0]}"))
                    for p in players]
         for ws in sockets:
             recv(ws, "sync")
@@ -173,8 +251,7 @@ def test_inactive_spider_survives_disconnect_and_resumes(coop_client, count):
         for ws in sockets:
             recv(ws, "game_start")
         sockets[0].send_json({"type": "spider_action", "action": "deal", "revision": 0})
-        for ws in sockets:
-            recv(ws, "spider_state")
+        dealt = recv(sockets[0], "spider_state")["game"]
         saved = deepcopy(rm.get_room(code)["game_state"])
         rm.get_room(code)["last_activity"] = time.time() - rm.ROOM_IDLE_TTL - 10
         assert code not in rm.sweep_idle_rooms()
@@ -188,33 +265,35 @@ def test_inactive_spider_survives_disconnect_and_resumes(coop_client, count):
     assert current["empty_since"] is not None
     assert not any((code, player[2]) in rm._dc_tasks for player in players)
     assert all(p["reconnect_left"] is None for p in rm.room_to_dict(current)["players"])
-    with coop_client.websocket_connect(f"/ws/room/{code}?token={players[0][0]}") as ws:
-        assert recv(ws, "sync")["game"] == spider.game_to_sync(saved)
+    with spider_client.websocket_connect(f"/ws/room/{code}?token={players[0][0]}") as ws:
+        assert recv(ws, "sync")["game"] == dealt
         assert current["empty_since"] is None
-        ws.send_json({"type": "spider_action", "action": "undo", "revision": saved["revision"]})
+        ws.send_json({"type": "spider_action", "action": "undo", "revision": dealt["revision"]})
         assert recv(ws, "spider_state")["game"]["move_count"] == 0
     current["empty_since"] = time.time() - rm.ROOM_IDLE_TTL - 10
     assert code in rm.sweep_idle_rooms()
 
 
-@pytest.mark.parametrize("count,total,columns", [(1, 8, 10), (3, 16, 20), (4, 16, 20)])
-def test_start_broadcast_scales_with_actual_members(coop_client, count, total, columns):
+@pytest.mark.parametrize("count", [1, 3, 4])
+def test_start_uses_standard_board_for_every_member(spider_client, count):
     with ExitStack() as stack:
-        players = [register(coop_client, f"spider_scale_{i}") for i in range(count)]
-        room = coop_client.post("/api/rooms", json={"game": "spider"}, headers=players[0][1]).json()
+        players = [register(spider_client, f"spider_scale_{i}") for i in range(count)]
+        room = spider_client.post("/api/rooms", json={"game": "spider"}, headers=players[0][1]).json()
         code = room["code"]
         for player in players[1:]:
-            assert coop_client.post(f"/api/rooms/{code}/join", json={}, headers=player[1]).status_code == 200
-        sockets = [stack.enter_context(coop_client.websocket_connect(f"/ws/room/{code}?token={p[0]}")) for p in players]
+            assert spider_client.post(f"/api/rooms/{code}/join", json={}, headers=player[1]).status_code == 200
+        sockets = [stack.enter_context(spider_client.websocket_connect(f"/ws/room/{code}?token={p[0]}")) for p in players]
         for ws in sockets:
             recv(ws, "sync")
         for ws in sockets[1:]:
             ws.send_json({"type": "ready"})
+        if count > 1:
+            recv(sockets[0], "lobby", lambda msg: all(p["ready"] for p in msg["room"]["players"][1:]))
         sockets[0].send_json({"type": "start"})
         views = [recv(ws, "game_start")["game"] for ws in sockets]
         assert all(view == views[0] for view in views)
-        assert views[0]["total_runs"] == total and len(views[0]["columns"]) == columns
+        assert views[0]["total_runs"] == 8 and len(views[0]["columns"]) == 10
         if count == 1:
-            assert coop_client.post(f"/api/rooms/{code}/leave", headers=players[0][1]).status_code == 200
+            assert spider_client.post(f"/api/rooms/{code}/leave", headers=players[0][1]).status_code == 200
             saved = rm.get_room(code)
             assert saved and saved["status"] == "waiting" and len(saved["players"]) == 1

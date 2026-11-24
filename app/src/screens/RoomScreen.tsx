@@ -15,6 +15,7 @@ import { RoomSettingsRow, RoomSettingsSheet } from '../roomSettings';
 import { GameHelpButton } from '../help';
 import GameIntro from '../GameIntro';
 import { createPractice } from '../social';
+import { spiderProgressLabel } from '../spider';
 import type { GameKey } from '../games';
 // 游戏名的唯一来源（这一行以前是一串嵌套三元，与主页卡片各写一遍）
 import { gameTitle } from '../games';
@@ -249,7 +250,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
     if (!token) return;
     try {
       await leaveRoom(token, code);
-      socketRef.current?.leave();
+      if (room?.game !== 'spider') socketRef.current?.leave();
       socketRef.current?.close();
       onLeave();
     } catch (err) {
@@ -298,7 +299,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   // 掉线只在游戏中存在：等待房没有「掉线」概念（人不在房里就没有掉线一说）
   const showOffline = room.status === 'playing';
   const canAddBot = isHost && !isFull && isLobbyStatus && supportsBots;
-  // 人数要求：扫雷 1 人即可开（单机）；2048 / 俄罗斯方块 1-4 人各自独立盘
+  // 人数要求：扫雷 1 人即可开（单机）；2048 / 俄罗斯方块 / 蜘蛛纸牌 1-4 人各自独立盘
   // （1 人即可开）；飞行棋 / UNO 2-4 人、深空休眠 2-6 人（≥2 可开，对齐 max_players）；其余须满员
   const needMorePlayers = isMine || is2048 || isTetris || room.game === 'spider'
     ? false
@@ -358,11 +359,10 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           <Text style={styles.finishedBannerText}>每日挑战 · {room.challenge.date}（UTC） · 固定单人房规
             {room.challenge.first_reveal ? ' · 首次请翻开正中央格子' : ''}</Text>
         </View>}
-        {/* 上一局已结束提示：按已打完的局数判断，不再依赖第三种房间状态 */}
-        {(room.round ?? 0) > 0 && (
+        {(!isLobbyStatus || (room.round ?? 0) > 0) && (
           <View style={styles.finishedBanner}>
-            <Ionicons name="checkmark-circle-outline" size={16} color={colors.textSecondary} />
-            <Text style={styles.finishedBannerText}> 上一局已结束，可继续开始新一局</Text>
+            <Ionicons name={isLobbyStatus ? 'checkmark-circle-outline' : 'time-outline'} size={16} color={colors.textSecondary} />
+            <Text style={styles.finishedBannerText}>{isLobbyStatus ? '上一局已结束，可继续开始新一局' : '本局进行中'}</Text>
           </View>
         )}
 
@@ -414,8 +414,9 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
               </View>
               <View style={styles.playerStatus}>
                 {showOffline && !p.connected && <Text style={[styles.statusPill, styles.disconnectedPill]}>断线</Text>}
-                {!p.is_bot && p.ready && <Text style={[styles.statusPill, styles.readyPill]}>已准备</Text>}
-                {!p.is_bot && !p.ready && !p.is_host && <Text style={[styles.statusPill, styles.unreadyPill]}>未准备</Text>}
+                {p.spider_progress && <Text style={[styles.statusPill, styles.progressPill]}>{spiderProgressLabel(p.spider_progress)}</Text>}
+                {isLobbyStatus && !p.is_bot && p.ready && <Text style={[styles.statusPill, styles.readyPill]}>已准备</Text>}
+                {isLobbyStatus && !p.is_bot && !p.ready && !p.is_host && <Text style={[styles.statusPill, styles.unreadyPill]}>未准备</Text>}
               </View>
             </View>
             {isLobbyStatus && p.id !== user?.id && <View style={styles.playerBadges}>
@@ -447,7 +448,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
 
         {/* Actions */}
         <View style={styles.actions}>
-          {me && !isHost && (
+          {isLobbyStatus && me && !isHost && (
             isReady ? (
               <TouchableOpacity style={[styles.actionBtn, styles.unreadyBtn]} onPress={handleUnready}>
                 <Text style={styles.unreadyBtnText}>取消准备</Text>
@@ -458,7 +459,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
               </TouchableOpacity>
             )
           )}
-          {isHost && (
+          {isLobbyStatus && isHost && (
             <TouchableOpacity
               style={[styles.actionBtn, styles.startBtn, !canStart && styles.disabledBtn]}
               onPress={handleStart}
@@ -730,6 +731,7 @@ const styles = StyleSheet.create({
   },
   readyPill: { backgroundColor: colors.success },
   unreadyPill: { backgroundColor: colors.textMuted },
+  progressPill: { backgroundColor: colors.surfaceMuted, color: colors.text },
   hostPill: { backgroundColor: colors.warning },
   disconnectedPill: { backgroundColor: colors.danger },
   actions: { marginTop: spacing.lg, gap: spacing.sm },

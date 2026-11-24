@@ -3,7 +3,7 @@
 import json
 import secrets
 
-from app.database import get_conn
+from app.database import get_conn, record_snapshot
 
 
 # Public final-state fields only. Internal histories, RNG, credentials and live
@@ -97,13 +97,13 @@ def public_share(token: str) -> dict | None:
     conn = get_conn()
     try:
         _ensure_schema(conn)
-        row = conn.execute('''SELECT r.* FROM record_shares s
+        row = conn.execute('''SELECT r.*, s.owner_id AS share_owner_id FROM record_shares s
             JOIN game_records r ON r.id = s.record_id
             WHERE s.token=? AND s.revoked=0 AND r.practice=0''', (token,)).fetchone()
         conn.commit()
         if row is None:
             return None
-        snapshot = json.loads(row['snapshot_json'])
+        snapshot = record_snapshot(row['snapshot_json'], row['share_owner_id'])
         snapshot = _public_values({key: value for key, value in snapshot.items() if key in _SNAPSHOT_FIELDS})
         return {
             'id': row['id'], 'game': row['game'], 'room_code': '',

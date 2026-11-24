@@ -253,20 +253,28 @@ def get_user_history(user_id: int, page: int = 1, size: int = 20) -> dict:
                ORDER BY r.id DESC LIMIT ? OFFSET ?""",
             (user_id, size, (page - 1) * size),
         ).fetchall()
-        return {"items": [_row_to_record(row) for row in rows], "total": total,
+        return {"items": [_row_to_record(row, user_id) for row in rows], "total": total,
                 "page": page, "size": size}
     finally:
         conn.close()
 
 
-def _row_to_record(row: sqlite3.Row) -> dict:
+def record_snapshot(snapshot_json: str, user_id: int) -> dict:
+    """Project private final boards to the history viewer or the share owner."""
+    snapshot = json.loads(snapshot_json)
+    if isinstance(snapshot, dict) and snapshot.get("game") == "spider" and "boards" in snapshot:
+        return snapshot["boards"][str(user_id)]
+    return snapshot
+
+
+def _row_to_record(row: sqlite3.Row, user_id: int) -> dict:
     return {
         "id": row["id"],
         "game": row["game"],
         "room_code": row["room_code"],
         "players": json.loads(row["players_json"]),
         "results": json.loads(row["results_json"]),
-        "snapshot": json.loads(row["snapshot_json"]),
+        "snapshot": record_snapshot(row["snapshot_json"], user_id),
         "started_at": row["started_at"],
         "ended_at": row["ended_at"],
     }
@@ -388,12 +396,11 @@ def _build_players_record(room: dict) -> list[dict]:
 
 def _build_results_record(room: dict) -> list[dict]:
     """Build the per-player result list."""
-    if room["game"] == "spider":
-        won = room["game_state"].get("reason") == "completed"
-        departed = room["game_state"].get("departed", [])
-        return [{"username": p["username"], "result": "win" if won and p["id"] not in departed else "end"}
-                for p in room["players"]]
     gs = room.get("game_state") or {}
+    if room["game"] == "spider":
+        return [{"username": p["username"],
+                 "result": "win" if gs["boards"][p["id"]]["reason"] == "completed" else "end"}
+                for p in room["players"]]
     winner = gs.get("winner")
     reason = gs.get("reason")
     colors = gs.get("player_colors", {})
@@ -487,7 +494,7 @@ def _build_snapshot(room: dict) -> dict:
     game = room["game"]
     if game == "spider":
         from app.game.spider import snapshot
-        return snapshot(gs)
+        return {"game": game, "boards": {str(pid): snapshot(board) for pid, board in gs["boards"].items()}}
     if game == "uttt":
         from app.game.uttt import snapshot
         return snapshot(gs)

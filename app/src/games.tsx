@@ -52,13 +52,11 @@ export interface GameEntry {
 export const GAME_CATEGORIES: Array<{ key: GameCategoryKey; name: string; blurb: string }> = [
   { key: 'board', name: '棋类对战', blurb: '两人轮流落子，一局定胜负' },
   { key: 'table', name: '多人桌游', blurb: '2-4 人围一桌，轮流出牌 / 掷骰' },
-  { key: 'solo', name: '各玩各的', blurb: '同盘同时开打，各自算分' },
+  { key: 'solo', name: '各玩各的', blurb: '同时开打，各自算成绩' },
   { key: 'coop', name: '合作', blurb: '一起扛同一局，输赢同担' },
 ];
 
 export const GAMES: GameEntry[] = [
-  { key: 'spider', title: '蜘蛛纸牌', short: '蜘蛛纸牌', desc: '一起整理黑桃顺牌，收齐所有 K 到 A',
-    badge: '1–4 人 · 合作', category: 'coop', ionicon: 'layers', Icon: SpiderIcon },
   { key: 'gomoku', title: '五子棋', short: '五子棋', desc: '经典对战，先连五子者胜',
     badge: '2 人 · 对战', category: 'board', ionicon: 'ellipse', Icon: GomokuIcon },
   { key: 'xiangqi', title: '中国象棋', short: '中国象棋', desc: '车马炮相仕帅，将死对方主帅',
@@ -88,6 +86,8 @@ export const GAMES: GameEntry[] = [
     badge: '1–4 人 · 竞速', category: 'solo', ionicon: 'cube', Icon: TetrisIcon },
   { key: 'minesweeper', title: '扫雷', short: '扫雷', desc: '同盘竞速排雷，比谁挖得多',
     badge: '1–4 人 · 竞速', category: 'solo', ionicon: 'warning-outline', Icon: MineIcon },
+  { key: 'spider', title: '蜘蛛纸牌', short: '蜘蛛纸牌', desc: '各自整理黑桃顺牌，收齐八组 K 到 A',
+    badge: '1–4 人 · 独立牌桌', category: 'solo', ionicon: 'layers', Icon: SpiderIcon },
 
   { key: 'stasis', title: '深空休眠', short: '深空休眠', desc: '实时合作守舱，打死静默体',
     badge: '2–6 人 · 合作', category: 'coop', ionicon: 'planet', Icon: StasisIcon },
