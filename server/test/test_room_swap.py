@@ -22,6 +22,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import room_manager as rm
+from app.game.dots import PLAYER1
 
 
 @pytest.fixture(autouse=True)
@@ -106,6 +107,42 @@ def _close(wss):
 
 
 class TestHumanSwap:
+    @pytest.mark.parametrize(("game", "first", "second"), [
+        ("gomoku", "black", "white"),
+        ("reversi", "black", "white"),
+        ("connect4", "black", "white"),
+        ("dots", "black", "white"),
+        ("uttt", "black", "white"),
+        ("xiangqi", "red", "black"),
+        ("luzhanqi", "red", "black"),
+        ("battleship", "blue", "red"),
+    ])
+    def test_first_turn_follows_swapped_seat(self, client, game, first, second):
+        wss, code, _, uids = _setup(client, game=game)
+        try:
+            wss[0].send_json({"type": "swap_request", "target_id": uids[1]})
+            _recv_type(wss[1], "swap_request")
+            _recv_type(wss[0], "swap_result")
+            wss[1].send_json({"type": "swap_respond", "from_id": uids[0], "accept": True})
+            assert _recv_type(wss[0], "swap_result")["accepted"] is True
+
+            wss[1].send_json({"type": "ready"})
+            for _ in range(4):
+                lobby = _recv_type(wss[0], "lobby")["room"]
+                if lobby["players"][0]["id"] == uids[1] and lobby["players"][0]["ready"]:
+                    break
+            else:
+                pytest.fail("1 号座位未准备")
+
+            wss[0].send_json({"type": "start"})
+            host_game = _recv_type(wss[0], "game_start")["game"]
+            guest_game = _recv_type(wss[1], "game_start")["game"]
+            assert host_game["your_color"] == second
+            assert guest_game["your_color"] == first
+            assert rm.get_room(code)["game_state"]["next"] == (PLAYER1 if game == "dots" else first)
+        finally:
+            _close(wss)
+
     def test_request_then_accept_swaps_seats(self, client):
         wss, code, _, uids = _setup(client)
         try:
