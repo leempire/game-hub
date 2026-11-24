@@ -505,9 +505,8 @@ def _build_snapshot(room: dict) -> dict:
     gs = room.get("game_state") or {}
     game = room["game"]
     if game == "abyss":
-        from app.game.abyss import snapshot
-        view = snapshot(gs)
-        return {"game": "abyss", **{key: view[key] for key in ("seconds", "level", "kills", "result", "players")}}
+        from app.game.abyss import record_summary
+        return record_summary(gs)
     if game == "spider":
         from app.game.spider import snapshot
         return snapshot(gs)

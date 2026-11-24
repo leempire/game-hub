@@ -2,7 +2,7 @@
   "expo": {
     "name": "GameHub",
     "slug": "gamehub",
-    "version": "1.25.1",
+    "version": "1.26.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.gamehub.app",
-      "versionCode": 43,
+      "versionCode": 45,
       "adaptiveIcon": {
         "backgroundColor": "#4338CA",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -40,7 +40,16 @@
             ]
           }
         }
-      ]
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      "expo-asset"
     ]
   }
 }

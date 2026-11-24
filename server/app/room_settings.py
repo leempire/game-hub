@@ -261,11 +261,7 @@ def _gomoku_settings():
 
 
 def _abyss_settings():
-    """深渊回声：对局时长与经验节奏。
-
-    武器/被动数值按《吸血鬼幸存者》固定，不跟着房规变；房规只调「一局多长」
-    与「升级门槛乘多少」，避免把数值对齐和节奏调校搅在一起。
-    """
+    """深渊回声：对局时长、经验节奏和地图大小。"""
     return [
         Setting(
             key="duration", label="对局时长", kind=KIND_CHOICE,
@@ -289,6 +285,16 @@ def _abyss_settings():
                  "blurb": "升级门槛降低 20%，更快成型。"},
                 {"value": "slow", "label": "慢速",
                  "blurb": "升级门槛提高 20%，更考验搭配与走位。"},
+            ),
+        ),
+        Setting(
+            key="map_size", label="地图大小", kind=KIND_CHOICE,
+            store="abyss_map_size", default="medium", in_summary=True,
+            choices=(
+                {"value": "small", "label": "小", "blurb": "1080 × 750，紧凑走位。"},
+                {"value": "medium", "label": "中", "blurb": "1440 × 1000，原版战场。"},
+                {"value": "large", "label": "大", "blurb": "2160 × 1500，留出更多走位空间。"},
+                {"value": "endless", "label": "无尽", "blurb": "地图没有边界，墙壁反弹不会触发，对局时长仍按房规。"},
             ),
         ),
     ]

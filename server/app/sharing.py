@@ -19,6 +19,8 @@ _SNAPSHOT_FIELDS = {
     'total_runs', 'deals', 'move_count', 'departed', 'map', 'clock_ms', 'entity',
     'rooms', 'result', 'difficulty', 'elapsed_ms', 'alive', 'finished',
 }
+_ABYSS_SUMMARY_FIELDS = {'game', 'seconds', 'map_size', 'level', 'kills', 'salvage', 'result', 'boss', 'boss_dead', 'players'}
+_ABYSS_DIVER_FIELDS = {'id', 'name', 'kills', 'hp', 'out', 'weapons', 'passives', 'xp_collected', 'rescues', 'damage_dealt'}
 _PLAYER_FIELDS = {'user_id', 'username', 'nickname', 'seat', 'color', 'is_bot', 'ai_difficulty'}
 _RESULT_FIELDS = {'username', 'result', 'rank', 'score', 'elapsed_ms', 'difficulty'}
 
@@ -104,7 +106,13 @@ def public_share(token: str) -> dict | None:
         if row is None:
             return None
         snapshot = json.loads(row['snapshot_json'])
-        snapshot = _public_values({key: value for key, value in snapshot.items() if key in _SNAPSHOT_FIELDS})
+        fields = _ABYSS_SUMMARY_FIELDS if row['game'] == 'abyss' else _SNAPSHOT_FIELDS
+        snapshot = _public_values({key: value for key, value in snapshot.items() if key in fields})
+        if row['game'] == 'abyss':
+            snapshot['players'] = [
+                {key: value for key, value in player.items() if key in _ABYSS_DIVER_FIELDS}
+                for player in snapshot.get('players', [])
+            ]
         return {
             'id': row['id'], 'game': row['game'], 'room_code': '',
             'players': [{key: value for key, value in player.items() if key in _PLAYER_FIELDS}

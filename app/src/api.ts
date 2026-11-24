@@ -433,8 +433,7 @@ export interface UtttSnapshot {
   reason: string | null;
 }
 
-export type AbyssSnapshot = { game: 'abyss' } &
-  Pick<import('./abyss').AbyssState, 'seconds' | 'level' | 'kills' | 'result' | 'players'>;
+export type AbyssSnapshot = { game: 'abyss' } & import('./abyss').AbyssSummary;
 
 export type GameSnapshot = AbyssSnapshot | GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot;
 

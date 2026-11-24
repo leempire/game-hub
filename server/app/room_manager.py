@@ -949,10 +949,9 @@ def _start_game_engine(code: str, user_id: int, *, prepared_spider: dict | None 
         "reason": None,
         "player_colors": {},
     }
-    host_player = next(p for p in room["players"] if p["id"] == room["host_id"])
-    other_player = next(p for p in room["players"] if p["id"] != room["host_id"])
-    game_state["player_colors"][host_player["id"]] = "black"
-    game_state["player_colors"][other_player["id"]] = "white"
+    first, second = room["players"]
+    game_state["player_colors"][first["id"]] = "black"
+    game_state["player_colors"][second["id"]] = "white"
     room["game_state"] = game_state
     _touch_activity(room)
     return game_state
@@ -1055,10 +1054,9 @@ def _start_reversi(room: dict) -> dict | None:
         "pass_count": 0,
         "player_colors": {},
     }
-    host = next(p for p in room["players"] if p["id"] == room["host_id"])
-    other = next(p for p in room["players"] if p["id"] != room["host_id"])
-    gs["player_colors"][host["id"]] = "black"
-    gs["player_colors"][other["id"]] = "white"
+    first, second = room["players"]
+    gs["player_colors"][first["id"]] = "black"
+    gs["player_colors"][second["id"]] = "white"
     room["game_state"] = gs
     room["empty_since"] = None
     _touch_activity(room)
@@ -1072,10 +1070,9 @@ def _start_xiangqi(room: dict) -> dict | None:
     room["status"] = "playing"
     room["game_started_at"] = _now_iso()
     gs = xiangqi_create_game()
-    host = next(p for p in room["players"] if p["id"] == room["host_id"])
-    other = next(p for p in room["players"] if p["id"] != room["host_id"])
-    gs["player_colors"][host["id"]] = XIANGQI_RED      # 房主执红先行
-    gs["player_colors"][other["id"]] = XIANGQI_BLACK
+    first, second = room["players"]
+    gs["player_colors"][first["id"]] = XIANGQI_RED
+    gs["player_colors"][second["id"]] = XIANGQI_BLACK
     room["game_state"] = gs
     room["empty_since"] = None
     _touch_activity(room)
@@ -1096,10 +1093,9 @@ def _start_luzhanqi(room: dict) -> dict | None:
     gs = lzq.create_game(room.get("luzhanqi_mode", "open"),
                          room.get("luzhanqi_reveal", True),
                          setup_timeout_seconds=room.get("luzhanqi_setup_timeout", 0))
-    host = next(p for p in room["players"] if p["id"] == room["host_id"])
-    other_player = next(p for p in room["players"] if p["id"] != room["host_id"])
-    gs["player_colors"][host["id"]] = lzq.RED          # 房主执红先行
-    gs["player_colors"][other_player["id"]] = lzq.BLACK
+    first, second = room["players"]
+    gs["player_colors"][first["id"]] = lzq.RED
+    gs["player_colors"][second["id"]] = lzq.BLACK
     rng = random.Random()
     for color in (lzq.RED, lzq.BLACK):
         lzq.fill_layout(gs, color, lzq.random_layout(color, rng))
@@ -1137,10 +1133,9 @@ def _start_connect4(room: dict) -> dict | None:
         "reason": None,
         "player_colors": {},
     }
-    host = next(p for p in room["players"] if p["id"] == room["host_id"])
-    other = next(p for p in room["players"] if p["id"] != room["host_id"])
-    gs["player_colors"][host["id"]] = "black"
-    gs["player_colors"][other["id"]] = "white"
+    first, second = room["players"]
+    gs["player_colors"][first["id"]] = "black"
+    gs["player_colors"][second["id"]] = "white"
     room["game_state"] = gs
     room["empty_since"] = None
     _touch_activity(room)
@@ -1159,27 +1154,26 @@ def _start_battleship(room: dict) -> dict | None:
         return None
     room["status"] = "playing"
     room["game_started_at"] = _now_iso()
-    host = next(p for p in room["players"] if p["id"] == room["host_id"])
-    other = next(p for p in room["players"] if p["id"] != room["host_id"])
+    first, second = room["players"]
     n = room.get("bs_size") or BS_DEFAULT_SIZE
     gs = {
         "phase": "placing",
         # **棋盘尺寸是这一局的参数**（v13）：引擎里凡是「有多大」都问 `gs["size"]`
         "size": n,
-        "boards": {host["id"]: bs_create_board(n), other["id"]: bs_create_board(n)},
-        "attack_boards": {host["id"]: bs_create_board(n),
-                          other["id"]: bs_create_board(n)},
-        "placements": {host["id"]: [], other["id"]: []},
-        "shots": {host["id"]: [], other["id"]: []},
-        "player_colors": {host["id"]: "blue", other["id"]: "red"},
+        "boards": {first["id"]: bs_create_board(n), second["id"]: bs_create_board(n)},
+        "attack_boards": {first["id"]: bs_create_board(n),
+                          second["id"]: bs_create_board(n)},
+        "placements": {first["id"]: [], second["id"]: []},
+        "shots": {first["id"]: [], second["id"]: []},
+        "player_colors": {first["id"]: "blue", second["id"]: "red"},
         "placement_ready": {},
         "next": "blue",
         "winner": None,
         "reason": None,
         # ── 特殊武器（v1.10）── 挂靠关系在布阵时写入
-        "weapons": {p["id"]: normalize_weapon_assignment(None, n) for p in (host, other)},
-        "weapons_used": {host["id"]: [], other["id"]: []},
-        "radar_results": {host["id"]: [], other["id"]: []},
+        "weapons": {p["id"]: normalize_weapon_assignment(None, n) for p in (first, second)},
+        "weapons_used": {first["id"]: [], second["id"]: []},
+        "radar_results": {first["id"]: [], second["id"]: []},
         # 命中续射的「先手第一发」补偿标记，只有真实开炮会置位
         "first_shot_done": False,
         # ── 房规（v1.18.1）──
@@ -1201,9 +1195,8 @@ def _start_dots(room: dict) -> dict | None:
     room["status"] = "playing"
     room["game_started_at"] = _now_iso()
     gs = dots_create_game(room.get("dots_count", DEFAULT_DOTS))
-    host = next(p for p in room["players"] if p["id"] == room["host_id"])
-    other = next(p for p in room["players"] if p["id"] != room["host_id"])
-    gs["player_colors"] = {host["id"]: "black", other["id"]: "white"}
+    first, second = room["players"]
+    gs["player_colors"] = {first["id"]: "black", second["id"]: "white"}
     room["game_state"] = gs
     room["empty_since"] = None
     _touch_activity(room)
@@ -1308,7 +1301,7 @@ def _start_ludo(room: dict) -> dict:
 def _start_uno(room: dict) -> dict | None:
     """开始 UNO（2-4 人回合制牌类）。
 
-    座位顺序 = room.players 顺序（房主先手），与飞行棋同源 —— `_get_player_seat`
+    座位顺序 = room.players 顺序，与飞行棋同源 —— `_get_player_seat`
     与 gs["turn"] 都按这个下标对齐。
     """
     players = room["players"]
@@ -1367,7 +1360,7 @@ def _start_abyss(room: dict) -> dict:
     duration = int(room.get("abyss_duration") or abyss.DEFAULT_DURATION)
     pace = {"fast": .8, "slow": 1.2}.get(room.get("abyss_xp_pace"), 1.0)
     gs = abyss.create(room["players"], random.randrange(2**32),
-                      duration=duration, xp_pace=pace)
+                      duration=duration, xp_pace=pace, map_size=room.get("abyss_map_size") or "medium")
     room.update(status="playing", game_state=gs, game_started_at=_now_iso(), empty_since=None)
     persistence.save_room(room)
     _ensure_abyss_tick(room)
@@ -1400,14 +1393,18 @@ async def _abyss_tick(room: dict):
                 break
             if deadline < loop.time() - .25:
                 deadline = loop.time()
-            if not gs["result"] and not _has_human_online(room):
+            online_ids = {p["id"] for p in room["players"] if p.get("connected") and not p.get("is_bot")}
+            if not gs["result"] and not online_ids:
                 continue
-            abyss.advance(gs)
+            choosing_before = bool(gs["pick_until"])
+            abyss.advance(gs, online_ids=online_ids)
             if gs["result"]:
                 _settle_abyss(room)
                 ws.send_abyss_end(room)
                 break
-            if gs["frame"] % 2 == 0:
+            choosing = bool(gs["pick_until"])
+            snapshot_interval = 5 if choosing else 2
+            if choosing_before != choosing or gs["frame"] % snapshot_interval == 0:
                 ws.send_abyss_tick(room)
             if gs["frame"] % 100 == 0:
                 persistence.save_room(room)

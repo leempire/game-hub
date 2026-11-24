@@ -528,6 +528,7 @@ export const abyssColors = {
   deep: '#07161C', panel: '#102B31', edge: '#46746E', text: '#ECF8EF',
   muted: '#A3C5BF', signal: '#91F0DF', beacon: '#91E7FF', shadow: '#051215',
   suit: '#AABEB0', brass: '#DCB581', visor: '#2D686D',
+  needlefish: '#B9DB78', jelly: '#A3B2FF', angler: '#F0A369',
   drifter: '#64B8A9', eel: '#AD86CB', crab: '#CA825F', elite: '#DA9B6C', warden: '#E387A8',
   rivet: '#F4C27F', arc: '#B1ADFF', ring: '#72F2D9', spore: '#D6E68D',
   charge: '#FF9380', harpoon: '#87DDFF',

@@ -127,3 +127,25 @@ def test_handler_exception_keeps_connection(ws_client, monkeypatch):
         assert me["connected"] is True
     finally:
         _close(wss)
+
+
+def test_disconnect_during_initial_sync_clears_room_presence(ws_client):
+    token, uid = _register(ws_client, f'rs_sync_{time.time_ns() % 10**12}')
+    created = ws_client.post('/api/rooms', json={'game': 'abyss'},
+                            headers={'Authorization': f'Bearer {token}'})
+    assert created.status_code == 200
+    code = created.json()['code']
+
+    class ClosedDuringSync:
+        query_params = {'token': token}
+
+        async def accept(self):
+            pass
+
+        async def send_json(self, message):
+            assert message['type'] == 'sync'
+            raise wsmod.WebSocketDisconnect(code=1006)
+
+    ws_client.portal.call(wsmod.ws_room, ClosedDuringSync(), code)
+    assert code not in wsmod._connections
+    assert not next(player for player in rm.get_room(code)['players'] if player['id'] == uid)['connected']

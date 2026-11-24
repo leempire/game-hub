@@ -129,25 +129,25 @@ async def ws_room(websocket: WebSocket, code: str):
     if code not in _connections:
         _connections[code] = {}
     _connections[code][user_id] = websocket
-    # Mark player connected
-    for p in room["players"]:
-        if p["id"] == user_id:
-            p["connected"] = True
-            break
-    # Cancel any disconnect timer (reconnect case)
-    rm.handle_player_reconnect(code, user_id)
-    # Send sync
-    await websocket.send_json(_build_sync(room, user_id))
-    # Broadcast lobby so every client sees the fresh connected flag
-    await _broadcast(code, {
-        "type": "lobby", "room": rm.room_to_dict(room)
-    }, exclude={user_id})
-    # Broadcast player_reconnected if game is playing
-    if room["status"] == "playing":
-        await _broadcast(code, {
-            "type": "player_reconnected", "user_id": user_id
-        }, exclude={user_id})
     try:
+        # Mark player connected
+        for p in room["players"]:
+            if p["id"] == user_id:
+                p["connected"] = True
+                break
+        # Cancel any disconnect timer (reconnect case)
+        rm.handle_player_reconnect(code, user_id)
+        # Send sync
+        await websocket.send_json(_build_sync(room, user_id))
+        # Broadcast lobby so every client sees the fresh connected flag
+        await _broadcast(code, {
+            "type": "lobby", "room": rm.room_to_dict(room)
+        }, exclude={user_id})
+        # Broadcast player_reconnected if game is playing
+        if room["status"] == "playing":
+            await _broadcast(code, {
+                "type": "player_reconnected", "user_id": user_id
+            }, exclude={user_id})
         while True:
             data = await websocket.receive_json()
             # 僵尸连接自愈：本页连接被同用户新连接替换后又被弹出（如对局结束返回房间页），
@@ -311,11 +311,11 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
             gs = room["game_state"]
             if msg_type == "abyss_move":
                 try:
-                    abyss.move(gs, user_id, data.get("dx"), data.get("dy"))
+                    abyss.move(gs, user_id, data.get("dx"), data.get("dy"), preserve_tap=data.get("tap") is True)
                 except ValueError as e:
                     await _send_error(code, user_id, str(e))
-            else:
-                abyss.pick(gs, user_id, data.get("level"), data.get("choice"))
+            elif abyss.pick(gs, user_id, data.get("level"), data.get("choice")):
+                send_abyss_tick(room)
     elif msg_type == "stasis_build":
         await _handle_stasis_build(code, user_id, data)
     elif msg_type == "stasis_lie":
@@ -2593,12 +2593,15 @@ async def _bot_do_placement(code: str, bot_id: int):
 _send_tails: dict[int, asyncio.Task] = {}
 
 
-def _stasis_enqueue(ws, message: dict, droppable: bool = False) -> bool:
+def _pending_send(ws):
+    tail = _send_tails.get(id(ws))
+    return tail if tail is not None and not tail.done() else None
+
+
+def _stasis_enqueue(ws, message: dict | str, droppable: bool = False) -> bool:
     """把一条消息挂到这个连接的发送链上。返回是否真的挂上了（tick 可能被丢）。"""
     key = id(ws)
-    prev = _send_tails.get(key)
-    if prev is not None and prev.done():
-        prev = None
+    prev = _pending_send(ws)
     if droppable and prev is not None:
         return False
 
@@ -2609,7 +2612,10 @@ def _stasis_enqueue(ws, message: dict, droppable: bool = False) -> bool:
             except BaseException:
                 pass
         try:
-            await ws.send_json(message)
+            if isinstance(message, str):
+                await ws.send_text(message)
+            else:
+                await ws.send_json(message)
         except Exception:
             pass
 
@@ -2624,11 +2630,10 @@ def _stasis_enqueue(ws, message: dict, droppable: bool = False) -> bool:
 
 
 async def _send_ordered(ws, message: dict):
-    """通用的单条发送：这个连接的发送链上还有没发完的（只有深空休眠会有），就
+    """通用的单条发送：这个连接的发送链上还有没发完的（深空休眠和深渊回声会用），就
     **排到链尾**，否则照旧直接发。不这样的话「终局挂上链 → 紧接着直接发 lobby」
     会让 lobby 抢在 game_over 前面到。其余游戏从不建链，行为与原来逐字相同。"""
-    tail = _send_tails.get(id(ws))
-    if tail is not None and not tail.done():
+    if _pending_send(ws) is not None:
         _stasis_enqueue(ws, message)
         return
     await ws.send_json(message)
@@ -2652,8 +2657,14 @@ def _stasis_send_all(code: str, message: dict, droppable: bool = False):
 
 
 def send_abyss_tick(room: dict):
-    _stasis_send_all(room["code"], {"type": "abyss_state", "game": abyss.snapshot(room["game_state"])},
-                     droppable=True)
+    ready = [ws for ws in _connections.get(room["code"], {}).values() if _pending_send(ws) is None]
+    if not ready:
+        return
+    # All recipients share the same snapshot and wire encoding.
+    message = {"type": "abyss_state", "game": abyss.snapshot(room["game_state"])}
+    encoded = json.dumps(message, separators=(",", ":"), ensure_ascii=False)
+    for ws in ready:
+        _stasis_enqueue(ws, encoded, droppable=True)
 
 
 def send_abyss_end(room: dict):

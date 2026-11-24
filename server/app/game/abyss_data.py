@@ -473,17 +473,17 @@ def weapon_stats(wid: str, level: int, stats: dict) -> dict:
     return out
 
 
-def xp_step(level: int) -> int | float:
-    """从当前等级升到下一级所需的**单级**经验，严格照 VS 三段斜坡。"""
+def xp_step(level: int, *, milestone_scale: float = 1.0) -> int | float:
+    """单级经验门槛，milestone_scale 仅缩放 20、40 级的额外门槛。"""
     nxt = level + 1
     if nxt <= 19:
         return 10 * nxt - 15
     if nxt == 20:
-        return 185 + 600
+        return 185 + 600 * milestone_scale
     if nxt <= 39:
         return 13 * nxt - 75
     if nxt == 40:
-        return 445 + 2400
+        return 445 + 2400 * milestone_scale
     return 16 * nxt - 195
 
 

@@ -196,7 +196,7 @@ export function useWebKeys(
 // 原生端 no-op。键名统一转小写（ArrowUp → arrowup），处理器返回 true 表示
 // 这个键被消费 → preventDefault，避免方向键滚走页面。输入框与组合键不接管。
 export function useWebHeldKeys(
-  onDown: (key: string) => boolean | void,
+  onDown: (key: string, repeated: boolean) => boolean | void,
   onUp: (key: string) => void,
   onBlur: () => void,
   enabled = true,
@@ -211,7 +211,7 @@ export function useWebHeldKeys(
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
         || target.isContentEditable)) return;
-      if (ref.current.onDown(keyOf(e))) e.preventDefault();
+      if (ref.current.onDown(keyOf(e), e.repeat)) e.preventDefault();
     };
     const up = (e: KeyboardEvent) => ref.current.onUp(keyOf(e));
     const blur = () => ref.current.onBlur();

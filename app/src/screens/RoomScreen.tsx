@@ -355,7 +355,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           </View>
         </TouchableOpacity>
 
-        <GameIntro game={room.game} userId={user?.id} practice={room.practice} onPractice={async () => {
+        <GameIntro game={room.game} userId={user?.id} practice={room.practice} onPractice={room.game === 'abyss' ? undefined : async () => {
           if (!token) throw new Error('请先登录');
           const result = await createPractice(token, room.game);
           if (focusedRef.current) navigation.replace('Room', { code: result.code });

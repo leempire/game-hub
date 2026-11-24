@@ -3,12 +3,13 @@
 
 用完即删；只验证浏览器接线，不替代 server/test/test_abyss.py 的引擎断言。
 """
+import os
 import re
 import time
 
 from playwright.sync_api import sync_playwright
 
-BASE = 'http://localhost:50540'
+BASE = os.environ.get('ABYSS_TEST_WEB_URL', 'http://localhost:50540')
 PWD = 'test123456'
 TS = int(time.time())
 UA, UB = f'ab_a_{TS}', f'ab_b_{TS}'
@@ -62,12 +63,26 @@ def main():
         assert match, '未找到6位房间号'
         code = match.group(0)
         ok(f'A 创建深渊回声房间 {code}')
+        guide = pa.get_by_test_id('game-intro')
+        guide.get_by_text('拖动移动，武器自动开火', exact=True).wait_for()
+        assert guide.get_by_text('打一局人机练习', exact=False).count() == 0
+        pa.get_by_test_id('guide-next').click()
+        guide.get_by_text('捡信标，选强化', exact=True).wait_for()
+        pa.get_by_test_id('guide-next').click()
+        guide.get_by_text('躲开警示圈，打倒守卫', exact=True).wait_for()
+        pa.get_by_test_id('guide-next').click()
+        guide.wait_for(state='hidden')
+        pa.get_by_text('新手指引', exact=True).click()
+        guide.get_by_text('拖动移动，武器自动开火', exact=True).wait_for()
+        pa.get_by_test_id('guide-skip').click()
+        ok('首进房间展示三步指引，完成后可主动回看')
 
         goto_tab(pb, '房间')
         pb.get_by_text('加入', exact=True).first.click()
         pb.get_by_placeholder('输入6位房间号').fill(code)
         pb.get_by_text('加入', exact=True).last.click()
         pb.get_by_text('房间号', exact=True).wait_for(timeout=15000)
+        pb.get_by_test_id('guide-skip').click()
         pb.get_by_text('准 备', exact=True).click()
         pa.wait_for_timeout(600)
         assert '2/4' in body(pa), f'房间人数应显示 2/4：{body(pa)[:200]}'
