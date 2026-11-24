@@ -4,6 +4,7 @@ import { createAudioPlayer } from 'expo-audio';
 import { Asset } from 'expo-asset';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AbyssState } from './abyss';
+import { onWebUserInteraction } from './backGuard';
 import { abyssCue, createAbyssSounds } from './abyssSound';
 import { abyssColors as c } from './theme';
 import { AppModal } from './ui';
@@ -140,14 +141,7 @@ export default function AbyssAudio({
         try { unlockEffects(); } catch { setError(true); }
       }
     }
-    document.addEventListener('pointerup', activate, true);
-    document.addEventListener('click', activate, true);
-    document.addEventListener('keydown', activate, true);
-    return () => {
-      document.removeEventListener('pointerup', activate, true);
-      document.removeEventListener('click', activate, true);
-      document.removeEventListener('keydown', activate, true);
-    };
+    return onWebUserInteraction(activate);
   }, [effects, inPlay, live, music, playMusic, restoreMusic, unlockEffects]);
 
   useEffect(() => {

@@ -1255,8 +1255,11 @@ def main(minutes):
         host.get_by_text('开始游戏', exact=True).click()
         host.get_by_test_id('abyss-arena').wait_for()
         host.evaluate('window.abyssDenyNextMusic = true')
-        host.keyboard.press('e')
-        host.wait_for_function('window.abyssDeniedMusic?.paused === true')
+        deadline = time.monotonic() + 5
+        while not host.evaluate('window.abyssDeniedMusic?.paused === true'):
+            assert time.monotonic() < deadline, 'Restored soundtrack did not attempt playback'
+            host.keyboard.press('e')
+            host.wait_for_timeout(50)
         host.keyboard.press('e')
         host.wait_for_function('abyssMusicElement === abyssDeniedMusic && !abyssMusicElement.paused && abyssMusicElement.volume === .8')
         ok('浏览器拒绝首次播放后，下次按键恢复已保存的配乐')

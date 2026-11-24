@@ -166,6 +166,15 @@ export function onWebOnline(handler: () => void): () => void {
   return () => window.removeEventListener('online', handler);
 }
 
+export function onWebUserInteraction(handler: (event: Event) => void): () => void {
+  if (!IS_WEB) return () => {};
+  const events = ['pointerup', 'click', 'keydown'];
+  for (const event of events) document.addEventListener(event, handler, true);
+  return () => {
+    for (const event of events) document.removeEventListener(event, handler, true);
+  };
+}
+
 // 网页端的键盘操作（俄罗斯方块、2048 这类「按方向」的对局屏共用）。原生端没有
 // 物理键盘，什么也不做。处理器返回 true 表示「这个键我用了」→ preventDefault，
 // 免得方向键 / 空格顺带把页面滚走。输入框里的按键、带 Ctrl/Alt/Meta 的组合键
