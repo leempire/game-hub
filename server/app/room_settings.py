@@ -260,6 +260,40 @@ def _gomoku_settings():
     ]
 
 
+def _abyss_settings():
+    """深渊回声：对局时长与经验节奏。
+
+    武器/被动数值按《吸血鬼幸存者》固定，不跟着房规变；房规只调「一局多长」
+    与「升级门槛乘多少」，避免把数值对齐和节奏调校搅在一起。
+    """
+    return [
+        Setting(
+            key="duration", label="对局时长", kind=KIND_CHOICE,
+            store="abyss_duration", default=720, in_summary=True,
+            choices=(
+                {"value": 720, "label": "12 分钟",
+                 "blurb": "紧凑局：两次精英宝箱与一次首领宝箱，成型偏快。"},
+                {"value": 1200, "label": "20 分钟",
+                 "blurb": "中长局：更容易凑齐 6 武器 + 6 被动。"},
+                {"value": 1800, "label": "30 分钟",
+                 "blurb": "完整节奏：对齐《吸血鬼幸存者》镶嵌图书馆的时长。"},
+            ),
+        ),
+        Setting(
+            key="xp_pace", label="经验节奏", kind=KIND_CHOICE,
+            store="abyss_xp_pace", default="standard", in_summary=True,
+            choices=(
+                {"value": "standard", "label": "标准",
+                 "blurb": "按 VS 三段经验曲线原速升级。"},
+                {"value": "fast", "label": "快速",
+                 "blurb": "升级门槛降低 20%，更快成型。"},
+                {"value": "slow", "label": "慢速",
+                 "blurb": "升级门槛提高 20%，更考验搭配与走位。"},
+            ),
+        ),
+    ]
+
+
 def _ludo_settings():
     return [
         Setting(key="teams", label="组队", kind=KIND_CHOICE, store="ludo_teams",
@@ -337,6 +371,7 @@ _GAMES: dict[str, list[Setting]] = {
                          store="connect4_popout", default=False, in_summary=True,
                          blurb="可选择落子或弹出自己最底下一枚；全盘重判四连，双方同时四连时行动方胜，相同局面及行动方第三次出现和棋。")],
     "ludo": _ludo_settings(),
+    "abyss": _abyss_settings(),
     "xiangqi": [_clock_setting(), Setting(
         key="byoyomi_seconds", label="读秒", kind=KIND_CHOICE,
         store="xiangqi_byoyomi_seconds", default=0, apply=_apply_byoyomi,

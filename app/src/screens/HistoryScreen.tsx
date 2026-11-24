@@ -1,3 +1,4 @@
+import { abyssClock } from '../abyss';
 // 历史战绩页面：列表 + 点击展开棋盘快照详情。
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -7,9 +8,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import RecordShareActions from '../RecordShareActions';
 import { useAuth } from '../auth';
-import { fetchMyHistory, GameRecord, HistoryResult, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
+import { fetchMyHistory, GameRecord, HistoryResult, AbyssSnapshot, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
-import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon } from '../icons';
+import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
@@ -96,6 +97,7 @@ export default function HistoryScreen() {
   };
 
   const renderGameIcon = (game: string) => {
+    if (game === 'abyss') return <AbyssIcon size={36} />;
     if (game === 'uttt') return <UltimateTicTacToeIcon size={36} />;
     if (game === 'spider') return <SpiderIcon size={36} />;
     if (game === 'gomoku') return <GomokuIcon size={36} />;
@@ -270,6 +272,14 @@ export function BoardSnapshot({ rec }: { rec: GameRecord }) {
   }
   if (view.game === 'ludo') {
     return <LudoSnapshot snap={view} players={rec.players} />;
+  }
+  if (view.game === 'abyss') {
+    const dive: AbyssSnapshot = view;
+    return <View>
+      <Text style={stasisSnapStyles.title}>{dive.result === 'won' ? '回收完成' : '回收未完成'} · {abyssClock(dive.seconds)}</Text>
+      <Text style={stasisSnapStyles.entity}>等级 {dive.level} · 全队击退 {dive.kills} 只</Text>
+      {dive.players.map(p => <Text key={p.id} style={stasisSnapStyles.meta}>{p.name} · 击退 {p.kills} 只</Text>)}
+    </View>;
   }
   if (view.game === 'uttt') {
     return <View testID="uttt-history" style={{ alignItems: 'center' }}>

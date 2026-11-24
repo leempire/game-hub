@@ -4,7 +4,7 @@ import React from 'react';
 import Svg, { Circle, Defs, Ellipse, G, Line, LinearGradient, Path, Polygon, Rect, Stop, Text } from 'react-native-svg';
 // UNO 的牌色直接取 theme（「颜色只有 theme.ts 一个来源」是硬规则——本文件其余
 // 图标用的是各自的局部常量，UNO 不再复制一份 hex）
-import { unoColors, unoWild, unoInk, unoOnWild, colors, spiderTable } from './theme';
+import { unoColors, unoWild, unoInk, unoOnWild, colors, spiderTable, abyssColors } from './theme';
 // 深空休眠的整套令牌也一律从 theme 取（同上：不在图标里写死 hex）
 // **v5 起只剩这一组**：各单位的贴图搬到 `stasisArt.tsx` 了（那边的贴图是
 // 「整格 44px 的俯视 sprite」，与这里 64px 的「正面图标」不是一套画法）。
@@ -690,3 +690,15 @@ export const ICON_COLORS = {
   C4_FRAME, C4_SLOT,
   LZQ_BOARD, LZQ_RAIL, LZQ_FACE, LZQ_RED, LZQ_BLACK,
 };
+
+
+export function AbyssIcon({ size = 56 }: { size?: number }) {
+  const c = abyssColors;
+  return <Svg width={size} height={size} viewBox="0 0 64 64">
+    <Rect x="3" y="3" width="58" height="58" rx="14" fill={c.panel} />
+    <Circle cx="32" cy="32" r="24" fill="none" stroke={c.edge} strokeDasharray="3 5" />
+    <Path d="M21 46V26a11 11 0 0 1 22 0v20L32 51Z" fill={c.brass} stroke={c.deep} strokeWidth="2" />
+    <Circle cx="32" cy="29" r="10" fill={c.visor} stroke={c.signal} strokeWidth="2" />
+    <Path d="M28 25q4-4 8 0" fill="none" stroke={c.text} strokeWidth="2" strokeLinecap="round" />
+  </Svg>;
+}

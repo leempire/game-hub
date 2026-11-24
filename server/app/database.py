@@ -409,6 +409,10 @@ def _build_results_record(room: dict) -> list[dict]:
         return [{"username": p["username"], "result": "win" if won and p["id"] not in departed else "end"}
                 for p in room["players"]]
     gs = room.get("game_state") or {}
+    if room["game"] == "abyss":
+        return [{"username": p["username"], "score": gs["players"][p["id"]]["kills"],
+                 "result": "win" if gs["result"] == "won" and not gs["players"][p["id"]]["departed"] else "lose"}
+                for p in room["players"]]
     winner = gs.get("winner")
     reason = gs.get("reason")
     colors = gs.get("player_colors", {})
@@ -500,6 +504,10 @@ def _build_snapshot(room: dict) -> dict:
     """Build the final-position snapshot stored with each record."""
     gs = room.get("game_state") or {}
     game = room["game"]
+    if game == "abyss":
+        from app.game.abyss import snapshot
+        view = snapshot(gs)
+        return {"game": "abyss", **{key: view[key] for key in ("seconds", "level", "kills", "result", "players")}}
     if game == "spider":
         from app.game.spider import snapshot
         return snapshot(gs)
