@@ -99,7 +99,10 @@ export default memo(function AbyssObjective({ game, uid, position, offlinePeers,
   const color = regroupName !== undefined ? c.signal : trackingWarden ? c.warden : rescueSeconds === undefined ? c.chest : c.charge;
   const label = regroupName !== undefined ? '队友' : trackingWarden ? '守卫' : rescueSeconds === undefined ? '宝箱' : `待救 ${rescueSeconds}s`;
 
-  const accessibilityLabel = regroupName !== undefined ? `队友 ${regroupName}` : label;
+  const regroupDistance = regroupName === undefined ? null : Math.round(Math.sqrt(closest));
+  const distanceLabel = regroupDistance !== null && regroupDistance >= 10000
+    ? `${(regroupDistance / 1000).toFixed(1)}k` : regroupDistance;
+  const accessibilityLabel = regroupName !== undefined ? `队友 ${regroupName}，距离 ${regroupDistance} 像素` : label;
   if (compact) return <G testID="abyss-objective-compact" accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel}
     transform={`translate(${atX} ${atY}) scale(${1 / zoom})`}>
     <Rect x={-11} y={-11} width={22} height={22} rx={7} fill={c.deep} stroke={color} strokeWidth={1.5} />
@@ -111,6 +114,9 @@ export default memo(function AbyssObjective({ game, uid, position, offlinePeers,
     <G testID="abyss-objective-arrow" transform={`translate(-23 0) rotate(${angle})`}>
       <Path d="M7 0L-5 6L-2 0L-5-6Z" fill={color} />
     </G>
-    <Text x={7} y={5} fill={c.text} fontSize={12} fontWeight="bold" textAnchor="middle">{label}</Text>
+    <Text x={7} y={regroupDistance === null ? 5 : -1} fill={c.text} fontSize={12} fontWeight="bold"
+      textAnchor="middle">{label}</Text>
+    {regroupDistance !== null && <Text testID="abyss-regroup-distance" x={7} y={10} fill={color} fontSize={10}
+      textAnchor="middle">{distanceLabel} px</Text>}
   </G>;
 });

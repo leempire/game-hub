@@ -19,6 +19,11 @@ const musicLevelNames: Record<MusicLevel, string> = { quiet: 'ä½Ž', standard: 'ä
 function warningGain(gain: number) {
   return (gain / musicLevels.standard) * .28;
 }
+
+function recoveringGain(gain: number, progress: number) {
+  const lowered = warningGain(gain);
+  return progress === 1 ? gain : lowered + (gain - lowered) * progress;
+}
 const musicFadeMs = 240;
 
 function createMusicPlayer() {
@@ -59,8 +64,11 @@ export default function AbyssAudio({
   const sounds = useRef<ReturnType<typeof createAbyssSounds> | null>(null);
   const previous = useRef<AbyssState | null>(null);
   const lastPickupAt = useRef(-Infinity);
+  const lastHitAt = useRef(-Infinity);
+  const lastFinishAt = useRef(-Infinity);
   const lastAlertAt = useRef(-Infinity);
   const musicRestoreTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const musicFadeProgress = useRef(1);
 
   useEffect(() => {
     let mounted = true;
@@ -92,21 +100,22 @@ export default function AbyssAudio({
   const restoreMusic = useCallback(() => {
     clearTimeout(musicRestoreTimer.current);
     musicRestoreTimer.current = undefined;
+    musicFadeProgress.current = 1;
     if (musicPlayer.current) musicPlayer.current.volume = musicGain.current;
   }, []);
 
   const duckMusic = useCallback(() => {
     const player = musicPlayer.current;
     if (!player?.playing) return;
+    musicFadeProgress.current = 0;
     player.volume = warningGain(musicGain.current);
     clearTimeout(musicRestoreTimer.current);
     musicRestoreTimer.current = setTimeout(() => {
       const start = performance.now();
       const fade = () => {
         const progress = Math.min(1, (performance.now() - start) / musicFadeMs);
-        const gain = musicGain.current;
-        const lowered = warningGain(gain);
-        player.volume = progress === 1 ? gain : lowered + (gain - lowered) * progress;
+        musicFadeProgress.current = progress;
+        player.volume = recoveringGain(musicGain.current, progress);
         musicRestoreTimer.current = progress < 1 ? setTimeout(fade, 30) : undefined;
       };
       fade();
@@ -151,14 +160,16 @@ export default function AbyssAudio({
     const cue = before && game && abyssCue(before, game, uid);
     if (!cue) return;
     const now = performance.now();
-    if (cue === 'pickup') {
-      if (now - lastPickupAt.current < 500 || now - lastAlertAt.current < 600) return;
-      lastPickupAt.current = now;
-    } else {
-      lastAlertAt.current = now;
-    }
-    const played = sounds.current?.play(cue);
-    if (played && (cue === 'warden' || cue === 'warning')) duckMusic();
+    if (cue === 'pickup' && (now - lastPickupAt.current < 500 || now - lastAlertAt.current < 600)) return;
+    if (cue === 'finish' && (now - lastFinishAt.current < 500 || now - lastAlertAt.current < 320)) return;
+    if (cue === 'hit' && (now - lastHitAt.current < 240 || now - lastAlertAt.current < 320)) return;
+    if (!sounds.current?.play(cue)) return;
+    if (cue === 'pickup') lastPickupAt.current = now;
+    else if (cue === 'hit' || cue === 'finish') {
+      lastHitAt.current = now;
+      if (cue === 'finish') lastFinishAt.current = now;
+    } else lastAlertAt.current = now;
+    if (cue === 'warden' || cue === 'warning') duckMusic();
   }, [duckMusic, effects, game, live, uid]);
 
   useEffect(() => () => {
@@ -181,9 +192,7 @@ export default function AbyssAudio({
   function chooseMusicLevel(level: MusicLevel) {
     musicGain.current = musicLevels[level];
     if (musicPlayer.current) {
-      musicPlayer.current.volume = musicRestoreTimer.current === undefined
-        ? musicGain.current
-        : warningGain(musicGain.current);
+      musicPlayer.current.volume = recoveringGain(musicGain.current, musicFadeProgress.current);
     }
     setMusicLevel(level);
     void AsyncStorage.setItem(musicLevelKey, level).catch(() => {});

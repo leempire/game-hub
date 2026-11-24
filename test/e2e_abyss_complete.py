@@ -195,6 +195,7 @@ def main(minutes):
           const stop = AudioBufferSourceNode.prototype.stop;
           AudioBufferSourceNode.prototype.stop = function (...args) {
             if (this === window.abyssSecondPickup) window.abyssSecondPickupInterrupted = true;
+            if (this === window.abyssFirstWeaponHit) window.abyssWeaponHitInterrupted = true;
             return stop.apply(this, args);
           };
           const play = AudioBufferSourceNode.prototype.start;
@@ -204,6 +205,14 @@ def main(minutes):
             if (window.abyssSfxStarts === 2) {
               window.abyssSecondPickup = this;
               this.playbackRate.value = .25;
+            }
+            if (window.abyssSfxStarts === 4) {
+              window.abyssFirstWeaponHit = this;
+              this.playbackRate.value = .1;
+            }
+            if (window.abyssSfxStarts === 5) {
+              this.playbackRate.value = .27;
+              this.addEventListener('ended', () => { window.abyssLongAlertEnded = true; }, {once: true});
             }
             return play.apply(this, args);
           };
@@ -260,6 +269,23 @@ def main(minutes):
                 'type': event, 'touchPoints': [{'x': px, 'y': py} for px, py in points],
             })
 
+        def host_direction():
+            return in_match(code, lambda gs: tuple(gs['players'][host_id][axis] for axis in ('dx', 'dy')))
+
+        gesture('touchStart', [(x, y)])
+        gesture('touchMove', [(x + 12, y + 16)])
+        deadline = time.monotonic() + .5
+        while any(abs(value - target) >= 1e-6 for value, target in zip(host_direction(), (.6, .8))):
+            assert time.monotonic() < deadline, 'A short diagonal drag did not reach full movement speed'
+            host.wait_for_timeout(10)
+        gesture('touchMove', [(x + 2, y + 1)])
+        deadline = time.monotonic() + .5
+        while host_direction() != (0, 0):
+            assert time.monotonic() < deadline, 'Returning to the joystick dead zone did not stop movement'
+            host.wait_for_timeout(10)
+        gesture('touchEnd', [])
+        ok('轻推斜向摇杆以完整速度移动，回到死区就停下')
+
         gesture('touchStart', [(x, y)])
         gesture('touchMove', [(x + 55, y)])
         gesture('touchMove', [(x - 55, y)])
@@ -280,7 +306,7 @@ def main(minutes):
 
         before_flick = host_x()
         gesture('touchStart', [(x, y)])
-        gesture('touchMove', [(x + 55, y)])
+        gesture('touchMove', [(x + 20, y)])
         gesture('touchEnd', [])
         deadline = time.monotonic() + .5
         while host_x() == before_flick:
@@ -290,6 +316,27 @@ def main(minutes):
         assert abs(host_x() - before_flick - abyss.data.PLAYER_SPEED * abyss.STEP) < 1e-6
         assert host_input() == (0, 0)
         ok('快速拨动触屏摇杆只走一个模拟步进，随后停步')
+
+        gesture('touchStart', [(x, y)])
+        gesture('touchMove', [(x + 55, y)])
+        deadline = time.monotonic() + .5
+        while host_direction() != (1, 0):
+            assert time.monotonic() < deadline, 'Touch movement did not start before cancellation'
+            host.wait_for_timeout(10)
+        gesture('touchMove', [(x - 55, y)])
+        gesture('touchCancel', [])
+        deadline = time.monotonic() + .25
+        while host_input() != (0, 0):
+            assert time.monotonic() < deadline, 'System touch cancellation did not clear movement immediately'
+            host.wait_for_timeout(10)
+        stopped_at = host_x()
+        host.wait_for_timeout(140)
+        assert host_x() == stopped_at and host_input() == (0, 0)
+        host.wait_for_function("""() => {
+          const stick = document.querySelector('[data-testid="abyss-stick"]');
+          return stick && getComputedStyle(stick).opacity === '0';
+        }""")
+        ok('系统取消触摸后立即停步并隐藏摇杆，排队方向不会重放')
         touch.detach()
         ok('触屏摇杆快速反向后保留最后方向，松手后不重放移动')
 
@@ -401,20 +448,23 @@ def main(minutes):
           let changedAt = performance.now();
           const start = changedAt;
           let longest = 0;
+          let updates = 0;
           function sample(now) {
             const x = diver.transform.baseVal.getItem(0).matrix.e;
             if (x !== last) {
+              updates++;
               longest = Math.max(longest, now - changedAt);
               last = x;
               changedAt = now;
             }
             if (now - start < 700) requestAnimationFrame(sample);
-            else resolve(Math.max(longest, now - changedAt));
+            else resolve({longest: Math.max(longest, now - changedAt), updates});
           }
           requestAnimationFrame(sample);
         })''')
         guest.evaluate('window.setAbyssTestJitter(false)')
-        assert remote < 66, f'Remote movement held on one position for {remote:.1f} ms'
+        # Four 60 Hz frames take about 66.7 ms; require motion well between the usual 100 ms snapshots.
+        assert remote['longest'] < 75 and remote['updates'] >= 25, remote
         ok('隔包增加 70 ms 延迟时，队友的持续移动仍能在快照间推进')
 
         host.evaluate('window.disconnectAbyssTestRoom()')
@@ -496,14 +546,37 @@ def main(minutes):
         assert host_input()[0] == 0
         host.keyboard.up('d')
 
-        host.evaluate('window.setAbyssTestMute(true)')
-        status.get_by_text('战场同步中断，正在恢复…', exact=True).wait_for()
-        repeats = host.evaluate('setInterval(window.repeatAbyssBattlePacket, 50)')
+        touch = host.context.new_cdp_session(host)
         try:
-            host.wait_for_function('count => window.abyssRoomConnectionCount > count', arg=connections, timeout=6000)
+            gesture('touchStart', [(x, y)])
+            gesture('touchMove', [(x + 55, y)])
+            deadline = time.monotonic() + .5
+            while host_direction() != (1, 0):
+                assert time.monotonic() < deadline, 'Touch movement did not start before interrupted sync'
+                host.wait_for_timeout(10)
+            host.evaluate('window.setAbyssTestMute(true)')
+            status.get_by_text('战场同步中断，正在恢复…', exact=True).wait_for()
+            assert host_direction() == (0, 0)
+            repeats = host.evaluate('setInterval(window.repeatAbyssBattlePacket, 50)')
+            try:
+                host.wait_for_function('count => window.abyssRoomConnectionCount > count', arg=connections, timeout=6000)
+            finally:
+                host.evaluate('timer => clearInterval(timer)', repeats)
+            status.wait_for(state='hidden')
+            gesture('touchMove', [(x - 55, y)])
+            host.wait_for_timeout(160)
+            assert host_direction() == (0, 0), 'A pre-reconnect touch resumed movement'
+            gesture('touchEnd', [])
+            gesture('touchStart', [(x, y)])
+            gesture('touchMove', [(x - 55, y)])
+            deadline = time.monotonic() + .5
+            while host_direction() != (-1, 0):
+                assert time.monotonic() < deadline, 'A fresh touch did not respond after reconnecting'
+                host.wait_for_timeout(10)
+            gesture('touchEnd', [])
         finally:
-            host.evaluate('timer => clearInterval(timer)', repeats)
-        status.wait_for(state='hidden')
+            touch.detach()
+        ok('断线时释放旧摇杆方向，重连后重新触碰即可移动')
         ok('短时同步中断后不补播旧受击反馈，持续停更时重复包无法阻止重连')
 
         in_match(code, lambda gs: abyss._hurt_diver(gs, gs['players'][host_id], 24))
@@ -562,7 +635,56 @@ def main(minutes):
         host.get_by_test_id(f'abyss-team-status-{mate_id}').wait_for()
         regroup = host.get_by_test_id('abyss-objective')
         regroup.get_by_text('队友', exact=True).wait_for()
-        assert regroup.get_attribute('aria-label') == f'队友 {UB}'
+        assert (regroup.get_attribute('aria-label') or '').startswith(f'队友 {UB}，距离 ')
+
+        def cast_past_the_viewport(gs):
+            gs['players'][mate_id].update(x=-3000, y=32)
+            abyss._effect(gs, 'pentagram', 'nova', life=14, x=-3000, y=32, r=1400)
+            return gs['effects'][-1]['id']
+
+        remote_nova_id = in_match(code, cast_past_the_viewport)
+        remote_nova = host.get_by_test_id('abyss-distant-nova')
+        remote_nova.wait_for(timeout=3000)
+        assert remote_nova.get_attribute('fill') == 'none'
+        assert host.get_by_test_id(f'abyss-effect-{remote_nova_id}').count() == 0
+        remote_nova.wait_for(state='detached', timeout=3000)
+        ok('无尽地图上的远处清屏以淡出边框提示，不绘制屏外技能圈')
+        regroup_distance = host.get_by_test_id('abyss-regroup-distance')
+        far_distance = int((regroup_distance.text_content() or '').split()[0])
+        in_match(code, lambda gs: gs['players'][mate_id].update(x=-2400))
+        host.wait_for_function("""far => {
+          const label = document.querySelector('[data-testid="abyss-regroup-distance"]');
+          return label && Number.parseInt(label.textContent, 10) < far - 500;
+        }""", arg=far_distance)
+        ok('无尽地图的队友箭头显示实时距离')
+
+        def fill_beacon_pool(gs):
+            lead = gs['players'][host_id]
+            mate = gs['players'][mate_id]
+            previous = gs['loot'], gs['xp'], mate['xp_collected']
+            gs['loot'] = []
+            for offset in range(abyss.MAX_LOOT):
+                abyss._drop_loot(gs, {'x': lead['x'] + 125, 'y': lead['y'] + offset / 10}, 1)
+            contact = {'x': mate['x'] - 100, 'y': mate['y']}
+            abyss._drop_loot(gs, contact, 1)
+            return previous, contact
+
+        previous, contact = in_match(code, fill_beacon_pool)
+        guest.get_by_test_id('abyss-loot').first.wait_for()
+        host.wait_for_function("""count => document.querySelectorAll('[data-testid="abyss-loot"]').length === count""",
+                               arg=abyss.MAX_LOOT - 1)
+        assert guest.get_by_test_id('abyss-loot').count() == 1
+        in_match(code, lambda gs: gs['players'][mate_id].update(contact))
+        guest.get_by_test_id('abyss-loot').wait_for(state='detached')
+
+        def restore_beacons(gs):
+            mate = gs['players'][mate_id]
+            assert mate['xp_collected'] == previous[2] + 1
+            gs['loot'], gs['xp'], mate['xp_collected'] = previous
+
+        in_match(code, restore_beacons)
+        ok('信标满额时远处掉落只出现在当地队友视口，并可在原地拾取')
+
         in_match(code, lambda gs: place_remote_diver(gs, True))
         remote_diver.wait_for()
         regroup.wait_for(state='hidden')
@@ -607,6 +729,7 @@ def main(minutes):
             abyss._spawn(gs, 'drifter', diver)
             gs['enemies'][-1].update(x=x + 15, y=y, speed=0, hp=1000, radius=18)
             stats = abyss.data.weapon_stats('harpoon', 1, diver['stats'])
+            stats['crit'] = 0
             abyss._shot(gs, diver, 'harpoon', stats, x, y, 1400, 0,
                         kind='harpoon', life=12, pierce=1, radius=7)
             return x, y, gs['shots'][-1]['id']
@@ -615,10 +738,118 @@ def main(minutes):
         host.wait_for_function('''([x, y]) => [...document.querySelectorAll('[data-testid^="abyss-projectile-impact-"]')]
           .some(node => {
             const point = node.transform.baseVal.getItem(0).matrix;
-            return point.e === x && point.f === y;
-          })''', arg=[hit_x, hit_y])
+            const sprite = node.getAttribute('href') ?? node.getAttribute('xlink:href');
+            return point.e === x && point.f === y && node.localName === 'use'
+              && sprite?.endsWith('-impact-harpoon-0') && node.getBBox().width > 0;
+          })''', arg=[hit_x, hit_y], timeout=4000)
         assert host.get_by_test_id(f'abyss-shot-{consumed_shot}').count() == 0
         ok('贴身鱼叉在下一份快照前被消耗，仍在实际接触点显示火花')
+
+        def launch_observed_shot(gs):
+            diver = gs['players'][host_id]
+            x, y = round(diver['x'] - 120), round(diver['y'] - 185)
+            stats = abyss.data.weapon_stats('harpoon', 1, diver['stats'])
+            abyss._shot(gs, diver, 'harpoon', stats, x, y, 160, 0,
+                        kind='harpoon', life=60, pierce=1, radius=7)
+            return gs['shots'][-1]['id'], y
+
+        observed_id, observed_y = in_match(code, launch_observed_shot)
+        host.get_by_test_id(f'abyss-shot-{observed_id}').wait_for()
+        host.evaluate("""([id, y]) => {
+          window.abyssTerminalImpactAligned = new Promise(resolve => {
+            const observer = new MutationObserver(() => {
+              if (document.querySelector('[data-testid="abyss-shot-' + id + '"]')) return;
+              observer.disconnect();
+              resolve([...document.querySelectorAll('[data-testid^="abyss-projectile-impact-"]')].some(node =>
+                node.transform.baseVal.getItem(0).matrix.f === y));
+            });
+            observer.observe(document.querySelector('[data-testid="abyss-world"]'), {childList: true, subtree: true});
+          });
+        }""", [observed_id, observed_y])
+
+        def intercept_observed_shot(gs):
+            shot = next(shot for shot in gs['shots'] if shot['id'] == observed_id)
+            abyss._spawn(gs, 'drifter', gs['players'][host_id])
+            gs['enemies'][-1].update(x=shot['x'] + 20, y=shot['y'], hp=1000, radius=18, speed=0)
+
+        in_match(code, intercept_observed_shot)
+        host.get_by_test_id(f'abyss-shot-{observed_id}').wait_for(state='detached', timeout=3000)
+        assert host.evaluate('window.abyssTerminalImpactAligned')
+        ok('已经可见的鱼叉在命中火花出现的同一帧消失')
+
+        center = [abyss.WIDTH / 2, abyss.HEIGHT / 2]
+        in_match(code, lambda gs: gs['players'][host_id].update(x=center[0], y=center[1]))
+        host.wait_for_function("""([id, x, y]) => {
+          const diver = document.querySelector('[data-testid="abyss-diver-' + id + '"]');
+          const position = diver?.transform.baseVal.getItem(0).matrix;
+          return position && Math.hypot(position.e - x, position.f - y) < 1;
+        }""", arg=[host_id, *center])
+
+        def seed_impact_cloud(gs):
+            diver = gs['players'][host_id]
+            xs = [diver['x'] + dx for dx in range(-126, 127, 36)]
+            ys = [diver['y'] + dy for dy in range(-126, 127, 36)]
+            ids = []
+            for x in xs:
+                for y in ys:
+                    abyss._effect(gs, 'axe', 'impact', life=5, x=x, y=y, r=16, angle=math.pi / 2)
+                    ids.append(gs['effects'][-1]['id'])
+            offscreen = []
+            for x in xs:
+                abyss._effect(gs, 'axe', 'impact', life=5, x=x, y=0, r=16, angle=math.pi / 2)
+                offscreen.append(gs['effects'][-1]['id'])
+            return ids, offscreen
+
+        impact_ids, offscreen_ids = in_match(code, seed_impact_cloud)
+        host.wait_for_function("""([ids, offscreen]) => {
+          const sparks = ids.map(id => document.querySelector('[data-testid="abyss-projectile-impact-' + id + '"]'));
+          const batched = sparks.filter(spark => spark?.closest('[data-testid="abyss-impact-group"]'));
+          return batched.length >= 12 && offscreen.every(id =>
+            !document.querySelector('[data-testid="abyss-projectile-impact-' + id + '"]')) && sparks.every(spark => {
+            const sprite = spark?.getAttribute('href') ?? spark?.getAttribute('xlink:href');
+            return spark?.localName === 'use' && spark.childElementCount === 0 && sprite?.endsWith('-impact-axe-1')
+              && spark.getBBox().width > 0 && Math.abs(spark.transform.baseVal.getItem(1).angle - 90) < 1;
+          });
+        }""", arg=[impact_ids, offscreen_ids], timeout=4000)
+        ok('64 个重击火花保留分组淡出与方向，同组屏外火花不挂载')
+
+        def spawn_defeat_target(gs):
+            diver = gs['players'][host_id]
+            abyss._spawn(gs, 'drifter', diver)
+            enemy = gs['enemies'][-1]
+            enemy.update(x=round(diver['x'] + 110), y=round(diver['y'] + 65), hp=1000, speed=0)
+            return enemy['id'], enemy['x'], enemy['y']
+
+        target_id, target_x, target_y = in_match(code, spawn_defeat_target)
+        host.get_by_test_id(f'abyss-enemy-{target_id}').wait_for()
+        host.evaluate("""([id, x, y]) => {
+          window.abyssDefeatAligned = new Promise(resolve => {
+            const observer = new MutationObserver(() => {
+              if (document.querySelector('[data-testid="abyss-enemy-' + id + '"]')) return;
+              const aligned = [...document.querySelectorAll('[data-testid^="abyss-defeat-"]')].some(node => {
+                const transform = node.transform.baseVal.getItem(0).matrix;
+                return transform.e === x && transform.f === y;
+              });
+              observer.disconnect();
+              resolve(aligned);
+            });
+            observer.observe(document.querySelector('[data-testid="abyss-world"]'), {childList: true, subtree: true});
+          });
+        }""", [target_id, target_x, target_y])
+
+        def defeat_foe(gs):
+            diver = gs['players'][host_id]
+            enemy = next(enemy for enemy in gs['enemies'] if enemy['id'] == target_id)
+            abyss._damage(gs, diver, enemy, enemy['hp'])
+            return gs['effects'][-1]['id']
+
+        defeat_id = in_match(code, defeat_foe)
+        defeat_burst = host.get_by_test_id(f'abyss-defeat-{defeat_id}')
+        defeat_burst.wait_for(timeout=3000)
+        assert host.evaluate('window.abyssDefeatAligned')
+        assert defeat_burst.evaluate('node => node.getBBox().width') > 0
+        defeat_burst.wait_for(state='detached', timeout=3000)
+        ok('怪物消失与最后一击的击破光环在同一渲染帧')
 
         def bounce_rune(gs):
             diver = gs['players'][host_id]
@@ -733,9 +964,16 @@ def main(minutes):
 
         burst, nova = in_match(code, seed_reduced_bursts)
         assert host.get_by_test_id(f'abyss-effect-{burst}').get_attribute('r') == '62'
-        assert host.get_by_test_id(f'abyss-effect-{nova}').locator('circle').first.get_attribute('r') == '170'
+        nova_effect = host.get_by_test_id(f'abyss-effect-{nova}')
+        assert nova_effect.locator('circle').first.get_attribute('r') == '170'
+        host.wait_for_function("""id => {
+          const effect = document.querySelector('[data-testid="abyss-effect-' + id + '"]');
+          const opacity = effect ? Number(effect.getAttribute('opacity')) : 0;
+          return opacity > .25 && opacity < .75;
+        }""", arg=nova, timeout=3000)
+        nova_effect.wait_for(state='detached')
         host.emulate_media(reduced_motion='no-preference')
-        ok('减少动态效果时爆炸和清屏光圈保持技能范围')
+        ok('减少动态效果时爆炸和清屏保持技能范围，清屏光圈按实际时长淡出')
 
 
         def start_dense_pursuit(gs):
@@ -812,7 +1050,7 @@ def main(minutes):
         host.wait_for_function('!abyssMusicElement.paused && abyssMusicElement.currentTime < 2')
         ok('72 秒配乐实际播放到结尾并循环')
         host.get_by_test_id('abyss-sfx').click()
-        host.wait_for_function('window.abyssDecodedClips === 9')
+        host.wait_for_function('window.abyssDecodedClips === 11')
         host.get_by_test_id('abyss-audio-close').click()
 
         def pickup(gs, mine):
@@ -845,6 +1083,54 @@ def main(minutes):
         host.wait_for_timeout(230)
         assert host.evaluate('window.abyssSfxStarts') == 3, 'Pickup interrupted the damage cue'
         ok('受伤提示打断正在播放的拾取声，并短时跳过后续拾取音')
+        host.wait_for_timeout(350)
+
+        def weapon_contact(gs, mine):
+            diver = next(player for player in gs['players'].values()
+                         if (player['id'] == host_id) == mine)
+            abyss._spawn(gs, 'drifter', diver)
+            abyss._damage(gs, diver, gs['enemies'][-1], 1)
+            gs['enemies'].pop()
+
+        in_match(code, lambda gs: weapon_contact(gs, False))
+        host.wait_for_timeout(150)
+        assert host.evaluate('window.abyssSfxStarts') == 3
+        in_match(code, lambda gs: weapon_contact(gs, True))
+        host.wait_for_function('window.abyssSfxStarts === 4')
+        in_match(code, lambda gs: weapon_contact(gs, True))
+        host.wait_for_timeout(160)
+        assert host.evaluate('window.abyssSfxStarts') == 4
+        ok('武器命中声仅提示本人，连续命中限频')
+
+        def interrupt_weapon_contact(gs):
+            diver = gs['players'][host_id]
+            diver['invincible'] = 0
+            abyss._hurt_diver(gs, diver, 5)
+
+        in_match(code, interrupt_weapon_contact)
+        host.wait_for_function('window.abyssSfxStarts === 5 && window.abyssWeaponHitInterrupted === true')
+        ok('受伤提示会中断尚在播放的武器命中音')
+        host.wait_for_timeout(350)
+        in_match(code, lambda gs: weapon_contact(gs, True))
+        host.wait_for_timeout(150)
+        assert host.evaluate('window.abyssSfxStarts === 5 && !window.abyssLongAlertEnded')
+        host.wait_for_function('window.abyssLongAlertEnded')
+        ok('提示音持续播放时，常规命中即使过了限频间隔也不会抢占声音')
+
+
+        def finish_enemy(gs):
+            diver = gs['players'][host_id]
+            abyss._spawn(gs, 'drifter', diver)
+            enemy = gs['enemies'].pop()
+            abyss._damage(gs, diver, enemy, enemy['hp'], drop_chance=0)
+
+        in_match(code, finish_enemy)
+        host.wait_for_function('''window.abyssSfxStarts === 6
+            && Math.abs(window.abyssSfxDurations[5] - .24) < .005''')
+        in_match(code, finish_enemy)
+        host.wait_for_timeout(160)
+        assert host.evaluate('window.abyssSfxStarts') == 6
+        ok('本人击破使用独立的低频音效，连续击破限频')
         host.get_by_test_id('abyss-audio').click()
         host.get_by_test_id('abyss-sfx').click()
         host.get_by_test_id('abyss-audio-close').click()
@@ -858,7 +1144,7 @@ def main(minutes):
         pickup_flash.wait_for()
         assert guest.get_by_test_id('abyss-local-pickup').count() == 0
         pickup_flash.wait_for(state='detached')
-        assert host.evaluate('window.abyssSfxStarts') == 3
+        assert host.evaluate('window.abyssSfxStarts') == 6
         ok('关闭音效后本地经验拾取仍有短暂视觉反馈，队友画面不受影响')
 
         def seed_moving_objects(gs):
@@ -933,8 +1219,8 @@ def main(minutes):
         guest.get_by_test_id('abyss-rescue-notice').get_by_text('等待队友靠近', exact=False).wait_for()
         host.get_by_test_id('abyss-rescue-notice').get_by_text(f'靠近 {UB} · 进入救援圈', exact=True).wait_for()
         in_match(code, lambda gs: gs['players'][host_id].update(x=729))
-        host.get_by_test_id('abyss-rescue-notice').get_by_text(re.compile(r'保持在救援圈内 · \d+% · 剩 \d+s')).wait_for()
-        guest.get_by_test_id('abyss-rescue-notice').get_by_text(re.compile(r'队友正在救援 · \d+% · 剩 \d+s')).wait_for()
+        host.get_by_test_id('abyss-rescue-notice').get_by_text(re.compile(rf'救援 {re.escape(UB)} · \d+% · 剩 \d+s')).wait_for()
+        guest.get_by_test_id('abyss-rescue-notice').get_by_text(re.compile(rf'{re.escape(UA)}正在救援 · \d+% · 剩 \d+s')).wait_for()
         rescue_arc = host.get_by_test_id('abyss-rescue-progress')
         values = rescue_arc.evaluate("""arc => new Promise(resolve => {
           const offsets = new Set();
@@ -956,7 +1242,7 @@ def main(minutes):
         for page in (host, guest):
             page.get_by_test_id('abyss-rescue-pulse').wait_for()
         ok('队友在真实战斗步进中完成救援，双方都能看到救援成功的扩散光环')
-        protection = guest.locator('[data-testid^="abyss-protection-"]')
+        protection = guest.get_by_test_id(f'abyss-protection-{mate_id}')
         protection.wait_for()
 
         def remaining_protection(gs):
@@ -964,15 +1250,15 @@ def main(minutes):
             return mate['invincible'] - gs['elapsed']
 
         deadline = time.monotonic() + 2
-        while in_match(code, remaining_protection) > 4:
+        while in_match(code, remaining_protection) > 16:
             assert time.monotonic() < deadline
             guest.wait_for_timeout(10)
         guest.evaluate('window.setAbyssTestMute(true)')
         try:
-            protection.wait_for(state='hidden', timeout=500)
+            protection.wait_for(state='hidden', timeout=1100)
         finally:
             guest.evaluate('window.setAbyssTestMute(false)')
-        ok('获救后的保护圈按剩余时间撤下，短暂丢包也不持续显示')
+        ok('持续丢包超过移动预测时限后，获救保护圈仍按剩余时间撤下')
 
 
         def set_upgrade(gs):
@@ -986,6 +1272,7 @@ def main(minutes):
             abyss._refresh_stats(lead)
 
         in_match(code, set_upgrade)
+        host.get_by_text('选择强化 · 10s', exact=True).wait_for(timeout=3000)
         card = host.get_by_test_id('abyss-choice-rivet')
         card.get_by_text('可用宝箱进化为圣铆炮', exact=True).wait_for()
         choice_frames = host.evaluate("""() => new Promise(resolve => {
@@ -1004,7 +1291,7 @@ def main(minutes):
         })""")
         assert 2 <= len(choice_frames) <= 3, choice_frames
         assert all(b - a == 5 for a, b in zip(choice_frames, choice_frames[1:])), choice_frames
-        ok('战斗暂停选卡时每 250 毫秒同步一次，保留倒计时')
+        ok('选卡倒计时从 10 秒开始，暂停期间每 250 毫秒同步一次')
         host.evaluate('window.setAbyssTestMute(true); window.abyssDropNextPick = true')
         card.click()
         host.get_by_test_id('abyss-pick-pending').wait_for()
@@ -1014,12 +1301,17 @@ def main(minutes):
         host.evaluate('window.setAbyssTestMute(false)')
         host.get_by_test_id('abyss-pick-pending').wait_for(state='hidden')
         assert card.count() == 1
-        card.click()
+        host.get_by_text('按数字键选择强化', exact=True).wait_for()
+        upgrade_key = in_match(code, lambda gs: gs['players'][host_id]['choices'].index('rivet') + 1)
+        card.get_by_text(str(upgrade_key), exact=True).wait_for()
+        host.keyboard.press(str(upgrade_key))
         card.wait_for(state='hidden')
         assert host.evaluate('window.abyssPickSends') == 2
-        ok('升级选择等待确认期间防连点，首次提交未送达时允许重试')
+        ok('升级选择等待确认期间防连点，首次未送达可用卡片上的数字键重试')
         waiting_choice = host.get_by_test_id('abyss-choice-waiting')
         waiting_choice.get_by_text(f'待选择：{UB}', exact=True).wait_for()
+        host.get_by_text('等待 1 名队友 ·', exact=False).wait_for()
+        host.get_by_text('你已完成选择。全员选完或倒计时结束后继续战斗。', exact=True).wait_for()
         assert guest.get_by_test_id('abyss-choice-waiting').count() == 0
         def offer_new_weapon(gs):
             mate = next(player for player in gs['players'].values() if player['id'] != host_id)
@@ -1150,21 +1442,29 @@ def main(minutes):
         host.get_by_test_id('abyss-warden-health').get_by_text('狂暴', exact=False).wait_for()
         host.get_by_test_id('abyss-warden-warning').get_by_text('压强脉冲', exact=False).wait_for()
         host.wait_for_function('abyssMusicElement.volume === .28')
+        host.get_by_test_id('abyss-audio').click()
         volumes = host.evaluate("""() => new Promise(resolve => {
           const levels = new Set();
           const started = performance.now();
+          let switched = null;
           function sample(now) {
             const volume = abyssMusicElement.volume;
-            if (volume > .28 && volume < .55) levels.add(volume);
-            if (volume >= .55 || now - started > 1200) resolve([...levels]);
+            if (!switched && volume > .34 && volume < .49) {
+              document.querySelector('[data-testid="abyss-music-level-loud"]').click();
+              switched = {before: volume / .55, after: abyssMusicElement.volume / .8};
+            }
+            const normalized = abyssMusicElement.volume / (switched ? .8 : .55);
+            if (normalized > .28 / .55 && normalized < 1) levels.add(normalized);
+            if (normalized >= 1 || now - started > 1200) resolve({levels: [...levels], switched});
             else requestAnimationFrame(sample);
           }
           requestAnimationFrame(sample);
         })""")
-        assert len(volumes) >= 3 and volumes == sorted(volumes), volumes
-        assert host.evaluate('abyssMusicElement.volume') == .55
-        ok('守卫狂暴后显示阶段，预警压低配乐并平滑恢复')
-        host.get_by_test_id('abyss-audio').click()
+        assert volumes['switched'] is not None, volumes
+        assert abs(volumes['switched']['before'] - volumes['switched']['after']) < .01, volumes
+        assert len(volumes['levels']) >= 3 and volumes['levels'] == sorted(volumes['levels']), volumes
+        assert host.evaluate('abyssMusicElement.volume') == .8
+        ok('守卫狂暴后配乐先压低再恢复，淡入中切换音量不回落')
         host.get_by_test_id('abyss-sfx').click()
         host.get_by_test_id('abyss-audio-close').click()
 
@@ -1251,7 +1551,6 @@ def main(minutes):
         fourth = join_rematch(fourth_name)
         fourth.set_viewport_size({'width': 320, 'height': 680})
         guest.get_by_text('准 备', exact=True).click()
-        host.evaluate("localStorage.setItem('abyss.audio.music-level', 'loud')")
         host.get_by_text('开始游戏', exact=True).click()
         host.get_by_test_id('abyss-arena').wait_for()
         host.evaluate('window.abyssDenyNextMusic = true')
@@ -1262,15 +1561,15 @@ def main(minutes):
             host.wait_for_timeout(50)
         host.keyboard.press('e')
         host.wait_for_function('abyssMusicElement === abyssDeniedMusic && !abyssMusicElement.paused && abyssMusicElement.volume === .8')
-        ok('浏览器拒绝首次播放后，下次按键恢复已保存的配乐')
+        ok('下一局保留从游戏内切换的高音量，浏览器拒绝首播后可按键恢复')
         host.get_by_test_id('abyss-audio').click()
         assert host.get_by_test_id('abyss-music').get_attribute('aria-checked') == 'true'
         assert host.get_by_test_id('abyss-sfx').get_attribute('aria-checked') == 'false'
         host.wait_for_function('''window.abyssMusicElement !== window.abyssPreviousMusicElement
             && !window.abyssMusicElement.paused''')
-        assert host.evaluate('window.abyssDecodedClips') == 9
+        assert host.evaluate('window.abyssDecodedClips') == 11
         host.get_by_test_id('abyss-sfx').click()
-        host.wait_for_function('window.abyssDecodedClips === 18')
+        host.wait_for_function('window.abyssDecodedClips === 22')
         ok('下一局恢复已保存的配乐开关与音效关闭状态，重新开启音效后才加载')
         fourth.get_by_test_id('abyss-arena').wait_for()
         team = fourth.get_by_test_id('abyss-team')
@@ -1324,7 +1623,7 @@ def main(minutes):
           const world = document.querySelector('[data-testid="abyss-world"]');
           return Math.abs(world.transform.baseVal.getItem(0).matrix.e + 440) < 2;
         }''')
-        guest.get_by_text('← / → 切换观战队友', exact=True).wait_for()
+        guest.get_by_text('← / → 切换队友', exact=True).wait_for()
         guest.keyboard.press('ArrowLeft')
         guest.get_by_test_id('abyss-rescue-notice').get_by_text('观战中 · ' + UA).wait_for()
         ok('出局后可用按钮或方向键在存活队友间切换镜头')
@@ -1563,12 +1862,32 @@ def main(minutes):
         solo.get_by_test_id('room-settings-row').click()
         for size in ('small', 'medium', 'large', 'endless'):
             solo.get_by_test_id(f'room-settings-map_size-{size}').wait_for()
+        solo.get_by_text('守卫在战斗进行到 11:00 时出现。升级选卡暂停战斗计时。', exact=True).wait_for()
         solo.get_by_test_id('room-settings-map_size-endless').click()
+        solo.get_by_text('地图没有边界，墙壁反弹不会触发，对局时长仍按房规。', exact=True).wait_for()
         solo.get_by_test_id('room-settings-close').click()
+        solo.get_by_test_id('room-settings-row').get_by_text('12 分钟 · 标准 · 无尽', exact=True).wait_for()
         solo.get_by_text('开始游戏', exact=True).click()
         solo.get_by_test_id('abyss-arena').wait_for()
         assert in_match(solo_code, lambda gs: gs['map_size']) == 'endless'
         assert solo.get_by_test_id('abyss-wall').count() == 0
+        solo.set_viewport_size({'width': 320, 'height': 680})
+        solo.wait_for_function("""() => {
+          const footer = document.querySelector('[data-testid="abyss-footer"]');
+          const bounds = footer.getBoundingClientRect();
+          const singleLine = id => {
+            const range = document.createRange();
+            range.selectNodeContents(footer.querySelector('[data-testid="abyss-footer-' + id + '"]'));
+            return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size === 1;
+          };
+          return bounds.width <= 320 && singleLine('status') && singleLine('hint')
+            && ['audio', 'inventory', 'leave'].every(id => {
+              const button = footer.querySelector('[data-testid="abyss-' + id + '"]').getBoundingClientRect();
+              return button.height >= 44 && button.left >= bounds.left && button.right <= bounds.right;
+            });
+        }""")
+        solo.set_viewport_size({'width': 360, 'height': 720})
+        ok('320 px 战斗底栏状态和提示各占一行，三个按钮完整可点')
 
         def move_beyond_old_boundary(gs):
             diver = next(iter(gs['players'].values()))
@@ -1581,12 +1900,38 @@ def main(minutes):
             solo.wait_for_function("""id => {
               const player = document.querySelector('[data-testid="abyss-diver-' + id + '"]');
               const world = document.querySelector('[data-testid="abyss-world"]');
+              const floor = document.querySelector('[data-testid="abyss-floor-tiles"]');
+              if (!world || !floor) return false;
+              const viewport = world.closest('svg').getBoundingClientRect();
+              const tiles = floor.getBoundingClientRect();
               return player?.transform.baseVal.getItem(0).matrix.e < -25
-                && world?.transform.baseVal.getItem(0).matrix.e > 0;
+                && world.transform.baseVal.getItem(0).matrix.e > 0
+                && tiles.left <= viewport.left + 1 && tiles.top <= viewport.top + 1
+                && tiles.right >= viewport.right - 1 && tiles.bottom >= viewport.bottom - 1
+                && [...floor.children].some(tile => {
+                  const edge = tile.getBoundingClientRect().left - viewport.left;
+                  return edge > 0 && edge < viewport.width;
+                });
             }""", arg=solo_id)
+            floor_updates = solo.get_by_test_id('abyss-floor-tiles').evaluate("""floor => new Promise(resolve => {
+              let moved = 0;
+              let tileUpdates = 0;
+              const observer = new MutationObserver(records => {
+                for (const record of records) {
+                  if (record.target === floor && record.type === 'attributes') moved++;
+                  else tileUpdates++;
+                }
+              });
+              observer.observe(floor, {attributes: true, childList: true, subtree: true});
+              setTimeout(() => {
+                observer.disconnect();
+                resolve({moved, tileUpdates});
+              }, 220);
+            })""")
+            assert floor_updates['moved'] >= 2 and floor_updates['tileUpdates'] == 0, floor_updates
         finally:
             solo.keyboard.up('a')
-        ok('房规可选四种地图，无尽地图可越过旧边界且镜头继续跟随')
+        ok('四种地图可选，无尽地图越界时地砖铺满，平移只更新图层')
 
         def spawn_distant_warden(gs):
             diver = gs['players'][solo_id]
