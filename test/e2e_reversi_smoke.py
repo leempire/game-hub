@@ -93,6 +93,12 @@ def main():
         wait_board(pb)
         ok('双方进入翻转棋对局页，8x8 棋盘渲染')
 
+        pa.get_by_role('button', name='返回', exact=True).click()
+        pa.get_by_text('确认退出？', exact=True).wait_for()
+        pa.get_by_text('再想想', exact=True).click()
+        wait_board(pa)
+        ok('左上角返回弹出退出确认，取消后继续对局')
+
         # 回合提示：A(黑) 先手
         pb.get_by_text('等待对方...', exact=True).wait_for(timeout=10000)
         assert '轮到你落子' in pa.locator('body').inner_text(), 'A 未看到自己回合'

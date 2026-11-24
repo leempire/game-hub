@@ -69,6 +69,7 @@ export function mountGame(name, initial, { game = name.toLowerCase(), os = 'web'
   const adapters = {
     react: hooks, 'react-native': rn, '@expo/vector-icons': { Ionicons: host('i') },
     '@react-navigation/native': { useNavigation: () => navigation },
+    '@react-navigation/elements': { HeaderBackButton: host('button') },
     'react-native-svg': { __esModule: true, default: host('svg'), ...Object.fromEntries(['Circle', 'Rect', 'Line', 'Path', 'Polygon', 'G', 'Text', 'Defs', 'Ellipse', 'ClipPath', 'LinearGradient', 'Stop'].map(name => [name, host('g')])) },
     auth: { useAuth: () => ({ token: 'test', user: { id: 1 } }) },
     api: { getRoom: async () => room, leaveRoom: async () => {} }, socket: { RoomSocket },
