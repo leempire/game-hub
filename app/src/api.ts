@@ -436,11 +436,13 @@ export interface UtttSnapshot {
 
 export type AbyssSnapshot = { game: 'abyss' } & import('./abyss').AbyssSummary;
 
-export type GameSnapshot = AbyssSnapshot | GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot;
+export type FishSnapshot = { game: 'fish'; ranking: import('./fish').FishRank[]; reason: string };
+
+export type GameSnapshot = FishSnapshot | AbyssSnapshot | GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot;
 
 export interface GameRecord {
   id: number;
-  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis' | 'uttt' | 'abyss';
+  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis' | 'uttt' | 'abyss' | 'fish';
   room_code: string;
   players: HistoryPlayer[];
   results: HistoryResult[];

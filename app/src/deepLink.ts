@@ -37,6 +37,7 @@ const ROUTE_BY_PATH: Record<string, string> = {
   uno: 'Uno',
   stasis: 'Stasis',
   abyss: 'Abyss',
+  fish: 'Fish',
   spider: 'Spider',
 };
 

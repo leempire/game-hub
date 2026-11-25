@@ -36,7 +36,7 @@
 |---|---|
 | 棋类 | 五子棋 / 中国象棋 / 军棋 / 翻转棋 / 重力四子棋 / 终极井字棋 / 点格棋 / 海战棋 |
 | 桌游 | UNO / 飞行棋 |
-| 各玩各的 | 2048 / 俄罗斯方块 / 扫雷 / 蜘蛛纸牌 |
+| 各玩各的 | 2048 / 俄罗斯方块 / 扫雷 / 蜘蛛纸牌 / 潮汐鱼群 |
 | 合作 | 深空休眠 / 深渊回声 |
 | 单机 | 潮汐灯塔 |
 
@@ -74,7 +74,7 @@ app/                    # Expo 客户端（RN + Web）
     │                   # 每款游戏的文件职责与实现约定见其 docs/游戏设计/<游戏>/设计.md
     └── screens/        # AuthScreen/GamesTab/RoomsTab/ProfileTab/RoomScreen/
                         # 各对局屏（Gomoku/Mine/Reversi/Battleship/Dots/Ludo/Game2048/
-                        # Xiangqi/ConnectFour/Tetris/Uno/Stasis/Luzhanqi/Spider/Abyss）
+                        # Xiangqi/ConnectFour/Tetris/Uno/Stasis/Luzhanqi/Spider/Abyss/Fish）
                         # + HistoryScreen/AdminScreen
 server/
 ├── config/config.json  # 端口、jwt_secret、admin 种子、public_base、app.version_code/name
@@ -98,7 +98,7 @@ server/
     ├── ws.py           # WS 路由与消息分发（各游戏 move/胜负广播/认输/断线判负）
     ├── game/           # **各游戏的纯引擎与人机 AI**（无 IO、不碰 asyncio）
     │   ├── <游戏>.py   # 引擎：五子棋/扫雷/翻转棋/海战棋/点格棋/飞行棋/2048/象棋/
-    │   │               # 重力四子棋/俄罗斯方块/UNO/深空休眠/军棋/蜘蛛纸牌/深渊回声
+    │   │               # 重力四子棋/俄罗斯方块/UNO/深空休眠/军棋/蜘蛛纸牌/深渊回声/潮汐鱼群
     │   ├── <游戏>_ai.py# 人机 AI（扫雷/2048/俄罗斯方块无 AI）
     │   └── __init__.py # 这层的约定（引擎不认识时间/不发消息；AI 只看下发过的信息）
     └── routers/        # auth / admin / rooms / app_update / history
@@ -602,9 +602,9 @@ curl -s http://127.0.0.1:50541/api/app/version
 `docs/游戏设计/<游戏中文名>/{设计.md,增强调研.md}`。**本文件不记录每个版本的流水账**
 ——只保留「改动前必须知道的跨游戏约定」与路线图。
 
-- **17 款游戏**：棋类（五子棋 / 中国象棋 / 军棋 /
+- **18 款游戏**：棋类（五子棋 / 中国象棋 / 军棋 /
   翻转棋 / 重力四子棋 / 终极井字棋 / 点格棋 / 海战棋）、桌游（UNO / 飞行棋）、
-  各玩各的（2048 / 俄罗斯方块 / 扫雷 / 蜘蛛纸牌）、合作（深空休眠 / 深渊回声）、
+  各玩各的（2048 / 俄罗斯方块 / 扫雷 / 蜘蛛纸牌 / 潮汐鱼群）、合作（深空休眠 / 深渊回声）、
   单机（潮汐灯塔）。
 - **开发中**：深渊回声（1–4 人合作生存）武器 / 被动 / 进化按《吸血鬼幸存者》基础
   12 把武器对齐，数值与取舍见 `docs/游戏设计/深渊回声/`；局外天赋树为账号级、

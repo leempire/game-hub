@@ -7,6 +7,10 @@ import { AppModal } from './ui';
 import { colors, fontSize, radius, spacing } from './theme';
 
 const GUIDES: Record<string, { title: string; body: string }[]> = {
+  fish: [
+    { title: '跟着自己的鱼走', body: '拖动水域控制游动。桌面也可以用 WASD 或方向键。青绿色野生鱼可以吃，红圈鱼会吃掉你。' },
+    { title: '三条命，比谁游得好', body: '每次被吃掉一条命，复活有 3 秒无敌。玩家之间可以互相穿过。10 分钟内多吃鱼、提升体型拿高分。' },
+  ],
   abyss: [
     { title: '拖动移动，武器自动开火', body: '在战场任意位置按住并拖动。电脑也可以用方向键或 WASD。边移动边和怪群保持距离。' },
     { title: '捡信标，选强化', body: '走近蓝色信标可为全队积攒经验。升级时有 10 秒选择。装备页会告诉你武器还缺什么才能用宝箱进化。' },
@@ -80,7 +84,7 @@ export default function GameIntro({ game, userId, practice, onPractice }: {
       <Text style={styles.body}>{steps[step].body}</Text>
       <TouchableOpacity style={styles.primary} testID="guide-next" onPress={() => {
         if (step + 1 < steps.length) setStep(value => value + 1); else close();
-      }}><Text style={styles.onPrimary}>{step + 1 < steps.length ? '下一步' : game === 'abyss' ? '返回房间' : '开始游戏'}</Text></TouchableOpacity>
+      }}><Text style={styles.onPrimary}>{step + 1 < steps.length ? '下一步' : ['abyss', 'fish'].includes(game) ? '返回房间' : '开始游戏'}</Text></TouchableOpacity>
       <TouchableOpacity style={styles.secondary} testID="guide-skip" disabled={busy} onPress={close}><Text style={styles.secondaryText}>跳过</Text></TouchableOpacity>
       {canPractice && <TouchableOpacity style={styles.secondary} disabled={busy} onPress={() => void start()}>
         <Text style={styles.secondaryText}>{busy ? '正在进入…' : '打一局人机练习（不计战绩）'}</Text>

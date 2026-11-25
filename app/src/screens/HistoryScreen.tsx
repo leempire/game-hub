@@ -219,6 +219,13 @@ export function BoardSnapshot({ rec, viewerId }: { rec: GameRecord; viewerId?: n
     />
   ) : null;
 
+  if (view.game === 'fish') {
+    return <View>
+      {view.ranking.map((row: import('../fish').FishRank) => <Text key={row.id} style={{ color: colors.text, marginVertical: spacing.xs }}>
+        {row.rank == null ? '退出' : `第 ${row.rank} 名`} · {row.name} · {row.score} 分 · 剩余 {row.lives} 条命
+      </Text>)}
+    </View>;
+  }
   if (view.game === 'gomoku') {
     return (
       <View>

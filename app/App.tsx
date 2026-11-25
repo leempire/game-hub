@@ -36,6 +36,7 @@ const LINKING = {
       Uno: 'uno/:code',
       Stasis: 'stasis/:code',
       Abyss: 'abyss/:code',
+      Fish: 'fish/:code',
       History: 'history',
       Competition: 'competition',
       Lighthouse: 'lighthouse',
