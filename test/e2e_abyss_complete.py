@@ -2029,6 +2029,9 @@ def main(minutes):
             diver = next(iter(gs['players'].values()))
             gs['enemies'].clear()
             gs['loot'].clear()
+            # Natural waves may have chipped an enemy before this checkpoint;
+            # reset so the assertion only sees the 9 damage applied below.
+            diver['damage_dealt'] = 0
             abyss._spawn(gs, 'drifter', diver)
             enemy = gs['enemies'][-1]
             enemy['hp'] = 9
