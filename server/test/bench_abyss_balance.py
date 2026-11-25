@@ -60,6 +60,11 @@ def direction(gs, p):
         return gain * min(1.15, weight) - danger_cost - max(0, 94 - edge) * .85
     return max(DIRECTIONS, key=score)
 
+def maxed_items(p):
+    return (sum(level >= data.WEAPONS[wid]['max_level'] for wid, level in p['weapons'].items())
+            + sum(level >= data.PASSIVES[pid]['max_level'] for pid, level in p['passives'].items()))
+
+
 def run_match(args):
     count, seed, minutes, pace, *settings = args
     map_size = settings[0] if settings else "medium"
@@ -101,6 +106,7 @@ def run_match(args):
         'xp_remaining': gs['xp'], 'next_xp': abyss.threshold(gs),
         'weapon_slots': [len(p['weapons']) for p in gs['players'].values()],
         'evolutions': [sum(weapon in data.EVOLUTIONS for weapon in p['weapons']) for p in gs['players'].values()],
+        'maxed_items': [maxed_items(p) for p in gs['players'].values()],
         'seconds': round(gs['elapsed'] * abyss.STEP), 'level': gs['level'], 'kills': gs['kills'],
         'pick_delay_seconds': pick_delay, 'elapsed_with_pauses': round(gs['frame'] * abyss.STEP, 2),
         'upgrade_pause_seconds': round((gs['frame'] - gs['elapsed']) * abyss.STEP, 2),

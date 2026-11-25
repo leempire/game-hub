@@ -144,7 +144,7 @@ def test_rescue_choice_timeout_and_final_boss():
     assert gs["result"] == "timeout"
 
 
-@pytest.mark.parametrize("count,expected", [(1, 5), (4, 12)])
+@pytest.mark.parametrize("count,expected", [(1, 4), (4, 9)])
 def test_supported_room_sizes(client, count, expected):
     with ExitStack() as stack:
         code, _, sockets = _open_room(client, stack, count)
@@ -242,9 +242,9 @@ def test_opening_health_and_upgrade_curve():
     abyss._spawn(gs, "drifter", p)
     assert gs["enemies"][-1]["hp"] == 14
     gs["level"] = 9
-    assert abyss.threshold(gs) == 85
+    assert abyss.threshold(gs) == 64
     gs["level"] = 19
-    assert abyss.threshold(gs) == 185
+    assert abyss.threshold(gs) == 139
     gs["level"] = 17
     gs["xp"] = abyss.threshold(gs)
     abyss._offer(gs)
@@ -253,26 +253,42 @@ def test_opening_health_and_upgrade_curve():
 
 
 @pytest.mark.parametrize(
-    "duration, milestones",
-    [(720, (185, 445)), (1200, (452, 1512)), (1800, (785, 2845))],
+    "duration, milestones, level20",
+    [(720, (139, 334), 149), (1200, (389, 1302), 171),
+     (1800, (785, 2845), 198)],
 )
-def test_milestone_costs_follow_room_duration(duration, milestones):
+def test_milestone_costs_follow_room_duration(duration, milestones, level20):
     gs = abyss.create([{"id": 1, "username": "test"}], 42, duration=duration)
     for level, expected in zip((19, 39), milestones):
         gs["level"] = level
         assert abyss.snapshot(gs)["next_xp"] == expected
     gs["level"] = 20
-    assert abyss.threshold(gs) == 198
+    assert abyss.threshold(gs) == level20
+
+
+def test_short_game_lowers_base_thresholds_and_scales_with_duration():
+    games = {duration: abyss.create([{"id": 1, "username": "a"}], 42,
+                                    duration=duration)
+             for duration in (720, 1200, 1800)}
+    assert abyss.xp_threshold_scale(720) == pytest.approx(.75)
+    assert abyss.xp_threshold_scale(1200) == pytest.approx(1 - .25 * 600 / 1080)
+    assert abyss.xp_threshold_scale(1800) == 1.0
+    for level in (19, 39, 60):
+        for game in games.values():
+            game["level"] = level
+        assert (abyss.threshold(games[720])
+                < abyss.threshold(games[1200])
+                < abyss.threshold(games[1800]))
 
 
 def test_milestone_combines_room_pace_with_team_scaling_and_keeps_growth_reward():
     players = [{"id": i, "username": str(i)} for i in range(4)]
     gs = abyss.create(players, 42, xp_pace=.8)
     gs["level"] = 19
-    gs["xp"] = 350
-    assert abyss.threshold(gs) == 348
+    gs["xp"] = abyss.threshold(gs)
+    assert abyss.threshold(gs) == 261
     abyss._offer(gs)
-    assert (gs["level"], gs["xp"], gs["growth_boost"]) == (20, 2, 2.0)
+    assert (gs["level"], gs["xp"], gs["growth_boost"]) == (20, 0, 2.0)
     assert abyss.snapshot(gs)["growth_boost"] == 2.0
     for player in gs["players"].values():
         assert player["choices"]
@@ -288,13 +304,14 @@ def test_milestone_boost_reaches_live_battle_snapshot(client):
         gs["spawn_budget"] = -1000
         gs["enemies"].clear()
         gs["level"] = 19
-        gs["xp"] = 184
+        next_xp = abyss.threshold(gs)
+        gs["xp"] = next_xp - 1
         ws_client = sockets[0]
         before = _recv(ws_client, "abyss_state", lambda msg: msg["game"]["level"] == 19)["game"]
-        assert (before["xp"], before["next_xp"], before["growth_boost"]) == (184, 185, 1)
-        gs["xp"] = 185
+        assert (before["xp"], before["next_xp"], before["growth_boost"]) == (next_xp - 1, next_xp, 1)
+        gs["xp"] = next_xp
         offered = _recv(ws_client, "abyss_state", lambda msg: msg["game"]["level"] == 20)["game"]
-        assert (offered["next_xp"], offered["growth_boost"]) == (198, 2)
+        assert (offered["next_xp"], offered["growth_boost"]) == (149, 2)
         assert offered["choice_seconds"] > 0
 
 
@@ -302,6 +319,7 @@ def test_milestone_boost_reaches_live_battle_snapshot(client):
 def test_legacy_match_keeps_original_milestone_after_restore():
     gs = abyss.create([{"id": 1, "username": "test"}], 42)
     del gs["milestone_scale"]
+    del gs["xp_threshold_scale"]
     gs["level"] = 19
     gs["xp"] = 600
     restored = persistence.loads_state(persistence.dumps_state(gs))
