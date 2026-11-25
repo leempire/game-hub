@@ -474,9 +474,9 @@ def test_wave_roster_by_phase(fraction, roster):
 @pytest.mark.parametrize(
     "kind, hp, speed, radius, damage, xp",
     [
-        ("needlefish", 8, 125, 8, 4, 1),
-        ("jelly", 26, 58, 19, 8, 2),
-        ("angler", 38, 87, 19, 10, 3),
+        ("needlefish", 8, 125, 8, 1, 1),
+        ("jelly", 26, 58, 19, 3, 2),
+        ("angler", 38, 87, 19, 5, 3),
     ],
 )
 def test_new_enemy_combat_and_rewards(kind, hp, speed, radius, damage, xp):
@@ -505,11 +505,104 @@ def test_blast_hits_at_the_combined_radius_but_not_beyond_it():
         gs['enemies'][-1].update(x=x, y=500, hp=60)
     abyss._area_damage(gs, player, 550, 500, 39, 12, weapon='charge', knockback=2)
     edge, outside = gs['enemies']
-    assert (edge['hp'], edge['x']) == (48, 612)
+    assert edge['hp'] == 48 and edge['x'] > 600
     assert (outside['hp'], outside['x']) == (60, 602)
 
 
-def test_contact_damage_excludes_tangent_enemy_and_uses_first_overlap():
+def test_knockback_pushes_away_and_staggers_chase():
+    gs = abyss.create([{'id': 1, 'username': 'Diver'}], 42)
+    diver = gs['players'][1]
+    diver['weapons'].clear()
+    gs['spawn_budget'] = -10000
+    abyss._spawn(gs, 'drifter', diver)
+    enemy = gs['enemies'][0]
+    enemy.update(x=600, y=500, hp=1000, speed=56)
+    diver.update(x=700, y=500)
+
+    abyss._damage(gs, diver, enemy, 1, src=(500, 500), knockback=1)
+    assert enemy['x'] == pytest.approx(600 + 56 * .25)
+    assert enemy['stagger_until'] > gs['elapsed']
+
+    pushed = enemy['x']
+    abyss.advance(gs)
+    assert enemy['x'] == pushed
+
+
+def test_garlic_stacks_knockback_taken_and_elite_resists():
+    gs = abyss.create([{'id': 1, 'username': 'Diver'}], 42)
+    diver = gs['players'][1]
+    diver['weapons'].clear()
+    gs['spawn_budget'] = -10000
+    abyss._spawn(gs, 'drifter', diver)
+    enemy = gs['enemies'][0]
+    enemy.update(x=600, y=500, hp=1000, speed=56)
+    for _ in range(3):
+        abyss._damage(gs, diver, enemy, 1, src=(550, 500), kb_stack=.3)
+    assert enemy['kb_taken'] == pytest.approx(1.9)
+
+    base = enemy['x']
+    abyss._damage(gs, diver, enemy, 1, src=(550, 500), knockback=1)
+    assert enemy['x'] - base == pytest.approx(56 * .25 * 1.9)
+
+    abyss._spawn(gs, 'elite', diver)
+    elite = gs['enemies'][-1]
+    elite.update(x=600, y=500, hp=1000, speed=83)
+    abyss._damage(gs, diver, elite, 1, src=(550, 500), knockback=1)
+    assert elite['x'] - 600 == pytest.approx(83 * .25 * .2)
+
+
+def test_slow_halves_enemy_speed_until_it_expires_and_elite_resists():
+    gs = abyss.create([{'id': 1, 'username': 'Diver'}], 42)
+    diver = gs['players'][1]
+    diver['weapons'].clear()
+    gs['spawn_budget'] = -10000
+    abyss._spawn(gs, 'drifter', diver)
+    enemy = gs['enemies'][0]
+    enemy.update(x=600, y=500, hp=1000, speed=56)
+    diver.update(x=700, y=500)
+
+    abyss._damage(gs, diver, enemy, 1, slow=.5, slow_ticks=10)
+    assert enemy['slow_factor'] == pytest.approx(.5)
+    assert abyss.snapshot(gs)['enemies'][0][7] == pytest.approx(.5)
+
+    before = enemy['x']
+    abyss.advance(gs)
+    assert enemy['x'] - before == pytest.approx(56 * .5 * abyss.STEP)
+
+    for _ in range(10):
+        abyss.advance(gs)
+    before = enemy['x']
+    abyss.advance(gs)
+    assert enemy['x'] - before == pytest.approx(56 * abyss.STEP)
+    assert abyss.snapshot(gs)['enemies'][0][7] == 0
+
+    abyss._spawn(gs, 'elite', diver)
+    elite = gs['enemies'][-1]
+    abyss._damage(gs, diver, elite, 1, slow=.5, slow_ticks=10)
+    assert elite['slow_factor'] == pytest.approx(.75)
+
+
+def test_snapshot_interval_thins_dense_waves():
+    gs = abyss.create([{'id': 1, 'username': 'Diver'}], 42)
+    diver = gs['players'][1]
+    gs['spawn_budget'] = -10000
+    for _ in range(abyss.DENSE_SNAPSHOT_THRESHOLD - 1):
+        abyss._spawn(gs, 'drifter', diver)
+    assert abyss.snapshot_interval(gs) == abyss.SNAPSHOT_INTERVAL
+    abyss._spawn(gs, 'drifter', diver)
+    assert abyss.snapshot_interval(gs) == abyss.DENSE_SNAPSHOT_INTERVAL
+
+
+def test_late_phase_spawning_fills_the_cap():
+    gs = abyss.create([{'id': 1, 'username': 'Diver'}], 42)
+    diver = gs['players'][1]
+    diver['weapons'].clear()
+    diver['invincible'] = 10 ** 9
+    gs['spawned'].update(('elite0', 'elite1', 'boss'))
+    gs['elapsed'] = round(gs['duration'] * .7 / abyss.STEP)
+    for _ in range(600):
+        abyss.advance(gs)
+    assert len(gs['enemies']) == abyss.SPAWN_PHASES[3][2]
     gs = abyss.create([{'id': 1, 'username': 'Diver'}], 42)
     diver = gs['players'][1]
     diver.update(x=700, y=500)

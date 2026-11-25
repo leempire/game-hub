@@ -44,6 +44,9 @@ _DEFAULTS = {
     "pierce": 1,
     "interval": 0.0,
     "knockback": 1.0,
+    "kb_stack": 0.0,
+    "slow": 0.0,
+    "slow_ticks": 0,
     "crit": 0.0,
     "crit_mult": 2.0,
     "heal_on_crit": 0.0,
@@ -203,8 +206,8 @@ WEAPONS = {
     ),
     "ring": _weapon(
         "ring", "荧孢光环", "garlic",
-        {"damage": 5, "cooldown": 1.3, "knockback": 0,
-         "pierce": INFINITE_PIERCE},
+        {"damage": 5, "cooldown": 1.3, "knockback": 0, "kb_stack": .3,
+         "slow": .30, "slow_ticks": 30, "pierce": INFINITE_PIERCE},
         (
             {"area": .4, "damage": 2},
             {"cooldown": -.1, "damage": 1},
@@ -219,7 +222,8 @@ WEAPONS = {
     "spore": _weapon(
         "spore", "腐潮水池", "water",
         {"damage": 10, "cooldown": 4.5, "duration": 2.0, "interval": .3,
-         "knockback": 0, "pierce": INFINITE_PIERCE},
+         "knockback": 0, "slow": .35, "slow_ticks": 30,
+         "pierce": INFINITE_PIERCE},
         (
             {"amount": 1, "area": .2},
             {"damage": 10, "duration": .5},
@@ -331,14 +335,15 @@ WEAPONS.update({
     "soul_eater": _evolved(
         "soul_eater", "噬魂光环", "garlic",
         {"damage": 20, "area": 3.0, "cooldown": 1.0, "duration": 1.3,
-         "knockback": 0, "pierce": INFINITE_PIERCE},
+         "knockback": 0, "kb_stack": .3, "slow": .40, "slow_ticks": 30,
+         "pierce": INFINITE_PIERCE},
         base="ring",
     ),
     "la_borra": _evolved(
         "la_borra", "拉波拉潮", "la_borra",
         {"damage": 40, "area": 2.0, "amount": 4, "cooldown": 4.0,
          "duration": 4.0, "interval": .3, "knockback": 0,
-         "pierce": INFINITE_PIERCE},
+         "slow": .45, "slow_ticks": 30, "pierce": INFINITE_PIERCE},
         base="spore",
     ),
     "no_future": _evolved(

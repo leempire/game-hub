@@ -82,10 +82,12 @@ export default function AbyssAudio({
         musicGain.current = musicLevels[saved];
         setMusicLevel(saved);
       }
-      setMusic(enabled === 'on');
+      // 默认开启：只有用户明确关过（存了 off）才保持关闭。旧版本没存过值，
+      // 或者第一次进游戏，都从开启开始。
+      setMusic(enabled !== 'off');
     });
     void AsyncStorage.getItem(effectsKey).catch(() => null).then(value => {
-      if (mounted) setEffects(value === 'on');
+      if (mounted) setEffects(value !== 'off');
     });
     return () => { mounted = false; };
   }, []);

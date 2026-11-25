@@ -77,19 +77,25 @@ function Creature({ kind }: { kind: CreatureKind }) {
 export const CreatureDefinitions = memo(function CreatureDefinitions({ prefix }: { prefix: string }) {
   return <Defs>
     {creatureKinds.map(kind => <G id={`${prefix}-creature-${kind}`} key={kind}><Creature kind={kind} /></G>)}
+    {/* 减速标记：虚线环 + 三根冰棱。形状与颜色双通道，不只靠变蓝传达。 */}
+    <G id={`${prefix}-slow-mark`}>
+      <Circle r="30" fill="none" stroke={c.beacon} strokeWidth="2" strokeDasharray="4 5" strokeOpacity=".85" />
+      <Path d="M0-38V-31M-33-17L-27-14M33-17L27-14"
+        fill="none" stroke={c.beacon} strokeWidth="2.5" strokeLinecap="round" />
+    </G>
   </Defs>;
 });
 
 export const wardenImage = require('../assets/abyss/cable-warden.webp');
 
 const fieldGuide: Record<AbyssEnemy, [string, string, number, number, number]> = {
-  drifter: ['漂囊', '尖头带拖尾，开场常成群出现。', 10, 56, 6],
-  needlefish: ['针鳍鱼', '尖吻和叉尾，体型小但速度最快。', 8, 125, 4],
-  eel: ['裂鳍鳗', '弯曲长身，走位转向时留意追上来的鳗鱼。', 15, 105, 6],
-  crab: ['锈甲蟹', '宽壳和双钳，移动慢，别被它们堵在墙边。', 22, 43, 6],
-  jelly: ['脉光水母', '伞盖宽、触须长，绕行时多留一点距离。', 26, 58, 8],
-  angler: ['灯颌鱼', '头顶悬灯，耐久和接触伤害都较高。', 38, 87, 10],
-  elite: ['精英锈甲蟹', '宽叉巨钳和分层背甲，击倒后掉落宝箱。', 450, 83, 6],
+  drifter: ['漂囊', '尖头带拖尾，开场常成群出现。', 10, 56, 2],
+  needlefish: ['针鳍鱼', '尖吻和叉尾，体型小但速度最快。', 8, 125, 1],
+  eel: ['裂鳍鳗', '弯曲长身，走位转向时留意追上来的鳗鱼。', 15, 105, 2],
+  crab: ['锈甲蟹', '宽壳和双钳，移动慢，别被它们堵在墙边。', 22, 43, 2],
+  jelly: ['脉光水母', '伞盖宽、触须长，绕行时多留一点距离。', 26, 58, 3],
+  angler: ['灯颌鱼', '头顶悬灯，耐久和接触伤害都较高。', 38, 87, 5],
+  elite: ['精英锈甲蟹', '宽叉巨钳和分层背甲，击倒后掉落宝箱。', 450, 83, 2],
   warden: ['断缆守卫', '耐久降到 45% 后进入狂暴。看到落点或脉冲圈就先撤出范围。', 1350, 84, 12],
 };
 

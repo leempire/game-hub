@@ -1446,7 +1446,7 @@ async def _abyss_tick(room: dict):
                 ws.send_abyss_end(room)
                 break
             choosing = bool(gs["pick_until"])
-            snapshot_interval = 5 if choosing else 2
+            snapshot_interval = 5 if choosing else abyss.snapshot_interval(gs)
             if choosing_before != choosing or gs["frame"] % snapshot_interval == 0:
                 ws.send_abyss_tick(room)
             if gs["frame"] % 100 == 0:
