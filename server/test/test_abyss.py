@@ -379,35 +379,35 @@ def test_room_settings_drive_duration_pace_and_map_size(client):
     gs = rm._start_abyss(room)
     assert gs["duration"] == 1800
     assert gs["xp_pace"] == .8
-    assert abyss.snapshot(gs)["bounds"] == [2160, 1500]
+    assert abyss.snapshot(gs)["bounds"] == [3240, 2250]
     assert room_settings.spec_for("abyss", "map_size") is not None
     assert room_settings.spec_for("abyss", "duration") is not None
     assert room_settings.spec_for("abyss", "xp_pace") is not None
 
 
 @pytest.mark.parametrize(("size", "bounds"), [
-    ("small", (1080, 750)), ("medium", (1440, 1000)),
-    ("large", (2160, 1500)), ("endless", (None, None)),
+    ("small", (1620, 1125)), ("medium", (2160, 1500)),
+    ("large", (3240, 2250)), ("endless", (None, None)),
 ])
 def test_map_size_controls_spawns_movement_and_projectile_bounce(size, bounds):
     gs = abyss.create([{"id": 1, "username": "Diver"}], 42, map_size=size)
     diver = gs["players"][1]
     width, height = bounds
     assert abyss.snapshot(gs)["bounds"] == list(bounds)
-    assert (diver["x"], diver["y"]) == ((width or 1440) / 2, (height or 1000) / 2)
+    assert (diver["x"], diver["y"]) == ((width or abyss.WIDTH) / 2, (height or abyss.HEIGHT) / 2)
 
-    edge = (width or 1440) - abyss.WALL_INSET
+    edge = (width or abyss.WIDTH) - abyss.WALL_INSET
     diver["x"] = edge - 1
     abyss.move(gs, 1, 1, 0)
     abyss.advance(gs)
     assert diver["x"] == (edge if width else edge - 1 + abyss.data.PLAYER_SPEED * abyss.STEP)
 
     stats = data.weapon_stats("rune", 1, diver["stats"])
-    abyss._shot(gs, diver, "rune", stats, (width or 1440) - 15, 100, 800, 0,
+    abyss._shot(gs, diver, "rune", stats, (width or abyss.WIDTH) - 15, 100, 800, 0,
                 kind="rune", life=10, radius=12, bounce=True)
     abyss._step_shots(gs)
     shot = gs["shots"][-1]
-    assert (shot["x"], shot["vx"]) == ((width - 12, -800) if width else (1465, 800))
+    assert (shot["x"], shot["vx"]) == ((width - 12, -800) if width else (abyss.WIDTH + 25, 800))
 
     if width is None:
         diver.update(x=-20, y=-40)
@@ -526,6 +526,67 @@ def test_knockback_pushes_away_and_staggers_chase():
     pushed = enemy['x']
     abyss.advance(gs)
     assert enemy['x'] == pushed
+
+
+@pytest.mark.parametrize(("size", "count"), [("small", 4), ("medium", 6), ("large", 8), ("endless", 8)])
+def test_exploration_caches_are_distant_deterministic_and_inside_bounds(size, count):
+    roster = [{"id": 1, "username": "Diver"}]
+    gs = abyss.create(roster, 42, map_size=size)
+    caches = gs["caches"]
+    assert caches == abyss.create(roster, 42, map_size=size)["caches"]
+    assert len(caches) == count
+    assert {cache["kind"] for cache in caches} == {"xp", "repair", "gear", "salvage"}
+    width, height = abyss._bounds(gs)
+    for cache in caches:
+        assert abyss._gap(cache, gs["players"][1]) > 370
+        assert abyss.WALL_INSET < cache["x"] < (width or abyss.WIDTH) - abyss.WALL_INSET
+        assert abyss.WALL_INSET < cache["y"] < (height or abyss.HEIGHT) - abyss.WALL_INSET
+
+
+def test_exploration_rewards_are_collected_once_by_eligible_online_diver():
+    roster = [{"id": uid, "username": str(uid)} for uid in (1, 2)]
+    gs = abyss.create(roster, 42, map_size="small")
+    lead, mate = gs["players"].values()
+    for cache in list(gs["caches"]):
+        for player in (lead, mate):
+            player.update(x=cache["x"], y=cache["y"])
+        abyss._collect(gs, [lead, mate], online_ids=set())
+        assert cache in gs["caches"]
+        if cache["kind"] == "repair":
+            abyss._collect(gs, [lead, mate], online_ids={1, 2})
+            assert cache in gs["caches"]
+            mate["hp"] -= 40
+        abyss._collect(gs, [lead, mate], online_ids={2})
+        assert cache not in gs["caches"]
+    abyss._collect(gs, [lead, mate], online_ids={2})
+    assert lead["weapons"]["rivet"] == 1 and mate["weapons"]["rivet"] == 2
+    assert lead["xp_collected"] == 0 and mate["xp_collected"] == abyss.CACHE_XP
+    assert mate["hp"] == mate["max_hp"] - 10
+    assert gs["salvage"] == abyss.CACHE_SALVAGE
+    assert len(gs["chest_events"]) == 4
+
+
+@pytest.mark.parametrize("kind", ["elite", "warden"])
+def test_elite_and_warden_catch_up_to_fast_diver_without_teleporting(kind):
+    gs = abyss.create([{"id": 1, "username": "Diver"}], 42, map_size="endless")
+    diver = gs["players"][1]
+    diver["weapons"].clear()
+    diver["stats"]["move_speed"] = 1.65
+    gs["spawn_budget"] = -10000
+    abyss._spawn(gs, kind, diver)
+    hunter = gs["enemies"][0]
+    hunter.update(x=diver["x"] - 210, y=diver["y"], next_attack=10000)
+    for _ in range(150):
+        previous = hunter["x"]
+        abyss.move(gs, 1, 1, 0)
+        abyss.advance(gs)
+        assert 0 < hunter["x"] - previous < 23
+        assert abyss._gap(hunter, diver) <= abyss.PURSUIT_RADIUS
+    abyss.stop(gs, 1)
+    before = abyss._gap(hunter, diver)
+    for _ in range(15):
+        abyss.advance(gs)
+    assert abyss._gap(hunter, diver) < before - 20
 
 
 def test_garlic_stacks_knockback_taken_and_elite_resists():

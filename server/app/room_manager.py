@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from app import persistence
 from app import room_settings
+from app import talents
 from app.quick_phrases import phrases_for as quick_phrases_for
 from app import room_timing
 from app.competition_rules import challenge_seed, challenge_info
@@ -1399,10 +1400,20 @@ def set_room_setting(code: str, user_id: int, key: str, value) -> dict:
 _abyss_tasks: dict[str, asyncio.Task] = {}
 
 
+def _abyss_players(players: list[dict]) -> list[dict]:
+    """把每个真人的局外天赋增量带进引擎；bot 与旧房间没有记录时给空字典。"""
+    out = []
+    for player in players:
+        bonus = ({} if player.get("is_bot") or player["id"] < 0
+                 else talents.bonus_for_user(player["id"]))
+        out.append({**player, "talent_bonus": bonus})
+    return out
+
+
 def _start_abyss(room: dict) -> dict:
     duration = int(room.get("abyss_duration") or abyss.DEFAULT_DURATION)
     pace = {"fast": .8, "slow": 1.2}.get(room.get("abyss_xp_pace"), 1.0)
-    gs = abyss.create(room["players"], random.randrange(2**32),
+    gs = abyss.create(_abyss_players(room["players"]), random.randrange(2**32),
                       duration=duration, xp_pace=pace, map_size=room.get("abyss_map_size") or "medium")
     room.update(status="playing", game_state=gs, game_started_at=_now_iso(), empty_since=None)
     persistence.save_room(room)
@@ -1464,6 +1475,9 @@ async def _abyss_tick(room: dict):
 def _settle_abyss(room: dict):
     gs = room["game_state"]
     gs["finished"] = True
+    # 发点在结算前完成，终局快照才能带上本局的 `talent_award`。按房间 + 开局
+    # 时间去重，重复 settle 不会重复加点。
+    talents.award_abyss(room)
     _cancel_all_dc_tasks(room["code"])
     _back_to_lobby(room)
     _touch_activity(room)

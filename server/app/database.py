@@ -9,7 +9,7 @@ import threading
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 
-from app import participants, competition_records, social_schema
+from app import participants, competition_records, social_schema, talent_schema
 
 
 _db_path: str = "data/gamehub.db"
@@ -127,6 +127,7 @@ def _create_tables(conn: sqlite3.Connection):
     participants.create_schema(conn)
     competition_records.create_schema(conn)
     social_schema.create_schema(conn)
+    talent_schema.create_schema(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS lighthouse_saves (
             user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

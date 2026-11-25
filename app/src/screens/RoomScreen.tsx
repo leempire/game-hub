@@ -12,6 +12,7 @@ import { useModalBackGuard } from '../backGuard';
 import { colors, spacing, radius, fontSize } from '../theme';
 import { notify } from '../utils';
 import { RoomSettingsRow, RoomSettingsSheet } from '../roomSettings';
+import { TalentTreeRow, TalentTreeSheet } from '../TalentTree';
 import InviteFriendsModal from '../InviteFriendsModal';
 import { GameHelpButton } from '../help';
 import GameIntro from '../GameIntro';
@@ -56,6 +57,16 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const [swapWaitTo, setSwapWaitTo] = useState<number | null>(null);
   // 邀请好友进房（等待大厅、无密码、未满员时出现）
   const [showInvite, setShowInvite] = useState(false);
+  // 深渊回声的局外天赋树（v1.29）：入口行显示未花点数，抽屉里加点 / 免费重置。
+  // `talentVersion` 只用来让入口行在结算或加点后重新拉一次余额。
+  const [talentOpen, setTalentOpen] = useState(false);
+  const [talentVersion, setTalentVersion] = useState(0);
+  // 稳定引用：抽屉的加载 effect 依赖 onChange，若每次渲染都换新函数会反复拉取。
+  const bumpTalentVersion = useCallback(() => setTalentVersion((v) => v + 1), []);
+  const closeTalents = useCallback(() => {
+    setTalentOpen(false);
+    bumpTalentVersion();
+  }, [bumpTalentVersion]);
   useModalBackGuard(swapFrom !== null, () => setSwapFrom(null));
   // WS sync 到达后 REST 快照即为陈旧数据（如 connected），不再覆盖实时状态
   const syncedRef = useRef(false);
@@ -394,6 +405,13 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           <RoomSettingsRow items={settings} maxItems={room.game === 'abyss' ? 3 : undefined}
             onOpen={() => setSettingsOpen(true)} />
         )}
+        {room.game === 'abyss' && (
+          <TalentTreeRow
+            token={token}
+            refreshKey={(room.round ?? 0) + talentVersion}
+            onOpen={() => setTalentOpen(true)}
+          />
+        )}
         {room.has_password && (
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>密码房</Text>
@@ -526,6 +544,14 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
         onClose={() => setSettingsOpen(false)}
         onPick={(key, value) => socketRef.current?.roomSetting(key, value)}
       />
+      {room.game === 'abyss' && (
+        <TalentTreeSheet
+          visible={talentOpen}
+          token={token}
+          onClose={closeTalents}
+          onChange={bumpTalentVersion}
+        />
+      )}
       {token && (
         <InviteFriendsModal
           visible={showInvite}

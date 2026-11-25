@@ -115,9 +115,22 @@ def main(browser_name='chromium', executable_path=None, isolated=False):
         pa.wait_for_timeout(400)
         ok('房规：20 分钟 + 快速经验')
 
+        pa.get_by_test_id('talent-tree-row').click()
+        sheet = pa.get_by_test_id('talent-sheet')
+        sheet.wait_for(timeout=8000)
+        sheet.get_by_text('深潜体魄', exact=True).wait_for(timeout=8000)
+        assert '潜水员天赋' in body(pa), '天赋树未下发'
+        assert '免费重置' in body(pa), '缺少免费重置入口'
+        pa.get_by_test_id('talent-close').click()
+        sheet.wait_for(state='hidden')
+        ok('房间可查看局外天赋树')
+
         pa.get_by_text('开始游戏', exact=True).click()
         for pg in (pa, pb):
             pg.locator('[data-testid="abyss-arena"]').wait_for(timeout=20000)
+            pg.get_by_test_id('abyss-minimap').wait_for()
+            assert pg.locator('[data-testid^="abyss-map-player-"]').count() == 2
+            assert pg.locator('[data-testid^="abyss-map-cache-"]').count() == 6
         ok('双方进入战场')
 
         clock = pa.locator('[data-testid="abyss-clock"]').inner_text()
@@ -150,11 +163,35 @@ def main(browser_name='chromium', executable_path=None, isolated=False):
             finally:
                 pa.keyboard.up('d')
             ok('队友视角看到了实时移动')
+
+            def approach_salvage(gs):
+                cache = next(item for item in gs['caches'] if item['kind'] == 'salvage')
+                gs['players'][lead].update(x=cache['x'] - 68, y=cache['y'])
+                return cache['id']
+
+            cache_id = in_match(code, approach_salvage)
+            pa.get_by_test_id(f'abyss-cache-{cache_id}').wait_for()
+            pa.keyboard.down('d')
+            try:
+                for pg in (pa, pb):
+                    pg.get_by_test_id(f'abyss-map-cache-{cache_id}').wait_for(state='detached')
+            finally:
+                pa.keyboard.up('d')
+            pa.get_by_text(re.compile(r'打捞储备 · 全队打捞分 \+100')).wait_for()
+            ok('走近打捞补给后获得奖励，双方小地图同时移除标记')
             in_match(code, lambda gs: gs.update(xp=abyss.threshold(gs)))
 
         pa.get_by_text('选择强化 ·', exact=False).wait_for(timeout=90000)
         choices = pa.locator('[data-testid^="abyss-choice-"]')
         assert choices.count() >= 3, f'升级候选不足 3 个：{choices.count()}'
+        art = choices.get_by_test_id('abyss-item-art')
+        assert art.count() == choices.count()
+        for choice in choices.all():
+            assert choice.get_by_test_id('abyss-item-kind').inner_text() in ('武器', '道具')
+        pa.wait_for_function("""count => {
+          const images = [...document.querySelectorAll('[data-testid="abyss-item-art"] img')];
+          return images.length === count && images.every(img => img.complete && img.naturalWidth > 0);
+        }""", arg=choices.count(), timeout=5000)
         text = body(pa)
         assert '等待队友选择' not in text, '自己的升级候选没有下发'
         pa.keyboard.press('1')

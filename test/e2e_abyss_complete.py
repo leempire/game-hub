@@ -268,7 +268,7 @@ def main(minutes):
         # 下面的移动 / 重连 / 低速断言默认玩家站着挨打；怪潮版本里自然刷怪会
         # 让两人在断言前掉血甚至倒地。这里先压住自然刷怪，后续用例按需手动
         # 生成敌人或恢复状态。
-        in_match(code, lambda gs: (gs.update(spawn_budget=-10000), gs['enemies'].clear()))
+        in_match(code, lambda gs: (gs.update(spawn_budget=-10000), gs['enemies'].clear(), gs['caches'].clear()))
 
         def host_input():
             return in_match(code, lambda gs: (gs['players'][host_id]['dx'], gs['players'][host_id]['input_until']))
@@ -876,13 +876,14 @@ def main(minutes):
 
         def bounce_rune(gs):
             diver = gs['players'][host_id]
-            diver.update(x=1320, y=500)
+            width, _ = abyss._bounds(gs)
+            diver.update(x=width - 120, y=500)
             stats = abyss.data.weapon_stats('rune', 1, diver['stats'])
-            abyss._shot(gs, diver, 'rune', stats, abyss.WIDTH - 22, 600, 800, 0,
+            abyss._shot(gs, diver, 'rune', stats, width - 22, 600, 800, 0,
                         kind='rune', life=18, radius=12, bounce=True)
             rune_id = gs['shots'][-1]['id']
             stats = abyss.data.weapon_stats('charge', 1, diver['stats'])
-            abyss._shot(gs, diver, 'charge', stats, 1320, 540, -200, 0,
+            abyss._shot(gs, diver, 'charge', stats, diver['x'], 540, -200, 0,
                         kind='fire', life=18, radius=24)
             return rune_id
 
@@ -898,6 +899,20 @@ def main(minutes):
         fireball = host.locator(r'use[href$="-shot-charge"], use[xlink\:href$="-shot-charge"]').first
         fireball.wait_for()
         assert fireball.evaluate('node => node.transform.baseVal.getItem(2).matrix.a') == 2
+        host.wait_for_function("""async () => {
+          const board = document.querySelector('[data-testid="abyss-world"]')?.ownerSVGElement;
+          if (!board) return false;
+          const names = ['shot-harpoon', 'shot-charge', 'shot-rune', 'area-bible', 'area-la_borra'];
+          return (await Promise.all(names.map(async name => {
+            const image = board.querySelector(`g[id$="-${name}"] image`);
+            const src = image?.href.baseVal;
+            if (!src || !src.includes('/items/')) return false;
+            const asset = new Image();
+            asset.src = src;
+            try { await asset.decode(); } catch { return false; }
+            return asset.naturalWidth > 0;
+          }))).every(Boolean);
+        }""")
         ok('火球和声呐弹复用 SVG，火球按半径缩放，声呐亮纹随反弹转向')
 
         def place_dense_wave(gs):
@@ -2014,6 +2029,9 @@ def main(minutes):
             diver = next(iter(gs['players'].values()))
             gs['enemies'].clear()
             gs['loot'].clear()
+            # Natural waves may have chipped an enemy before this checkpoint;
+            # reset so the assertion only sees the 9 damage applied below.
+            diver['damage_dealt'] = 0
             abyss._spawn(gs, 'drifter', diver)
             enemy = gs['enemies'][-1]
             enemy['hp'] = 9
@@ -2029,14 +2047,45 @@ def main(minutes):
         solo_report.get_by_text('拾取经验 7', exact=False).wait_for()
         solo_report.get_by_text('输出伤害 9', exact=False).wait_for()
         assert solo_report.get_by_text('全队击退', exact=True).count() == 0
+        award = solo.get_by_test_id('abyss-talent-award')
+        award.get_by_text('天赋点 +1', exact=True).wait_for()
+        award.get_by_text('完成试潜 +1', exact=False).wait_for()
         ok('单人结算显示实际输出伤害和拾取经验')
-        def restart_solo():
+
+        def back_to_room():
             solo.get_by_role('button', name='返回房间').click()
             solo.get_by_text('房间号', exact=True).wait_for()
+
+        def start_solo():
             solo.get_by_text('开始游戏', exact=True).click()
             solo.get_by_test_id('abyss-arena').wait_for()
 
-        restart_solo()
+        def restart_solo():
+            back_to_room()
+            start_solo()
+
+        # 结算后回房间：入口行应显示 1 点，抽屉里可加点、可免费重置。
+        back_to_room()
+        solo.get_by_test_id('talent-tree-row').click()
+        sheet = solo.get_by_test_id('talent-sheet')
+        sheet.wait_for()
+        sheet.get_by_text('深潜体魄', exact=True).wait_for()
+        sheet.get_by_text('过载火力', exact=True).wait_for()
+        sheet.get_by_text('打捞直觉', exact=True).wait_for()
+        vitality = solo.get_by_test_id('talent-node-vitality')
+        assert '1' in solo.get_by_test_id('talent-points').inner_text()
+        solo.get_by_test_id('talent-add-vitality').click()
+        vitality.get_by_text('Lv.1/5', exact=True).wait_for()
+        assert '0' in solo.get_by_test_id('talent-points').inner_text()
+        solo.get_by_test_id('talent-reset').click()
+        solo.get_by_test_id('talent-reset-confirm').wait_for()
+        solo.get_by_test_id('talent-reset-confirm-btn').click()
+        vitality.get_by_text('Lv.0/5', exact=True).wait_for()
+        assert '1' in solo.get_by_test_id('talent-points').inner_text()
+        solo.get_by_test_id('talent-close').click()
+        sheet.wait_for(state='hidden')
+        ok('房间天赋树：结算得点、可加点、免费重置并全额返还')
+        start_solo()
         in_match(solo_code, lambda gs: abyss._hurt_diver(gs, next(iter(gs['players'].values())), 200))
         solo.get_by_text('全队失压', exact=True).wait_for()
         solo_report.get_by_text('潜水员失压，回收任务结束。', exact=True).wait_for()

@@ -491,3 +491,65 @@ export function fetchMyHistory(
     token,
   );
 }
+
+// --- 深渊回声局外天赋 API ---
+
+export interface TalentNode {
+  key: string;
+  name: string;
+  detail: string;
+  max: number;
+  cost: number;
+  /** 当前等级（0 = 未点）。 */
+  rank: number;
+  /** 点数够且未满级；只用于样式，点击仍会得到服务端的明确拒绝。 */
+  affordable: boolean;
+}
+
+export interface TalentBranch {
+  key: string;
+  name: string;
+  summary: string;
+  nodes: TalentNode[];
+}
+
+export interface TalentAwardRuleItem {
+  key: string;
+  label: string;
+  detail: string;
+}
+
+export interface TalentProfile {
+  /** 未花的天赋点。 */
+  points: number;
+  /** 历史累计获得（重置不会减少）。 */
+  earned: number;
+  /** 当前已花在树上的点数。 */
+  spent: number;
+  levels: Record<string, number>;
+  tree: TalentBranch[];
+  rules: {
+    per_game_max: number;
+    active_kills: number;
+    active_damage: number;
+    items: TalentAwardRuleItem[];
+    note: string;
+  };
+}
+
+export function getTalents(token: string): Promise<TalentProfile> {
+  return apiFetch<TalentProfile>('/api/talents', {}, token);
+}
+
+export function allocateTalent(token: string, node: string): Promise<TalentProfile> {
+  return apiFetch<TalentProfile>('/api/talents/allocate', {
+    method: 'POST',
+    body: JSON.stringify({ node }),
+  }, token);
+}
+
+export function resetTalents(token: string): Promise<TalentProfile> {
+  return apiFetch<TalentProfile>('/api/talents/reset', {
+    method: 'POST',
+  }, token);
+}

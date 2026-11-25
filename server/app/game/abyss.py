@@ -14,9 +14,17 @@ import random
 
 from app.game import abyss_data as data
 
-WIDTH, HEIGHT = 1440, 1000
-MAP_SIZES = {"small": (1080, 750), "medium": (WIDTH, HEIGHT),
-             "large": (2160, 1500), "endless": (None, None)}
+WIDTH, HEIGHT = 2160, 1500
+MAP_SIZES = {"small": (1620, 1125), "medium": (WIDTH, HEIGHT),
+             "large": (3240, 2250), "endless": (None, None)}
+LEGACY_MAP_SIZES = {"small": (1080, 750), "medium": (1440, 1000),
+                    "large": (2160, 1500), "endless": (None, None)}
+CACHE_PICKUP_RADIUS = 36
+CACHE_XP = 12
+CACHE_SALVAGE = 100
+PURSUIT_RADIUS = 240
+PURSUIT_NEAR_RADIUS = 205
+PURSUIT_KINDS = {"elite", "warden"}
 WALL_INSET = 22
 STEP = .05
 DEFAULT_DURATION = 720
@@ -102,20 +110,30 @@ def create(players, seed, duration=DEFAULT_DURATION, xp_pace=1.0, map_size="medi
         "pick_until": 0, "kills": 0, "salvage": 0, "result": None,
     }
     for seat, player in enumerate(players):
+        # 局外天赋由房间层换算成纯字典注入（引擎不认识数据库）。bot 没有天赋。
+        talent = player.get("talent_bonus") or {}
         p = {
             "id": player["id"],
             "name": player.get("nickname") or player["username"],
             "x": (width or WIDTH) / 2 + 36 * (seat - (len(players) - 1) / 2),
             "y": (height or HEIGHT) / 2, "angle": 0, "hp": data.BASE_MAX_HP,
-            "max_hp": data.BASE_MAX_HP, "invincible": 0,
+            "max_hp": data.BASE_MAX_HP,
+            "invincible": round(float(talent.get("start_invincible", 0)) * FRAMES_PER_SECOND),
             "dx": 0, "dy": 0, "input_until": 0, "down": 0, "rescue": 0,
             "out": False, "departed": False,
-            "weapons": {"rivet": 1}, "passives": {}, "cycles": {},
+            "weapons": {"rivet": min(
+                data.WEAPONS["rivet"]["max_level"],
+                1 + int(talent.get("start_weapon_level", 0)),
+            )}, "passives": {}, "cycles": {},
             "orbits": {}, "orbit_hits": {}, "choices": [],
+            "talent": dict(talent),
             "stats": dict(data.BASE_STATS), "kills": 0, "damage_dealt": 0.0, "xp_collected": 0, "rescues": 0, "last_crit_heal": -20,
         }
         _refresh_stats(p)
+        # 应急储备是「全队各自的开局打捞分」，直接加到共享打捞池。
+        gs["salvage"] += int(talent.get("start_salvage", 0))
         gs["players"][p["id"]] = p
+    gs["caches"] = _exploration_caches(gs, seed, width or WIDTH, height or HEIGHT)
     return gs
 
 
@@ -172,7 +190,9 @@ def _gap_xy(a, x, y):
 
 
 def _bounds(gs):
-    return MAP_SIZES[gs.get("map_size", "medium")]
+    # Persisted games from before exploration keep their original playing area.
+    sizes = MAP_SIZES if "caches" in gs else LEGACY_MAP_SIZES
+    return sizes[gs.get("map_size", "medium")]
 
 
 def _clamp(value, limit):
@@ -203,7 +223,7 @@ def snapshot_interval(gs):
 
 def _refresh_stats(p):
     old_max = p.get("max_hp", data.BASE_MAX_HP)
-    stats = data.player_stats(p["passives"])
+    stats = data.player_stats(p["passives"], p.get("talent"))
     p["stats"] = stats
     p["max_hp"] = stats["max_hp"]
     if p["hp"] > 0:
@@ -280,6 +300,25 @@ def _defeat_effect(gs, enemy):
 
 def _spawn_chest(gs, x, y):
     gs["chests"].append({"id": _id(gs), "x": x, "y": y})
+
+
+def _exploration_caches(gs, seed, width, height):
+    # At least one destination in each quadrant. Layout randomness is independent
+    # of combat rolls so a change to the cache layout does not change enemy spawns.
+    sites = [(.17, .21), (.82, .20), (.79, .83), (.19, .82)]
+    kinds = ["xp", "gear", "repair", "salvage"]
+    rng = random.Random(seed)
+    rng.shuffle(kinds)
+    if gs["map_size"] != "small":
+        sites.extend([(.5, .11), (.5, .89)])
+        kinds.extend(["xp", "repair"])
+    if gs["map_size"] in ("large", "endless"):
+        sites.extend([(.10, .5), (.90, .5)])
+        kinds.extend(["gear", "salvage"])
+    return [{"id": -1 - index, "kind": kind,
+             "x": round((x + rng.uniform(-.025, .025)) * width),
+             "y": round((y + rng.uniform(-.025, .025)) * height)}
+            for index, ((x, y), kind) in enumerate(zip(sites, kinds))]
 
 
 def _drop_loot(gs, enemy, units):
@@ -962,6 +1001,39 @@ def _collect(gs, alive, *, online_ids=None):
         else:
             chests.append(chest)
     gs["chests"] = chests
+    _collect_caches(gs, collectors)
+
+
+def _collect_caches(gs, collectors):
+    if not gs.get("caches"):
+        return
+    remaining = []
+    for cache in gs["caches"]:
+        kind = cache["kind"]
+        eligible = (player for player in collectors
+                    if kind != "repair" or player["hp"] < player["max_hp"])
+        target = min(eligible, key=lambda p: _gap(cache, p), default=None)
+        if target is None or _gap(cache, target) > CACHE_PICKUP_RADIUS:
+            remaining.append(cache)
+            continue
+        if kind == "xp":
+            before = gs["xp"]
+            _grant_xp(gs, target, CACHE_XP)
+            text = f"信标储备 · 全队经验 +{gs['xp'] - before}"
+        elif kind == "repair":
+            before = target["hp"]
+            target["hp"] = _hp_after_repair(target, "repair")
+            text = f"紧急补片 · 耐久 +{round(target['hp'] - before, 1):g}"
+        elif kind == "gear":
+            text = f"装备补给 · {_chest_reward(gs, target, allow_evolution=False)}"
+        else:
+            gs["salvage"] += CACHE_SALVAGE
+            text = f"打捞储备 · 全队打捞分 +{CACHE_SALVAGE}"
+        gs["chest_events"].append({
+            "frame": gs["frame"], "player": target["id"], "text": f"{target['name']}：{text}",
+        })
+    gs["chest_events"] = gs["chest_events"][-12:]
+    gs["caches"] = remaining
 
 
 def _upgrade_weapon(p, weapon, gs=None):
@@ -1018,8 +1090,8 @@ def _try_evolve(p):
     return None
 
 
-def _chest_reward(gs, p):
-    evolved = _try_evolve(p)
+def _chest_reward(gs, p, *, allow_evolution=True):
+    evolved = _try_evolve(p) if allow_evolution else None
     if evolved:
         base, target = evolved
         return f"{data.WEAPONS[base]['name']} 进化为 {data.WEAPONS[target]['name']}"
@@ -1342,6 +1414,7 @@ def advance(gs, *, online_ids=None):
     _spawn_events(gs, seconds, alive)
 
     diver_positions = [(p["x"], p["y"]) for p in alive]
+    pursuit_speed = max(data.PLAYER_SPEED * p["stats"]["move_speed"] for p in alive)
     for enemy in gs["enemies"]:
         attack = enemy.get("attack")
         if attack and attack["kind"] == "pulse" and not attack["resolved"]:
@@ -1355,13 +1428,26 @@ def advance(gs, *, online_ids=None):
             if distance_sq < nearest_sq:
                 nearest_sq, dx, dy = distance_sq, ox, oy
         enemy["angle"] = math.atan2(dy, dx)
-        if nearest_sq > 0 and elapsed >= enemy.get("stagger_until", 0):
-            speed = enemy["speed"]
-            if elapsed < enemy.get("slow_until", 0):
-                speed *= enemy.get("slow_factor", 1.0)
-            fraction = min(1, speed * STEP / math.sqrt(nearest_sq))
-            enemy["x"] += dx * fraction
-            enemy["y"] += dy * fraction
+        if not nearest_sq:
+            continue
+        speed = enemy["speed"]
+        pursuit = False
+        if speed > 0 and enemy["kind"] in PURSUIT_KINDS:
+            radius = PURSUIT_NEAR_RADIUS if enemy.get("pursuing") else PURSUIT_RADIUS
+            pursuit = nearest_sq > radius * radius
+            enemy["pursuing"] = pursuit
+        if not pursuit and elapsed < enemy.get("stagger_until", 0):
+            continue
+        distance = math.sqrt(nearest_sq)
+        if pursuit:
+            # Catch up without teleporting, then return to normal movement and
+            # crowd control inside the shorter radius.
+            speed = max(speed, pursuit_speed + min(160, 55 + distance - PURSUIT_NEAR_RADIUS))
+        elif elapsed < enemy.get("slow_until", 0):
+            speed *= enemy.get("slow_factor", 1.0)
+        fraction = min(1, speed * STEP / distance)
+        enemy["x"] += dx * fraction
+        enemy["y"] += dy * fraction
 
     for p in alive:
         for weapon, level in list(p["weapons"].items()):
@@ -1502,6 +1588,7 @@ def snapshot(gs):
             }} if p["hp"] and any(choice in REPAIR_AMOUNTS for choice in p["choices"]) else {}),
             "evolution_requirements": _evolution_requirements(p),
             **({"damage_dealt": round(p["damage_dealt"], 1)} if "damage_dealt" in p else {}),
+            **({"talent_award": p["talent_award"]} if p.get("talent_award") else {}),
             "kills": p["kills"], "xp_collected": p.get("xp_collected", 0), "rescues": p.get("rescues", 0),
             "move_speed": round(data.PLAYER_SPEED * p["stats"]["move_speed"]),
             "stats": {
@@ -1518,6 +1605,7 @@ def snapshot(gs):
                     for e in gs["enemies"]],
         "loot": [[item["id"], *point(item)] for item in gs["loot"]],
         "chests": [[chest["id"], *point(chest)] for chest in gs["chests"]],
+        "caches": [[cache["id"], cache["kind"], *point(cache)] for cache in gs.get("caches", ())],
         "chest_events": [
             event for event in gs["chest_events"]
             if event["frame"] >= gs["frame"] - 100

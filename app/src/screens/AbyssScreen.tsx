@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, Vibration, View } from 'react-native';
+import { ActivityIndicator, Animated, AppState, Image, Platform, Pressable, ScrollView, StyleSheet, Text, Vibration, View } from 'react-native';
 import type { GestureResponderEvent } from 'react-native';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AbyssBoard from '../AbyssBoard';
+import AbyssMinimap, { abyssMinimapLayout } from '../AbyssMinimap';
 import AbyssAudio from '../AbyssAudio';
 import AbyssResult from '../AbyssResult';
+import { abyssItemArt } from '../abyssItemArt';
 import {
   abyssChangeText, abyssClock, abyssEvolutionPreview, abyssItemInfo, abyssLevelOf, abyssLowPressure, abyssNewWeaponText, abyssPassives, abyssRescue, abyssResults, abyssVibrationDuration, abyssWeapons,
   type AbyssChoice, type AbyssPassive, type AbyssState, type AbyssWeapon, type XY,
@@ -460,6 +462,8 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
       ? `${rescuer?.name ?? '队友'}正在救援 · ${rescuePercent}% · 剩 ${me.down}s`
       : `待救援 ${me.down}s · 等待队友靠近`);
   const showArenaNotice = !!game && !finished && !game.choice_seconds && !!(networkStatus || rescueNotice);
+  const minimap = game && !finished && !game.choice_seconds
+    ? abyssMinimapLayout(size.width, size.height, showArenaNotice ? noticeHeight : 0) : null;
   const rescueSeconds = me?.hp ? nearestRescue?.down : me && !me.out ? me.down : undefined;
   const rescueUrgent = rescueSeconds !== undefined && rescueSeconds <= 3;
   const growthBoost = game?.growth_boost ?? 1;
@@ -545,7 +549,9 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
       onResponderRelease={() => stopDrag(true)} onResponderTerminate={() => stopDrag()}>
       {game && <AbyssBoard game={game} uid={user?.id} watching={watchedDiver?.id} offlinePeers={offlinePeers} size={size} input={input} connected={liveConnection}
         bannerHeight={showChestRewards || wardenWarning ? bannerHeight : 0}
-        noticeHeight={showArenaNotice ? noticeHeight : 0} />}
+        noticeHeight={showArenaNotice ? noticeHeight : 0} minimap={minimap} />}
+      {game && minimap && <AbyssMinimap game={game} uid={user?.id} watching={watchedDiver?.id}
+        offlinePeers={offlinePeers} {...minimap} />}
       <Animated.View testID="abyss-stick" pointerEvents="none" accessible={false}
         style={[styles.stick, { opacity: stick.opacity, transform: stick.anchor.getTranslateTransform() }]}>
         <Animated.View testID="abyss-stick-thumb" style={[styles.stickThumb, { transform: stick.thumb.getTranslateTransform() }]} />
@@ -607,17 +613,23 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
                 const suffix = info.kind === 'utility' ? '' : rank ? ` Lv.${rank} → ${rank + 1}` : ' 新';
                 return <Pressable key={choice} testID={`abyss-choice-${choice}`} style={[styles.choice, pendingChoice === choice && styles.selectedChoice]}
                   accessibilityRole="button" onPress={() => choose(choice)} disabled={!inPlay || pendingChoice !== null}>
-                  <View style={styles.choiceTitle}>
-                    {Platform.OS === 'web' && <Text style={styles.choiceKey}>{index + 1}</Text>}
-                    <Text style={styles.text}>{info.title}{suffix}</Text>
+                  <Image testID="abyss-item-art" accessible={false} source={abyssItemArt[choice]} resizeMode="contain" style={styles.choiceArt} />
+                  <View style={styles.choiceBody}>
+                    <View style={styles.choiceTitle}>
+                      {Platform.OS === 'web' && <Text style={styles.choiceKey}>{index + 1}</Text>}
+                      <Text testID="abyss-item-kind" style={[styles.choiceKind, info.kind === 'weapon' && styles.weaponKind]}>
+                        {info.kind === 'weapon' ? '武器' : '道具'}
+                      </Text>
+                      <Text style={styles.choiceName}>{info.title}{suffix}</Text>
+                    </View>
+                    <Text style={styles.label}>{repair
+                      ? repair[0] === repair[1] ? '耐久已满' : `耐久 ${repair[0]} → ${repair[1]}`
+                      : detail}</Text>
+                    {!!newWeaponStats?.length && <Text style={styles.label}>{abyssNewWeaponText(newWeaponStats)}</Text>}
+                    {!!evolutions.length && <Text style={styles.evolutionReady}>
+                      可用宝箱进化为{evolutions.join('、')}
+                    </Text>}
                   </View>
-                  <Text style={styles.label}>{repair
-                    ? repair[0] === repair[1] ? '耐久已满' : `耐久 ${repair[0]} → ${repair[1]}`
-                    : detail}</Text>
-                  {!!newWeaponStats?.length && <Text style={styles.label}>{abyssNewWeaponText(newWeaponStats)}</Text>}
-                  {!!evolutions.length && <Text style={styles.evolutionReady}>
-                    可用宝箱进化为{evolutions.join('、')}
-                  </Text>}
                 </Pressable>;
               }) : <>
                 {!!choosingNames && <Text testID="abyss-choice-waiting" accessibilityLiveRegion="polite" style={styles.label}>
@@ -676,7 +688,10 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
           ].filter(Boolean).join(' + ');
           return <View key={weapon} style={styles.gearRow}>
             <View style={styles.inventoryRow}>
-              <Text style={styles.text}>{info.title}</Text>
+              <View style={styles.gearName}>
+                <Image accessible={false} source={abyssItemArt[weapon]} resizeMode="contain" style={styles.gearArt} />
+                <Text style={styles.choiceName}>{info.title}</Text>
+              </View>
               <Text style={evolved ? styles.evolutionReady : styles.label}>{evolved ? '已进化' : `Lv.${level}`}</Text>
             </View>
             <Text style={[styles.itemDetail, styles.label]}>{info.detail}</Text>
@@ -689,7 +704,10 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
         {passiveEntries.length ? passiveEntries.map(([passive, level]) =>
           <View key={passive} style={styles.gearRow}>
             <View style={styles.inventoryRow}>
-              <Text style={styles.text}>{abyssPassives[passive].title}</Text>
+              <View style={styles.gearName}>
+                <Image accessible={false} source={abyssItemArt[passive]} resizeMode="contain" style={styles.gearArt} />
+                <Text style={styles.choiceName}>{abyssPassives[passive].title}</Text>
+              </View>
               <Text style={styles.label}>Lv.{level}</Text>
             </View>
             <Text style={[styles.itemDetail, styles.label]}>{abyssPassives[passive].detail}</Text>
@@ -730,7 +748,13 @@ const styles = StyleSheet.create({
   hud: { flexDirection: 'row', padding: 8, gap: 6 },
   readout: { flex: 1, padding: 7, gap: 3, borderWidth: 1, borderColor: c.edge, borderRadius: 8, backgroundColor: c.panel },
   label: { color: c.muted, fontSize: 13 },
-  choiceTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  choiceTitle: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  choiceBody: { flex: 1, minWidth: 0, gap: 2 },
+  choiceArt: { width: 48, height: 48, borderRadius: 6, backgroundColor: c.panel },
+  choiceKind: { color: c.brass, fontSize: 12, fontWeight: '700', borderWidth: 1,
+    borderColor: c.edge, borderRadius: 4, paddingHorizontal: 4 },
+  weaponKind: { color: c.signal },
+  choiceName: { flexShrink: 1, color: c.text, fontSize: 15, fontWeight: '600' },
   choiceKey: { color: c.signal, fontSize: 13, fontWeight: '700', minWidth: 20, textAlign: 'center',
     borderWidth: 1, borderColor: c.edge, borderRadius: 4 },
   value: { color: c.signal, fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
@@ -773,8 +797,11 @@ const styles = StyleSheet.create({
   title: { color: c.text, fontSize: 21, fontWeight: '800' },
   text: { color: c.text, fontSize: 15, fontWeight: '600' },
   section: { color: c.signal, fontSize: 14, fontWeight: '700', marginTop: 4 },
-  choice: { minHeight: 48, backgroundColor: c.deep, padding: 7, borderRadius: 7, borderWidth: 1, borderColor: c.edge },
+  choice: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: c.deep, padding: 7, borderRadius: 7, borderWidth: 1, borderColor: c.edge },
   gearRow: { backgroundColor: c.deep, borderRadius: 6 },
+  gearName: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  gearArt: { width: 32, height: 32 },
   evolutionReady: { color: c.signal, fontSize: 13, fontWeight: '700' },
   itemDetail: { paddingHorizontal: 8, paddingBottom: 6 },
   inventoryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
