@@ -145,6 +145,12 @@ export interface AbyssPlayer {
   damage_dealt?: number;
   xp_collected?: number;
   rescues?: number;
+  /** 终局结算的局外天赋点（只有真正参与了本局的真人才有）。 */
+  talent_award?: {
+    points: number;
+    balance: number;
+    detail: { key?: string; label: string; points: number }[];
+  };
   move_speed: number;
   stats: AbyssStats;
 }
@@ -215,7 +221,7 @@ export function abyssVibrationDuration(
 
 export type AbyssSummary = Pick<AbyssState, 'result'> &
   Partial<Pick<AbyssState, 'seconds' | 'level' | 'kills' | 'salvage' | 'boss' | 'boss_dead' | 'map_size'>> & {
-    players: Pick<AbyssPlayer, 'id' | 'name' | 'kills' | 'hp' | 'out' | 'weapons' | 'passives' | 'xp_collected' | 'rescues' | 'damage_dealt'>[];
+    players: Pick<AbyssPlayer, 'id' | 'name' | 'kills' | 'hp' | 'out' | 'weapons' | 'passives' | 'xp_collected' | 'rescues' | 'damage_dealt' | 'talent_award'>[];
   };
 
 export const abyssResults = {

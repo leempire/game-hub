@@ -29,6 +29,15 @@ export default function AbyssResult({ game, uid }: { game: AbyssSummary; uid?: n
         <Text style={styles.value}>{value}</Text>
       </View>)}
     </View>}
+    {me?.talent_award && <View testID="abyss-talent-award" style={styles.talentBox}>
+      <Text style={styles.talentTitle}>天赋点 +{me.talent_award.points}</Text>
+      <Text style={styles.label}>
+        {me.talent_award.detail.map(item => `${item.label} +${item.points}`).join(' · ')}
+      </Text>
+      <Text style={styles.label}>
+        现有 {me.talent_award.balance} 点 · 回房间打开天赋树加点
+      </Text>
+    </View>}
     {(isTeam || game.players.some(player => player.damage_dealt !== undefined || player.xp_collected !== undefined || player.rescues !== undefined)) && <>
       <Text style={styles.section}>{isTeam ? '潜水小队' : '本局贡献'}</Text>
       {game.players.map(player => {
@@ -77,6 +86,8 @@ const styles = StyleSheet.create({
   metrics: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 6 },
   metric: { width: '49%', padding: 7, gap: 2, backgroundColor: c.deep, borderRadius: 6 },
   value: { color: c.signal, fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  talentBox: { gap: 3, backgroundColor: c.deep, borderRadius: 6, padding: 7 },
+  talentTitle: { color: c.signal, fontSize: 15, fontWeight: '800' },
   section: { color: c.signal, fontSize: 14, fontWeight: '700', marginTop: 4 },
   diver: { gap: 3, backgroundColor: c.deep, borderRadius: 6, padding: 6 },
   row: { flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'space-between' },

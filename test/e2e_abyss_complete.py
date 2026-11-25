@@ -2029,14 +2029,45 @@ def main(minutes):
         solo_report.get_by_text('拾取经验 7', exact=False).wait_for()
         solo_report.get_by_text('输出伤害 9', exact=False).wait_for()
         assert solo_report.get_by_text('全队击退', exact=True).count() == 0
+        award = solo.get_by_test_id('abyss-talent-award')
+        award.get_by_text('天赋点 +1', exact=True).wait_for()
+        award.get_by_text('完成试潜 +1', exact=False).wait_for()
         ok('单人结算显示实际输出伤害和拾取经验')
-        def restart_solo():
+
+        def back_to_room():
             solo.get_by_role('button', name='返回房间').click()
             solo.get_by_text('房间号', exact=True).wait_for()
+
+        def start_solo():
             solo.get_by_text('开始游戏', exact=True).click()
             solo.get_by_test_id('abyss-arena').wait_for()
 
-        restart_solo()
+        def restart_solo():
+            back_to_room()
+            start_solo()
+
+        # 结算后回房间：入口行应显示 1 点，抽屉里可加点、可免费重置。
+        back_to_room()
+        solo.get_by_test_id('talent-tree-row').click()
+        sheet = solo.get_by_test_id('talent-sheet')
+        sheet.wait_for()
+        sheet.get_by_text('深潜体魄', exact=True).wait_for()
+        sheet.get_by_text('过载火力', exact=True).wait_for()
+        sheet.get_by_text('打捞直觉', exact=True).wait_for()
+        vitality = solo.get_by_test_id('talent-node-vitality')
+        assert '1' in solo.get_by_test_id('talent-points').inner_text()
+        solo.get_by_test_id('talent-add-vitality').click()
+        vitality.get_by_text('Lv.1/5', exact=True).wait_for()
+        assert '0' in solo.get_by_test_id('talent-points').inner_text()
+        solo.get_by_test_id('talent-reset').click()
+        solo.get_by_test_id('talent-reset-confirm').wait_for()
+        solo.get_by_test_id('talent-reset-confirm-btn').click()
+        vitality.get_by_text('Lv.0/5', exact=True).wait_for()
+        assert '1' in solo.get_by_test_id('talent-points').inner_text()
+        solo.get_by_test_id('talent-close').click()
+        sheet.wait_for(state='hidden')
+        ok('房间天赋树：结算得点、可加点、免费重置并全额返还')
+        start_solo()
         in_match(solo_code, lambda gs: abyss._hurt_diver(gs, next(iter(gs['players'].values())), 200))
         solo.get_by_text('全队失压', exact=True).wait_for()
         solo_report.get_by_text('潜水员失压，回收任务结束。', exact=True).wait_for()

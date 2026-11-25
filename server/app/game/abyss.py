@@ -102,19 +102,28 @@ def create(players, seed, duration=DEFAULT_DURATION, xp_pace=1.0, map_size="medi
         "pick_until": 0, "kills": 0, "salvage": 0, "result": None,
     }
     for seat, player in enumerate(players):
+        # 局外天赋由房间层换算成纯字典注入（引擎不认识数据库）。bot 没有天赋。
+        talent = player.get("talent_bonus") or {}
         p = {
             "id": player["id"],
             "name": player.get("nickname") or player["username"],
             "x": (width or WIDTH) / 2 + 36 * (seat - (len(players) - 1) / 2),
             "y": (height or HEIGHT) / 2, "angle": 0, "hp": data.BASE_MAX_HP,
-            "max_hp": data.BASE_MAX_HP, "invincible": 0,
+            "max_hp": data.BASE_MAX_HP,
+            "invincible": round(float(talent.get("start_invincible", 0)) * FRAMES_PER_SECOND),
             "dx": 0, "dy": 0, "input_until": 0, "down": 0, "rescue": 0,
             "out": False, "departed": False,
-            "weapons": {"rivet": 1}, "passives": {}, "cycles": {},
+            "weapons": {"rivet": min(
+                data.WEAPONS["rivet"]["max_level"],
+                1 + int(talent.get("start_weapon_level", 0)),
+            )}, "passives": {}, "cycles": {},
             "orbits": {}, "orbit_hits": {}, "choices": [],
+            "talent": dict(talent),
             "stats": dict(data.BASE_STATS), "kills": 0, "damage_dealt": 0.0, "xp_collected": 0, "rescues": 0, "last_crit_heal": -20,
         }
         _refresh_stats(p)
+        # 应急储备是「全队各自的开局打捞分」，直接加到共享打捞池。
+        gs["salvage"] += int(talent.get("start_salvage", 0))
         gs["players"][p["id"]] = p
     return gs
 
@@ -203,7 +212,7 @@ def snapshot_interval(gs):
 
 def _refresh_stats(p):
     old_max = p.get("max_hp", data.BASE_MAX_HP)
-    stats = data.player_stats(p["passives"])
+    stats = data.player_stats(p["passives"], p.get("talent"))
     p["stats"] = stats
     p["max_hp"] = stats["max_hp"]
     if p["hp"] > 0:
@@ -1502,6 +1511,7 @@ def snapshot(gs):
             }} if p["hp"] and any(choice in REPAIR_AMOUNTS for choice in p["choices"]) else {}),
             "evolution_requirements": _evolution_requirements(p),
             **({"damage_dealt": round(p["damage_dealt"], 1)} if "damage_dealt" in p else {}),
+            **({"talent_award": p["talent_award"]} if p.get("talent_award") else {}),
             "kills": p["kills"], "xp_collected": p.get("xp_collected", 0), "rescues": p.get("rescues", 0),
             "move_speed": round(data.PLAYER_SPEED * p["stats"]["move_speed"]),
             "stats": {

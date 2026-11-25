@@ -440,23 +440,30 @@ def passive_bonuses(passives: dict) -> dict:
     return bonuses
 
 
-def player_stats(passives: dict) -> dict:
-    """最终玩家属性。百分比属性 1.0 = 100%。"""
+def player_stats(passives: dict, talent: dict | None = None) -> dict:
+    """最终玩家属性。百分比属性 1.0 = 100%。
+
+    `talent` 是局外天赋的**增量**字典（见 `app/talents.py` 的 `bonuses`）：
+    百分比项直接加在 1.0 上，护甲/回复相加，生命百分比只放大基础生命
+    （不与局内「高压气瓶」的固定加成连乘），避免局外成长滚雪球。
+    """
     bonus = passive_bonuses(passives)
+    talent = talent or {}
     return {
-        "might": 1.0 + bonus["might"],
-        "area": 1.0 + bonus["area"],
-        "cooldown": max(.10, 1.0 + bonus["cooldown"]),
-        "duration": 1.0 + bonus["duration"],
-        "speed": 1.0 + bonus["speed"],
-        "amount": int(bonus["amount"]),
-        "move_speed": 1.0 + bonus["move_speed"],
-        "magnet": bonus["magnet"],
-        "luck": 1.0 + bonus["luck"],
-        "growth": 1.0 + bonus["growth"],
-        "armor": int(bonus["armor"]),
-        "recovery": bonus["recovery"],
-        "max_hp": BASE_MAX_HP + bonus["max_hp"],
+        "might": 1.0 + bonus["might"] + talent.get("might", 0.0),
+        "area": 1.0 + bonus["area"] + talent.get("area", 0.0),
+        "cooldown": max(.10, 1.0 + bonus["cooldown"] + talent.get("cooldown", 0.0)),
+        "duration": 1.0 + bonus["duration"] + talent.get("duration", 0.0),
+        "speed": 1.0 + bonus["speed"] + talent.get("speed", 0.0),
+        "amount": int(bonus["amount"] + talent.get("amount", 0)),
+        "move_speed": 1.0 + bonus["move_speed"] + talent.get("move_speed", 0.0),
+        "magnet": bonus["magnet"] * (1.0 + talent.get("magnet", 0.0)),
+        "luck": 1.0 + bonus["luck"] + talent.get("luck", 0.0),
+        "growth": 1.0 + bonus["growth"] + talent.get("growth", 0.0),
+        "armor": int(bonus["armor"] + talent.get("armor", 0)),
+        "recovery": bonus["recovery"] + talent.get("recovery", 0.0),
+        "max_hp": (BASE_MAX_HP * (1.0 + talent.get("max_hp", 0.0))
+                   + bonus["max_hp"]),
     }
 
 

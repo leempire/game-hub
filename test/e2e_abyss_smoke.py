@@ -115,6 +115,16 @@ def main(browser_name='chromium', executable_path=None, isolated=False):
         pa.wait_for_timeout(400)
         ok('房规：20 分钟 + 快速经验')
 
+        pa.get_by_test_id('talent-tree-row').click()
+        sheet = pa.get_by_test_id('talent-sheet')
+        sheet.wait_for(timeout=8000)
+        sheet.get_by_text('深潜体魄', exact=True).wait_for(timeout=8000)
+        assert '潜水员天赋' in body(pa), '天赋树未下发'
+        assert '免费重置' in body(pa), '缺少免费重置入口'
+        pa.get_by_test_id('talent-close').click()
+        sheet.wait_for(state='hidden')
+        ok('房间可查看局外天赋树')
+
         pa.get_by_text('开始游戏', exact=True).click()
         for pg in (pa, pb):
             pg.locator('[data-testid="abyss-arena"]').wait_for(timeout=20000)
