@@ -1,6 +1,6 @@
 // Reversi (翻转棋/奥赛罗) game screen — 8×8 board, 2-player online battle.
 // Follows GomokuScreen pattern: WS sync, ghost preview, Vibration, Modal confirm.
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Modal, useWindowDimensions,
   Platform, Vibration, Animated,
@@ -14,6 +14,7 @@ import { shadow,
 } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
+import { HeaderBackButton } from '@react-navigation/elements';
 import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import { useDisconnectCountdown } from '../disconnect';
 import GameShell, { GameResult } from '../GameShell';
@@ -158,15 +159,6 @@ export default function ReversiScreen({ code, onLeave }: Props) {
       return;
     }
     e.preventDefault();
-    setConfirm('leave');
-  }), [navigation]);
-
-  // Web 浏览器返回：backGuard 拦截 popstate 后派发此事件，就地弹确认框（原生端 no-op）
-  useEffect(() => onConfirmLeave(() => {
-    if (gameOverRef.current) {
-      navigation.goBack();  // 终局后无需确认
-      return;
-    }
     setConfirm('leave');
   }), [navigation]);
 
@@ -353,6 +345,25 @@ export default function ReversiScreen({ code, onLeave }: Props) {
     socketRef.current?.close();
     navigation.popTo('Room', { code });
   }, [navigation, code]);
+
+  const handleBack = useCallback(() => {
+    if (gameOverRef.current) {
+      handleBackToRoom();
+    } else {
+      setConfirm('leave');
+    }
+  }, [handleBackToRoom]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerBackVisible: false,
+      headerLeft: ({ tintColor }: { tintColor?: string }) => (
+        <HeaderBackButton tintColor={tintColor} onPress={handleBack} accessibilityLabel="返回" />
+      ),
+    });
+  }, [navigation, handleBack]);
+
+  useEffect(() => onConfirmLeave(handleBack), [handleBack]);
 
   const isMyTurn = game ? game.your_color === game.next && !game.winner : false;
 

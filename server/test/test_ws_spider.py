@@ -274,6 +274,39 @@ def test_inactive_spider_survives_disconnect_and_resumes(spider_client, count):
     assert code in rm.sweep_idle_rooms()
 
 
+def test_host_ends_round_and_everyone_gets_final_state(spider_client):
+    client = spider_client
+    with ExitStack() as stack:
+        room, host, partner, sockets = pair(client, stack)
+        code = room["code"]
+        start_pair(sockets)
+        sockets[0].send_json({"type": "spider_action", "action": "end_round", "revision": 0})
+        states = [recv(ws, "spider_state")["game"] for ws in sockets]
+        assert all(state["finished"] and state["reason"] == "abandoned" for state in states)
+        for ws in sockets:
+            assert recv(ws, "game_over")["reason"] == "all_finished"
+        assert rm.get_room(code)["status"] == "waiting"
+        for player in (host, partner):
+            records = client.get("/api/history/mine", headers=player[1]).json()["items"]
+            assert len(records) == 1
+            assert [entry["result"] for entry in records[0]["results"]] == ["end", "end"]
+            share = client.post(f"/api/history/{records[0]['id']}/share", headers=player[1]).json()
+            public = client.get(f"/api/history/shared/{share['token']}").json()
+            assert public["snapshot"]["finished"]
+            assert "boards" not in public["snapshot"]
+
+
+def test_non_host_cannot_end_round_from_ws(spider_client):
+    client = spider_client
+    with ExitStack() as stack:
+        room, _host, _partner, sockets = pair(client, stack)
+        start_pair(sockets)
+        sockets[1].send_json({"type": "spider_action", "action": "end_round", "revision": 0})
+        assert "房主" in recv(sockets[1], "error")["message"]
+        recv(sockets[1], "spider_state")
+        assert rm.get_room(room["code"])["status"] == "playing"
+
+
 @pytest.mark.parametrize("count", [1, 3, 4])
 def test_start_uses_standard_board_for_every_member(spider_client, count):
     with ExitStack() as stack:

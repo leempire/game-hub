@@ -36,7 +36,7 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
   const [pending, setPending] = useState(false);
   const [selected, setSelected] = useState<{ source: number; index: number } | null>(null);
   const [message, setMessage] = useState(PICK_MESSAGE);
-  const [confirm, setConfirm] = useState<'leave' | 'end' | 'undo' | null>(null);
+  const [confirm, setConfirm] = useState<'leave' | 'end' | 'undo' | 'endRound' | null>(null);
   const leaving = useRef(false);
   useModalBackGuard(fullscreen, exitFullscreen);
   useModalBackGuard(confirm !== null, () => setConfirm(null));
@@ -85,7 +85,13 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
       receive(msg.game as unknown as SpiderState, true);
     });
     ws.on('spider_state', msg => receive(msg.game as unknown as SpiderState));
-    ws.on('lobby', msg => setRoom(msg.room as unknown as Room));
+    ws.on('lobby', msg => {
+      const nextRoom = msg.room as unknown as Room;
+      setRoom(nextRoom);
+      // 房主“结束本局”时，自己已经打完的牌桌 revision 不会变；靠终局大厅消息
+      // 收掉“保存中”状态，否则按钮会一直停在 pending。
+      if (nextRoom?.status === 'waiting') { pendingRevision.current = null; setPending(false); }
+    });
     ws.on('error', msg => { setMessage(String(msg.message)); pendingRevision.current = null; setPending(false); });
     ws.on('room_closed', () => { setMessage('房间已解散，请返回'); setGame(null); gameRef.current = null; });
     ws.connect(() => setConnected(true), () => { setConnected(false); pendingRevision.current = null; setPending(false); });
@@ -144,9 +150,30 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
       backToRoom();
     } catch (error) { setMessage((error as Error).message); setConfirm(null); }
   };
+  const endRound = () => {
+    const current = gameRef.current;
+    if (!connected || !current || pendingRevision.current !== null) {
+      setMessage('正在同步牌局，请稍候');
+      return;
+    }
+    setMessage('正在结束本局…');
+    pendingRevision.current = current.revision;
+    setPending(true);
+    socket.current?.send({ type: 'spider_action', action: 'end_round', revision: current.revision });
+  };
   const inactive = !game || game.finished;
+  const isHost = room?.host_id === user?.id;
   const roundFinished = game?.finished === true && room?.status === 'waiting';
   const result = game?.reason === 'completed' ? '个人通关' : '你的牌局已结束';
+  const confirmTitle = confirm === 'endRound' ? '结束所有人的牌局？'
+    : confirm === 'end' ? '结束我的牌局？' : confirm === 'undo' ? '撤销上一步？' : '离开本局？';
+  const confirmBody = confirm === 'endRound'
+    ? '未完成的牌局会记为结束，所有人按当前进度结算并返回房间。'
+    : confirm === 'end' ? '你的牌局将结束，其他玩家可以继续。'
+      : confirm === 'undo' ? '你的牌桌将恢复到上一步操作之前。'
+        : '你的牌局将结束并返回房间，其他玩家可以继续。';
+  const confirmLabel = confirm === 'endRound' ? '确认结束本局'
+    : confirm === 'end' ? '确认结束' : confirm === 'undo' ? '确认撤销' : '确认离开';
   const players = shellPlayers(room, user?.id, game).map((player, seat) => {
     const progress = room?.players[seat]?.spider_progress;
     return progress ? { ...player, identity: spiderProgressLabel(progress) } : player;
@@ -204,6 +231,11 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
     </View>}
     {!fullscreen && !roundFinished && <View style={styles.footer}>
       {!inactive && <TouchableOpacity style={styles.button} testID="spider-end" onPress={() => setConfirm('end')}><Text style={styles.buttonText}>结束我的牌局</Text></TouchableOpacity>}
+      {isHost && room?.status === 'playing' && (
+        <TouchableOpacity style={styles.button} testID="spider-end-round" onPress={() => setConfirm('endRound')}>
+          <Text style={styles.buttonText}>结束本局</Text>
+        </TouchableOpacity>
+      )}
       <TouchableOpacity style={styles.button} testID="spider-back" onPress={() => inactive ? backToRoom() : setConfirm('leave')}><Text style={styles.buttonText}>{inactive ? '返回房间' : '离开本局'}</Text></TouchableOpacity>
     </View>}
     </GameShell>
@@ -216,10 +248,15 @@ export default function SpiderScreen({ code, onLeave }: { code: string; onLeave:
     <Modal visible={confirm !== null} transparent animationType="fade" supportedOrientations={['portrait', 'landscape']}
       onRequestClose={() => setConfirm(null)}>
       {confirm && <View style={[styles.overlay, landscapeStyle]}><View style={styles.dialog}>
-        <Text style={styles.dialogTitle}>{confirm === 'end' ? '结束我的牌局？' : confirm === 'undo' ? '撤销上一步？' : '离开本局？'}</Text>
-        <Text style={styles.dialogBody}>{confirm === 'end' ? '你的牌局将结束，其他玩家可以继续。' : confirm === 'undo' ? '你的牌桌将恢复到上一步操作之前。' : '你的牌局将结束并返回房间，其他玩家可以继续。'}</Text>
-        <TouchableOpacity style={styles.primary} onPress={() => { if (confirm === 'leave') { if (inactive) backToRoom(); else void exitGame(); } else { setConfirm(null); act(confirm); } }}>
-          <Text style={styles.primaryText}>{confirm === 'end' ? '确认结束' : confirm === 'undo' ? '确认撤销' : '确认离开'}</Text></TouchableOpacity>
+        <Text style={styles.dialogTitle}>{confirmTitle}</Text>
+        <Text style={styles.dialogBody}>{confirmBody}</Text>
+        <TouchableOpacity style={styles.primary} onPress={() => {
+          if (confirm === 'leave') { if (inactive) backToRoom(); else void exitGame(); return; }
+          const action = confirm;
+          setConfirm(null);
+          if (action === 'endRound') endRound(); else act(action);
+        }}>
+          <Text style={styles.primaryText}>{confirmLabel}</Text></TouchableOpacity>
         <TouchableOpacity style={styles.button} onPress={() => setConfirm(null)}><Text style={styles.buttonText}>继续游戏</Text></TouchableOpacity>
       </View></View>}
     </Modal>

@@ -48,16 +48,16 @@ export function settingBlurb(item: RoomSetting): string {
 }
 
 /**
- * 房间页那一行的摘要：只取 `in_summary` 的项，最多两项。
+ * 房间页那一行的摘要：优先取 `in_summary` 的项，默认最多两项。
  *
  * UNO 有 8 项，全拼出来能占满一整行 —— 所以摘要由**服务端**标出哪几项算数
  * （UNO 只标档位，军棋标「玩法 + 阵亡公开」）。
  */
-export function settingsSummary(items: RoomSetting[]): string {
+export function settingsSummary(items: RoomSetting[], maxItems = 2): string {
   const shown = visibleSettings(items);
   const marked = shown.filter((i) => i.in_summary);
   return (marked.length ? marked : shown)
-    .slice(0, 2)
+    .slice(0, maxItems)
     .map((i) => i.value_label)
     .filter(Boolean)
     .join(' · ');
@@ -71,11 +71,12 @@ export function settingValueLabel(
 }
 
 /** 房间页那一行。**永远可点** —— 非房主也要能看当前设置，只是抽屉里不能改。 */
-export function RoomSettingsRow({ items, onOpen }: {
+export function RoomSettingsRow({ items, maxItems, onOpen }: {
   items: RoomSetting[];
+  maxItems?: number;
   onOpen: () => void;
 }) {
-  const summary = settingsSummary(items);
+  const summary = settingsSummary(items, maxItems);
   return (
     <TouchableOpacity
       style={styles.row}

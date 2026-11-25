@@ -82,3 +82,33 @@ def test_anonymous_http_read_and_authenticated_create_revoke(share_db):
         assert client.delete(f'/api/history/{share_db}/share').status_code == 403
     finally:
         app.dependency_overrides.pop(get_current_user_id)
+
+
+@pytest.mark.parametrize("has_new_metrics", [False, True])
+def test_abyss_public_summary_preserves_battle_result_and_drops_live_state(share_db, has_new_metrics):
+    snapshot = {
+        "game": "abyss", "seconds": 720, "kills": 290, "level": 21, "result": "won",
+        "players": [{"id": 1, "name": "alice", "kills": 290, "hp": 80, "out": False,
+                     "weapons": {"holy_wand": 1}, "passives": {"empty_tome": 1},
+                     "position": [720, 500], "choices": ["rivet"], "token": "private"}],
+        "enemies": [[1, "warden", 200, 200]], "choice_seconds": 3,
+    }
+    if has_new_metrics:
+        snapshot.update(salvage=175, boss=True, boss_dead=True)
+    conn = database.get_conn()
+    conn.execute("UPDATE game_records SET game='abyss', snapshot_json=? WHERE id=?",
+                 (json.dumps(snapshot), share_db))
+    conn.commit()
+    conn.close()
+
+    token = sharing.create_share(share_db, 1)['token']
+    record = TestClient(app).get(f"/api/history/shared/{token}").json()
+    view = record["snapshot"]
+    assert (view["seconds"], view["level"], view["kills"], view["result"]) == (720, 21, 290, "won")
+    assert view["players"] == [{"id": 1, "name": "alice", "kills": 290, "hp": 80, "out": False,
+                               "weapons": {"holy_wand": 1}, "passives": {"empty_tome": 1}}]
+    assert "enemies" not in view and "choice_seconds" not in view
+    if has_new_metrics:
+        assert (view["salvage"], view["boss"], view["boss_dead"]) == (175, True, True)
+    else:
+        assert "salvage" not in view and "boss" not in view

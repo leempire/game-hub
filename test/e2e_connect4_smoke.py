@@ -112,6 +112,7 @@ def main():
         # A 创建重力四子棋房间
         goto_tab(pa, '房间')
         pa.get_by_text('创建', exact=True).first.click()
+        pa.get_by_test_id('create-game-picker').click()
         pa.get_by_text('重力四子棋', exact=True).last.click()
         pa.get_by_text('创建', exact=True).last.click()
         pa.get_by_text('房间号', exact=True).wait_for(timeout=15000)
@@ -249,6 +250,7 @@ def main():
         pa.wait_for_timeout(600)
         pa.get_by_text('创建', exact=True).filter(visible=True).first.wait_for(timeout=15000)
         pa.get_by_text('创建', exact=True).filter(visible=True).first.click()
+        pa.get_by_test_id('create-game-picker').click()
         pa.get_by_text('重力四子棋', exact=True).last.click()
         pa.get_by_text('创建', exact=True).filter(visible=True).last.click()
         pa.get_by_text('房间号', exact=True).wait_for(timeout=15000)

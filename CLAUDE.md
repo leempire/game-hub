@@ -37,7 +37,8 @@
 | 棋类 | 五子棋 / 中国象棋 / 军棋 / 翻转棋 / 重力四子棋 / 终极井字棋 / 点格棋 / 海战棋 |
 | 桌游 | UNO / 飞行棋 |
 | 各玩各的 | 2048 / 俄罗斯方块 / 扫雷 / 蜘蛛纸牌 |
-| 合作 | 深空休眠 |
+| 合作 | 深空休眠 / 深渊回声 |
+| 单机 | 潮汐灯塔 |
 
 > 新增游戏时：先按「先联网调研」一节把结论归档到
 > `docs/游戏设计/<游戏中文名>/增强调研.md`，再写 `设计.md`，然后接引擎与客户端
@@ -56,6 +57,8 @@ app/                    # Expo 客户端（RN + Web）
     ├── help.tsx        # 游戏规则帮助系统（GAME_HELP 内容库 + GameHelpButton）
     ├── icons.tsx       # react-native-svg 矢量图标组件
     ├── games.tsx       # 客户端游戏目录：名称、简介、分类与图标入口的唯一来源
+    ├── choice.tsx      # 通用「当前值 + 弹窗选择」字段与游戏候选网格（建房 / 排行榜共用）
+    ├── InviteFriendsModal.tsx # 房间页邀请好友弹窗（列好友、逐个发邀请）
     ├── api.ts          # HTTP 客户端（注册/登录/房间/历史/版本检查）
     ├── socket.ts       # 房间 WS 客户端
     ├── auth.tsx        # 登录态 Context
@@ -71,7 +74,7 @@ app/                    # Expo 客户端（RN + Web）
     │                   # 每款游戏的文件职责与实现约定见其 docs/游戏设计/<游戏>/设计.md
     └── screens/        # AuthScreen/GamesTab/RoomsTab/ProfileTab/RoomScreen/
                         # 各对局屏（Gomoku/Mine/Reversi/Battleship/Dots/Ludo/Game2048/
-                        # Xiangqi/ConnectFour/Tetris/Uno/Stasis/Luzhanqi/Spider）
+                        # Xiangqi/ConnectFour/Tetris/Uno/Stasis/Luzhanqi/Spider/Abyss）
                         # + HistoryScreen/AdminScreen
 server/
 ├── config/config.json  # 端口、jwt_secret、admin 种子、public_base、app.version_code/name
@@ -83,6 +86,10 @@ server/
     ├── database.py     # SQLite 建表/users/战绩落库（save_game_record）
     ├── persistence.py  # 房间实时落盘 + 启动恢复（热重启，见「热重启」）
     ├── security.py     # JWT + 密码哈希
+    ├── friends.py      # 账号好友申请/管理/拉黑和社交摘要
+    ├── direct_messages.py # 持久化好友私聊、幂等发送、分页与已读游标
+    ├── social_schema.py# 好友、拉黑、消息、已读和房间邀请表的幂等schema
+    ├── room_invites.py # 好友房间邀请：持久化、按房间现状校验、失效清理
     ├── spectating.py   # UNO/深空独立只读WS、用户绑定许可与服务端公开字段白名单
     ├── practice.py     # 四款私人练习，统计/榜单/历史排除 practice=1
     ├── room_manager.py # 房间生命周期：创建/加入/准备/开始/断线保座(120s)/对局结束回调
@@ -91,7 +98,7 @@ server/
     ├── ws.py           # WS 路由与消息分发（各游戏 move/胜负广播/认输/断线判负）
     ├── game/           # **各游戏的纯引擎与人机 AI**（无 IO、不碰 asyncio）
     │   ├── <游戏>.py   # 引擎：五子棋/扫雷/翻转棋/海战棋/点格棋/飞行棋/2048/象棋/
-    │   │               # 重力四子棋/俄罗斯方块/UNO/深空休眠/军棋/蜘蛛纸牌
+    │   │               # 重力四子棋/俄罗斯方块/UNO/深空休眠/军棋/蜘蛛纸牌/深渊回声
     │   ├── <游戏>_ai.py# 人机 AI（扫雷/2048/俄罗斯方块无 AI）
     │   └── __init__.py # 这层的约定（引擎不认识时间/不发消息；AI 只看下发过的信息）
     └── routers/        # auth / admin / rooms / app_update / history
@@ -101,6 +108,8 @@ bin/
 scripts/                # 运维脚本（见「运维脚本」）——启停本项目服务只走这里，别手写 kill
 ├── lib.sh              # 公共库：三重指纹定位进程、进程树 kill、端口/HTTP 等待（被 source）
 ├── start.sh / stop.sh / restart.sh / status.sh
+├── install.sh          # 注册 systemd 开机自启（gamehub-backend/web.service）
+└── uninstall.sh        # 取消开机自启并清理单元（见「开机自启」）
 tmp/                    # gitignore：run/*.pid + log/{backend,web}.log
 test/                   # 浏览器 E2E 与视觉审计（见 docs/测试矩阵.md）
 docs/                   # 使用指南 / 接口协议 / 协作开发 / 更新计划 / 测试矩阵 /
@@ -190,6 +199,12 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
   服务端把 `swap_request` 转给对方弹窗确认。四种结果各回一句 `swap_result.message`，
   **一条都不静默**。待答请求存 `room["swap_requests"]`（不进 `room_to_dict`），
   发起人退房或开局时作废。
+- **好友房间邀请**（v1.24）：等待大厅成员可逐个邀请好友，受邀者在「社交」页加入或忽略。
+  邀请只是「请朋友来」的记录，**入房仍走普通 `join_room`**，密码/满员/开局规则不复制
+  第二份；`room_invites.py` 额外挡密码房、挑战房、练习房、非成员发起。同一房间对同一人
+  只保留一条待答邀请（部分唯一索引 + UPSERT）；**列表读取时按房间现状重新校验**，
+  房间解散/开局/满员、解除好友或拉黑后标 `expired`，不留下僵尸红点。底栏角标计入
+  `invite_total`。
 - **游戏级设置一律「进房之后再选」**（v1.13/v1.15）：`POST /api/rooms` 只收游戏类型；
   房主在等待大厅里改，服务端校验「只有房主 / 只有 `waiting`」，然后**广播一条 `lobby`
   给全房**（只回给房主的话，别人看到的还是旧值）。
@@ -272,6 +287,13 @@ cd ~/.claude/skills/byted-web-search && python3 scripts/web_search.py "搜索词
 - 结算回房用 `navigation.popTo("Room", {code})`，覆盖深链进入而导航栈里没有房间的情况；查看战绩先完成同样的保座返回，再进入 History。
 - 房间页的 REST 自愈、WS sync 与 game_start 共用一次入局门闩，聚焦重置；导航回调存在 ref 中，不能因 wrapper 内联函数变化重建 Socket。深链先完成入房再连 WS，REST 返回不得覆盖之后到达的权威状态。
 - 表单使用 `ui.tsx` 的 `AppModal` / `FormInput` / `Card`。`AppModal` 自带返回保护、键盘避让和可滚动容器，调用方不重复注册同一弹窗。阴影统一 `theme.shadow`，遮罩统一 `colors.overlay`。
+- **底部输入栏的 Android 键盘避让**（v1.24）：Expo SDK 54+ 在 Android 15 上默认
+  edge-to-edge，`adjustResize` 不再缩窗口。`KeyboardAvoidingView` **两个平台都用
+  `behavior="padding"`**，并把 `useHeaderHeight()`（`@react-navigation/elements`）传给
+  `keyboardVerticalOffset` —— 不减导航头高度会少抬一整个头。聊天页还监听
+  `keyboardDidShow/DidHide`，弹起时把输入栏底部安全区降到普通间距（紧贴键盘），
+  收起恢复 `insets.bottom`。**这类问题只有真机 APK 能复现**，浏览器/无头测试只能靠
+  mock `Keyboard.addListener` 锁住接线；验收必须装新 APK 在真机点输入框。
 
 ### 返回操作（backGuard.tsx）
 
@@ -368,6 +390,30 @@ team_tools 50031/50035/50040…），手写 `ps aux | grep uvicorn | xargs kill`
 - `start.sh` 会等 HTTP 探活通过才返回（backend 40s / web 120s 上限），失败时自动
   tail 日志再退出。
 
+#### 开机自启（systemd，install.sh 生成）
+
+`scripts/install.sh` 注册两个**系统级**单元（以仓库所有者身份运行），随机器开机启动：
+
+| 单元 | 开机执行 | 停止/关机执行 |
+|---|---|---|
+| `gamehub-backend.service` | `scripts/start.sh backend` | `scripts/stop.sh backend` |
+| `gamehub-web.service` | `scripts/start.sh web` | `scripts/stop.sh web` |
+
+- **只有一层启停逻辑**：两个单元都是 `Type=oneshot + RemainAfterExit=yes`，systemd
+  只负责「开机拉起」与「关机收尾」，实际进程仍归 `scripts/{start,stop,status}.sh`
+  管理（三重指纹不变，手工运维命令照常可用）。改后端代码/配置后仍用
+  `scripts/restart.sh backend`，或 `sudo systemctl restart gamehub-backend.service`（等价）。
+- **环境文件 `/etc/systemd/system/gamehub.env` 只放 `HOME` / `PATH` / `LANG`**：安装时
+  自动探测 `uvicorn`（conda 环境）与 `node/npx` 的目录。**`PUBLIC_BASE` / `IP` /
+  `JWT_SECRET` / `ADMIN_*` 刻意不写进单元**——它们以 `server/config/config.json`
+  为准；写进环境会被 lib.sh 的「环境变量 > config」优先级静默盖掉，之后改 config 无效。
+- **`Restart=no`，只保证开机拉起**：运行中进程崩溃不会自动重启（需要时再加 watchdog
+  timer，别直接改成 `Restart=always`——oneshot 单元不允许该组合）。
+- `uninstall.sh` 会先走单元的 `ExecStop`（即 `stop.sh`）收掉进程，再 disable + 删除单元；
+  重复执行 `install.sh` 是幂等的。
+- 排查：`systemctl status gamehub-{backend,web}.service`、`journalctl -u gamehub-*`；
+  实际服务日志仍在 `tmp/log/{backend,web}.log`。
+
 ## 常用命令
 
 **启停一律走 `scripts/` 下的运维脚本，不要手写 `ps aux | grep ... | kill`**。
@@ -380,6 +426,12 @@ scripts/start.sh web --dev           # 默认是生产模式 bundle（--no-dev -
 scripts/restart.sh backend           # 改 server/ 代码或 config.json 后必须执行
 scripts/stop.sh                      # 停全部
 tail -f tmp/log/backend.log          # 服务日志；pid 在 tmp/run/*.pid
+
+# 开机自启（systemd，见「运维脚本 / 开机自启」）
+bash scripts/install.sh              # 注册并启用（可重复执行）
+sudo systemctl restart gamehub-backend.service   # 等价于 scripts/restart.sh backend
+systemctl status gamehub-backend.service gamehub-web.service
+bash scripts/uninstall.sh            # 取消开机自启
 
 # 类型检查（在 app/ 目录下执行，勿在仓库根）
 (cd app && npx tsc --noEmit)
@@ -516,6 +568,12 @@ curl -s http://127.0.0.1:50541/api/app/version
   主组件只挂状态与回调（`StasisScreen` 2709 → 1369 是最彻底的例子）。
 - **测试断言的可靠性**：数棋子/元素不要靠「方形按钮里有没有子元素」这类启发式，
   用 `testID`（`stone-x-y` / `bs-<mode>-x-y` 等）。
+- **把文字按钮改成图标按钮 = 测试契约变更**（v1.24）：`get_by_text('换位')` 这类选择器
+  会失效，改用稳定 `testID` 或 `aria-label`（RNW 把 `accessibilityLabel` 映射成
+  `aria-label`）。`inner_text()` 解析玩家列表时要过滤 Ionicons 的私用区字形
+  （U+E000–U+F8FF），否则会多出一个假玩家名。建房游戏收进折叠选择器后，E2E 必须先点
+  `create-game-picker` 再点游戏名；只测默认游戏（五子棋）的脚本可能「碰巧通过」。
+  改按钮形态后先 `rg` 旧文案，逐个换选择器并重跑受影响脚本。
 - **对局屏触控目标**：主要操作按钮统一 `paddingVertical: spacing.sm + 6`（≈47px，
   HIG 建议主控件 ≥44pt）；2048 方向键固定 48×48。棋盘格子做不到 44pt 的，
   靠第二条输入路径补偿，具体取舍见各游戏设计文档。
@@ -539,16 +597,19 @@ curl -s http://127.0.0.1:50541/api/app/version
 
 ## 当前状态与路线图
 
-**当前版本 v1.22.0（versionCode 38）**。完整的逐版本发布记录、待办与优先级在
+**当前版本 v1.27.0（versionCode 46）**。完整的逐版本发布记录、待办与优先级在
 `docs/更新计划.md`；每款游戏的规则取舍、美术与踩坑在
 `docs/游戏设计/<游戏中文名>/{设计.md,增强调研.md}`。**本文件不记录每个版本的流水账**
 ——只保留「改动前必须知道的跨游戏约定」与路线图。
 
-- **15 款游戏**：棋类（五子棋 / 中国象棋 / 军棋 / 翻转棋 / 重力四子棋 / 终极井字棋 /
-  点格棋 / 海战棋）、桌游（UNO / 飞行棋）、各玩各的（2048 / 俄罗斯方块 / 扫雷 / 蜘蛛纸牌）、
-  合作（深空休眠）。
+- **17 款游戏**：棋类（五子棋 / 中国象棋 / 军棋 /
+  翻转棋 / 重力四子棋 / 终极井字棋 / 点格棋 / 海战棋）、桌游（UNO / 飞行棋）、
+  各玩各的（2048 / 俄罗斯方块 / 扫雷 / 蜘蛛纸牌）、合作（深空休眠 / 深渊回声）、
+  单机（潮汐灯塔）。
+- **开发中**：深渊回声（1–4 人合作生存）武器 / 被动 / 进化按《吸血鬼幸存者》基础
+  12 把武器对齐，数值与取舍见 `docs/游戏设计/深渊回声/`。
 - **平台能力**：账号与 JWT、房间制 + 人机、战绩落库与终局快照回放、应用内更新、
-  热重启恢复、房间级设置注册表、Web 深链。
+  热重启恢复、房间级设置注册表、Web 深链、好友私聊与好友房间邀请。
 - **近期版本**（细节见更新计划）：v1.16 统一房间设置 + 座位互换 + 主页分类；
   v1.17 各游戏待优化清账 + UNO 组队 + 游戏名单单一来源；
   v1.18 P0 体验修复（房间列表三态 / 弹窗 / 登录 / 深链）+ 扫雷竞速计分；
@@ -556,7 +617,9 @@ curl -s http://127.0.0.1:50541/api/app/version
   俄罗斯方块 hold / 2048 撤销与最佳分 / 海战棋房规 / 扫雷问号与每日盘 /
   深空休眠三档难度）；v1.19 蜘蛛纸牌（第 14 款）+ 修复后端假死（SQLite 连接线程本地复用）；
   v1.20 蜘蛛纸牌改为 1–4 人房间合作 + 横屏全屏 + 俄罗斯方块/UNO 修复；
-  v1.21 终极井字棋（第 15 款，双人 + 三档人机）+ 蜘蛛纸牌断线续玩 + 海战棋三种尺寸布阵修复。
+  v1.21 终极井字棋（第 15 款，双人 + 三档人机）+ 蜘蛛纸牌断线续玩 + 海战棋三种尺寸布阵修复；
+  v1.23 好友与私聊；v1.24 好友房间邀请 + 建房/排行榜弹窗选择 + 每日挑战与排行榜入口拆分 +
+  玩家卡单行 + 聊天键盘避让。
 - **路线图**：
   - **下一个已定方向：大富翁**（用户指定 UNO 之后做；军棋是中途插进来的，已做完）。
     与本项目现有资产重合度最高——飞行棋已经把**服务端权威骰子 + 逐格路径动画 +

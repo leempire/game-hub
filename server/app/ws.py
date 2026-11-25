@@ -40,6 +40,7 @@ from app.game.connect4 import (
     COLS as C4_COLS, ROWS as C4_ROWS,
     BLACK as C4_BLACK, WHITE as C4_WHITE,
 )
+from app.game import abyss
 from app.game import stasis as stasis_engine
 from app.game import (battleship_ai, gomoku_ai, reversi_ai, dots_ai, ludo_ai, xiangqi_ai,
                  connect4_ai, uno_ai, luzhanqi_ai)
@@ -113,7 +114,8 @@ async def ws_room(websocket: WebSocket, code: str):
         return
     # Check user is a player in the room
     player_ids = {p["id"] for p in room["players"]}
-    if user_id not in player_ids:
+    if user_id not in player_ids or (room["game"] == "abyss" and room["status"] == "playing"
+                                     and not rm.user_in_game(room, user_id)):
         await websocket.close(code=4003, reason="你不在房间中")
         return
     await websocket.accept()
@@ -121,30 +123,32 @@ async def ws_room(websocket: WebSocket, code: str):
     if code not in _connections:
         _connections[code] = {}
     _connections[code][user_id] = websocket
-    # Mark player connected
-    for p in room["players"]:
-        if p["id"] == user_id:
-            p["connected"] = True
-            break
-    # Cancel any disconnect timer (reconnect case)
-    rm.handle_player_reconnect(code, user_id)
-    # Send sync
-    await websocket.send_json(_build_sync(room, user_id))
-    # Broadcast lobby so every client sees the fresh connected flag
-    await _broadcast(code, {
-        "type": "lobby", "room": rm.room_to_dict(room)
-    }, exclude={user_id})
-    # Broadcast player_reconnected if game is playing
-    if room["status"] == "playing":
-        await _broadcast(code, {
-            "type": "player_reconnected", "user_id": user_id
-        }, exclude={user_id})
     try:
+        # Mark player connected
+        for p in room["players"]:
+            if p["id"] == user_id:
+                p["connected"] = True
+                break
+        # Cancel any disconnect timer (reconnect case)
+        rm.handle_player_reconnect(code, user_id)
+        # Send sync
+        await websocket.send_json(_build_sync(room, user_id))
+        # Broadcast lobby so every client sees the fresh connected flag
+        await _broadcast(code, {
+            "type": "lobby", "room": rm.room_to_dict(room)
+        }, exclude={user_id})
+        # Broadcast player_reconnected if game is playing
+        if room["status"] == "playing":
+            await _broadcast(code, {
+                "type": "player_reconnected", "user_id": user_id
+            }, exclude={user_id})
         while True:
             data = await websocket.receive_json()
             # 僵尸连接自愈：本页连接被同用户新连接替换后又被弹出（如对局结束返回房间页），
             # 旧连接再发消息时若表位空缺则重新注册；表位有新连接时不抢占（防旧连接 ping 夺位）
             conns = _connections.setdefault(code, {})
+            if room["game"] == "abyss" and conns.get(user_id) is not websocket:
+                break
             if user_id not in conns:
                 conns[user_id] = websocket
             # 处理器自己的异常只作废这一条消息：不隔离的话它冒到下面的 except，
@@ -286,6 +290,16 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
         # 那正是本项目最忌讳的失败模式，所以这里回一句能看懂的话。
         # 这一支不解析载荷、不写状态，下一版连常量一起删。
         await _send_error(code, user_id, "客户端版本过旧，请更新后再改玩法设置")
+    elif msg_type in ("abyss_move", "abyss_pick"):
+        if room["game"] == "abyss" and rm.user_in_game(room, user_id):
+            gs = room["game_state"]
+            if msg_type == "abyss_move":
+                try:
+                    abyss.move(gs, user_id, data.get("dx"), data.get("dy"), preserve_tap=data.get("tap") is True)
+                except ValueError as e:
+                    await _send_error(code, user_id, str(e))
+            elif abyss.pick(gs, user_id, data.get("level"), data.get("choice")):
+                send_abyss_tick(room)
     elif msg_type == "stasis_build":
         await _handle_stasis_build(code, user_id, data)
     elif msg_type == "stasis_lie":
@@ -396,6 +410,9 @@ async def _handle_start(code: str, user_id: int):
         return
     if room["game"] == "uno":
         await _broadcast_uno_start(code, room, gs)
+        return
+    if room["game"] == "abyss":
+        _stasis_send_all(code, {"type": "game_start", "game": abyss.snapshot(gs)})
         return
     if room["game"] == "stasis":
         await _broadcast_stasis_start(code, room, gs)
@@ -812,6 +829,9 @@ async def _handle_surrender(code: str, user_id: int):
     room = rm.get_room(code)
     if not room:
         return
+    if room["game"] == "abyss":
+        await _handle_leave(code, user_id)
+        return
     if room["game"] == "stasis":
         # 合作塔防：弃守只是本人舱室失压、遗产平分给队友，**队友继续守**。
         # 通用的 rm.surrender 是「对手获胜」的 2 人对战语义，用在这里会把
@@ -982,6 +1002,8 @@ async def _broadcast_leave(code: str, user_id: int, action: str,
             await _uno_event(code, "leave", seat)
             await _send_uno_state(code, updated_room)
             await _broadcast_uno_game_over(code, updated_room)
+        elif updated_room["game"] == "abyss":
+            send_abyss_end(updated_room)
         elif updated_room["game"] == "stasis":
             await broadcast_stasis_game_over(
                 updated_room, updated_room.get("_stasis_ranking", []))
@@ -993,9 +1015,8 @@ async def _broadcast_leave(code: str, user_id: int, action: str,
                 "type": "game_over", "winner": winner, "reason": reason,
             })
         # Also broadcast updated lobby (host may have transferred)
-        await _broadcast(code, {
-            "type": "lobby", "room": rm.room_to_dict(updated_room),
-        })
+        if updated_room["game"] != "abyss":
+            await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(updated_room)})
     elif action == "removed" and updated_room:
         if updated_room["game"] in ("minesweeper", "ludo", "uno", "stasis"):
             seat = rm._get_player_seat(updated_room, user_id)
@@ -1092,6 +1113,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = tetris_game_to_sync(room["game_state"], user_id)
         elif room["game"] == "uno":
             game_info = uno_game_to_sync(room["game_state"], user_id)
+        elif room["game"] == "abyss":
+            game_info = abyss.snapshot(room["game_state"])
         elif room["game"] == "stasis":
             game_info = stasis_engine.game_to_sync(room["game_state"], user_id)
         elif room["game"] == "luzhanqi":
@@ -1110,6 +1133,9 @@ def _build_sync(room: dict, user_id: int) -> dict:
     return {
         "type": "sync", "room": room_dict, "game": game_info,
         "in_game": rm.user_in_game(room, user_id),
+        **({"abyss_result": abyss.snapshot(room["game_state"])}
+           if room["game"] == "abyss" and room["status"] == "waiting"
+           and (room.get("game_state") or {}).get("finished") else {}),
     }
 
 
@@ -1230,6 +1256,14 @@ async def _handle_spider_action(code: str, user_id: int, room: dict, data: dict)
         if room["game"] != "spider" or room["game_state"] is not gs:
             return
         view = _spider_view(gs, user_id)
+    elif result.get("all_boards"):
+        # 房主结束本局会同时结算所有人的牌桌，必须逐人下发各自的终局视图；
+        # 只回房主会让其他人停在未 finished 的本地状态，无法弹出结算。
+        view = None
+        if rm.get_room(code) is room and room["game_state"] is gs:
+            for pid, board in gs["boards"].items():
+                await _send_to(code, pid, {"type": "spider_state", "actor_id": user_id,
+                                           "game": rm.spider.game_to_sync(board)})
     else:
         view = result["game"]
     if view is not None:
@@ -2596,12 +2630,15 @@ async def _bot_do_placement(code: str, bot_id: int):
 _send_tails: dict[int, asyncio.Task] = {}
 
 
-def _stasis_enqueue(ws, message: dict, droppable: bool = False) -> bool:
+def _pending_send(ws):
+    tail = _send_tails.get(id(ws))
+    return tail if tail is not None and not tail.done() else None
+
+
+def _stasis_enqueue(ws, message: dict | str, droppable: bool = False) -> bool:
     """把一条消息挂到这个连接的发送链上。返回是否真的挂上了（tick 可能被丢）。"""
     key = id(ws)
-    prev = _send_tails.get(key)
-    if prev is not None and prev.done():
-        prev = None
+    prev = _pending_send(ws)
     if droppable and prev is not None:
         return False
 
@@ -2612,7 +2649,10 @@ def _stasis_enqueue(ws, message: dict, droppable: bool = False) -> bool:
             except BaseException:
                 pass
         try:
-            await ws.send_json(message)
+            if isinstance(message, str):
+                await ws.send_text(message)
+            else:
+                await ws.send_json(message)
         except Exception:
             pass
 
@@ -2627,11 +2667,10 @@ def _stasis_enqueue(ws, message: dict, droppable: bool = False) -> bool:
 
 
 async def _send_ordered(ws, message: dict):
-    """通用的单条发送：这个连接的发送链上还有没发完的（只有深空休眠会有），就
+    """通用的单条发送：这个连接的发送链上还有没发完的（深空休眠和深渊回声会用），就
     **排到链尾**，否则照旧直接发。不这样的话「终局挂上链 → 紧接着直接发 lobby」
     会让 lobby 抢在 game_over 前面到。其余游戏从不建链，行为与原来逐字相同。"""
-    tail = _send_tails.get(id(ws))
-    if tail is not None and not tail.done():
+    if _pending_send(ws) is not None:
         _stasis_enqueue(ws, message)
         return
     await ws.send_json(message)
@@ -2652,6 +2691,25 @@ async def _send_ws(ws, message: dict):
 def _stasis_send_all(code: str, message: dict, droppable: bool = False):
     for ws in list(_connections.get(code, {}).values()):
         _stasis_enqueue(ws, message, droppable)
+
+
+def send_abyss_tick(room: dict):
+    ready = [ws for ws in _connections.get(room["code"], {}).values() if _pending_send(ws) is None]
+    if not ready:
+        return
+    # All recipients share the same snapshot and wire encoding.
+    message = {"type": "abyss_state", "game": abyss.snapshot(room["game_state"])}
+    encoded = json.dumps(message, separators=(",", ":"), ensure_ascii=False)
+    for ws in ready:
+        _stasis_enqueue(ws, encoded, droppable=True)
+
+
+def send_abyss_end(room: dict):
+    code = room["code"]
+    gs = room["game_state"]
+    _stasis_send_all(code, {"type": "game_over", "reason": gs["result"], "game": abyss.snapshot(gs)})
+    room.pop("_lobby_after_game_over", None)
+    _stasis_send_all(code, {"type": "lobby", "room": rm.room_to_dict(room)})
 
 
 async def _broadcast_stasis_start(code: str, room: dict, gs: dict):
@@ -2815,6 +2873,12 @@ async def reschedule_after_restore():
                 # 恢复只需要重起任务。因为用的是**游戏内时钟**而不是墙钟，
                 # 恢复后时间从最后一次关键帧继续，不会跳变（最多丢 5 秒游戏时间）。
                 rm._ensure_stasis_tick(room["code"])
+            elif room["game"] == "abyss":
+                for p in room["players"]:
+                    abyss.stop(gs, p["id"])
+                    if rm.user_in_game(room, p["id"]):
+                        rm._start_dc_timer(room["code"], p["id"], asyncio.get_running_loop())
+                rm._ensure_abyss_tick(room)
             elif room["game"] == "battleship" and gs.get("phase") == "placing":
                 for pid in gs["player_colors"]:
                     if _is_bot(room, pid) and not gs["placement_ready"].get(pid):

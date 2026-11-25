@@ -10,12 +10,12 @@ import * as Linking from 'expo-linking';
  * - 所以必须在 **NavigationContainer 挂载之前** 把初始 URL 记下来，
  *   等 token 出现后再主动导航一次。
  *
- * 只处理「一屏 + 一个房间号」的路径；纯首页 / 房间列表等无需恢复。
+ * 恢复房间、聊天及潮汐灯塔的入口；纯首页 / 房间列表等无需恢复。
  */
 
 export interface PendingRoute {
   screen: string;
-  params: Record<string, string>;
+  params: Record<string, string | number>;
 }
 
 /** 路径第一段 → 路由名。顺序无关，但必须与 `navigation.tsx` 的 Stack.Screen 对应。 */
@@ -36,6 +36,7 @@ const ROUTE_BY_PATH: Record<string, string> = {
   tetris: 'Tetris',
   uno: 'Uno',
   stasis: 'Stasis',
+  abyss: 'Abyss',
   spider: 'Spider',
 };
 
@@ -62,8 +63,14 @@ function parseUrl(url: string | null | undefined): PendingRoute | null {
     segments = url.split('/').filter(Boolean).map(decodeURIComponent);
   }
 
+  if (segments.length === 1 && segments[0] === 'lighthouse') return { screen: 'Lighthouse', params: {} };
   if (segments.length !== 2) return null;
 
+  if (segments[0] === 'chat') {
+    const userId = Number(segments[1]);
+    return /^\d+$/.test(segments[1]) && Number.isSafeInteger(userId) && userId > 0
+      ? { screen: 'Chat', params: { userId } } : null;
+  }
   const screen = ROUTE_BY_PATH[segments[0]];
   if (!screen) return null;
   return { screen, params: { code: segments[1].toUpperCase() } };
@@ -99,7 +106,9 @@ export function takePendingRoute(): Promise<PendingRoute | null> {
 
 /** A room's startup link is already fulfilled once its game is on top. */
 export function destinationAlreadyOpen(target: PendingRoute,
-  current: { name?: string; params?: Record<string, string> } | undefined): boolean {
+  current: { name?: string; params?: Record<string, string | number> } | undefined): boolean {
+  if (target.screen === 'Lighthouse') return current?.name === 'Lighthouse';
+  if (target.screen === 'Chat') return current?.name === 'Chat' && current.params?.userId === target.params.userId;
   if (!current || current.params?.code !== target.params.code) return false;
   if (current.name === target.screen) return true;
   return target.screen === 'Room' && !!current.name && current.name !== 'Watch'

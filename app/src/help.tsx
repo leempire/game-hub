@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize } from './theme';
 import { useModalBackGuard } from './backGuard';
 import { boldSegments } from './richText';
+import { AbyssFieldGuide } from './AbyssCreatures';
 // 游戏 key 的唯一来源是 `games.tsx` 的目录表 —— 这里只 import 类型。
 // `GAME_HELP` 的类型是 `Record<GameKey, …>`，所以**新增一个游戏却忘了写帮助文案
 // 会直接编译不过**（这层保险一直都有，只是键的类型以前写在本文件里）。
@@ -21,7 +22,15 @@ interface HelpEntry {
   sections: HelpSection[];
 }
 
-export const GAME_HELP: Record<GameKey, HelpEntry> = {
+export const GAME_HELP: Record<GameKey | 'lighthouse', HelpEntry> = {
+  lighthouse: {
+    title: '潮汐灯塔玩法',
+    sections: [
+      { heading: '修复海岛', body: '启动发电机获得零件，点亮灯塔后用信号台获得航运券。安装蓄电组可同时为两台设施供电。' },
+      { heading: '开通航线', body: '修复码头后装载补给出航。到港和交付订单可获得海图，用于升级设施。完成十二条航线即可全线通航。' },
+      { heading: '离线生产', body: '进度保存在账号里。回归时最多结算 24 小时生产，航船按实际航程到港。' },
+    ],
+  },
   spider: {
     title: '蜘蛛纸牌规则',
     sections: [
@@ -29,7 +38,7 @@ export const GAME_HELP: Record<GameKey, HelpEntry> = {
       { heading: '横屏全屏', body: '点牌桌右下角“全屏”切换横向牌桌。点“退出全屏”或按返回可恢复，也可以滑动查看长列和屏幕外的牌。' },
       { heading: '移动', body: '先点选一张明牌，它与下方连续递减的牌会一起选中，再点标有“可放”的目标列。只能接到点数大 1 的牌上；空列可接任意可移动牌组。移走暗牌上方的牌后会自动翻牌。再次点击选中的首张牌可取消。' },
       { heading: '发牌与撤销', body: '余牌共五轮，每次给所有列各发一张明牌。有空列时请先填满。撤销可以回退自己的上一步，最多保留 200 步。提示会指出一个合法移动。' },
-      { heading: '房间与结算', body: '成员准备后由房主开始。每步自动保存，断线后可回到自己的牌桌续玩。通关、结束或离开后，其他玩家可以继续。所有人结束后写入各自战绩，返回房间重新准备即可再开一局。' },
+      { heading: '房间与结算', body: '成员准备后由房主开始。每步自动保存，断线后可回到自己的牌桌续玩。通关、结束或离开后，其他玩家可以继续。在线玩家全部完成后本局结算，离线玩家未完成的牌局记为结束；房主也可以「结束本局」提前收尾，避免有人不回来时房间一直卡住。结算后写入各自战绩，返回房间重新准备即可再开一局。' },
     ],
   },
   uttt: {
@@ -406,6 +415,15 @@ export const GAME_HELP: Record<GameKey, HelpEntry> = {
       },
     ],
   },
+  abyss: {
+    title: '深渊回声规则',
+    sections: [
+      { heading: '试潜与回收', body: '1–4 人同图合作。拖动战场或用方向键、WASD 移动，武器自动攻击。收集蓝色信标为全队升级。房主可在房规选择小、中、大、无尽地图。无尽没有地图边界，对局时长仍按房规。' },
+      { heading: '配装', body: '每人最多 6 把武器 + 6 个被动道具。武器最高 8 级，被动多数 5 级。升级时每人有 10 秒选强化，超时自动选第一项；幸运足够高时会出现第 4 个候选。点底部「装备」可查看当前配装与属性。' },
+      { heading: '宝箱与进化', body: '两次精英和一个断缆守卫死亡时各掉一个宝箱。基础武器满 8 级、并且背包里有对应被动时，打开宝箱即可进化；宝箱对每个还站着的玩家各给一次奖励。' },
+      { heading: '救援与结束', body: '靠近倒地队友 2 秒即可救起，倒地超过 15 秒转为观战。默认 12 分钟；房主可在等待大厅把时长改成 12 / 20 / 30 分钟，并把经验节奏改成标准 / 快速 / 慢速。精英在时长的 1/3、2/3 出现，断缆守卫在 11/12 出现。看到断缆落点或压强脉冲的警示圈时及时离开。击倒守卫并活到结束即可完成回收。' },
+    ],
+  },
   stasis: {
     title: '深空休眠规则',
     sections: [
@@ -454,7 +472,7 @@ export const GAME_HELP: Record<GameKey, HelpEntry> = {
 };
 
 interface GameHelpButtonProps {
-  game: GameKey;
+  game: keyof typeof GAME_HELP;
   size?: number;
 }
 
@@ -509,6 +527,7 @@ function GameHelpButtonImpl({ game, size = 28 }: GameHelpButtonProps) {
             </View>
             <ScrollView style={styles.scroll} showsVerticalScrollIndicator>
               {sections}
+              {visible && game === 'abyss' && <AbyssFieldGuide />}
               <View style={styles.bottomSpacer} />
             </ScrollView>
           </View>

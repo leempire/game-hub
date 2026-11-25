@@ -114,7 +114,7 @@ s=uno.create_game([1,2]);print(json.dumps(uno.game_to_sync(s,1)))
   });
 }
 
-test('UNO 鼠标悬停和触屏长按都能查看不可出的手牌', () => {
+test('UNO 鼠标悬停、触屏长按和普通点击都能查看不可出的手牌', () => {
   const game = {
     num_players: 2, seat_uids: [1, 2], your_seat: 0, out: [], turn: 1,
     next_seat: 0, winner: null, finished: false, hand: ['W+RO'], playable: [],
@@ -126,10 +126,16 @@ test('UNO 鼠标悬停和触屏长按都能查看不可出的手牌', () => {
   assert.equal(view.get('u-hand-effect').children, game.hand_effects['W+RO']);
   card.onHoverOut(); view.render();
   assert.ok(!view.get('u-hand-effect'));
-  card.onLongPress(); view.render();
+  card.onPressIn(); card.onLongPress(); view.render();
   assert.equal(view.get('u-hand-effect').children, game.hand_effects['W+RO']);
   card.onPressOut(); view.render();
   assert.ok(!view.get('u-hand-effect'));
+  // 某些触屏路径长按后仍补发 onPress；不能把牌打出去，也不能再弹提示。
+  card.onPress(); view.render();
+  assert.ok(!view.get('u-hand-effect'));
+  // 新的一次点击要能看到牌效反馈。
+  card.onPressIn(); card.onPress(); view.render();
+  assert.equal(view.get('u-hand-effect').children, game.hand_effects['W+RO']);
   assert.deepEqual(view.calls, []);
 });
 

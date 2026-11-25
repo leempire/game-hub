@@ -159,7 +159,7 @@ def main():
         audit_tabbar(pg)
         audit_page(pg, 'games')
 
-        for tab, name in (('房间', 'rooms'), ('我的', 'profile')):
+        for tab, name in (('房间', 'rooms'), ('社交', 'social'), ('我的', 'profile')):
             pg.get_by_text(tab, exact=True).last.click()
             pg.wait_for_timeout(900)
             audit_page(pg, name)

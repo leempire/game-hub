@@ -29,6 +29,22 @@ def test_initial_deal_and_hidden_information():
     assert game == spider.create_game(12)
 
 
+def test_standard_deal_size_and_five_stock_rounds():
+    game = spider.create_game(5)
+    assert len(game["columns"]) == 10 and game["total_runs"] == 8
+    assert Counter(sum(game["columns"], []) + game["stock"]) == Counter({rank: 8 for rank in range(1, 14)})
+    assert len(game["stock"]) == 50
+    before = deepcopy(game)
+    assert spider.apply_action(game, "deal") is None
+    assert len(game["stock"]) == 40
+    assert spider.apply_action(game, "undo") is None
+    assert game["columns"] == before["columns"] and game["stock"] == before["stock"]
+    view = spider.game_to_sync(game)
+    assert view["total_runs"] == 8
+    assert sum(rank is None for c in view["columns"] for rank in c) == 44
+    assert not any(key in view for key in ("stock", "history", "face_up"))
+
+
 def replay_win(game, path):
     assert path is not None
     assert sum(move is None for move in path) == 5
@@ -273,6 +289,63 @@ def test_natural_end_and_new_game_record_results(solo_room, monkeypatch):
     rm.spider_action(room["code"], 41, {"action": "end", "revision": 2})
     assert len(ended) == 2
     assert _build_results_record(ended[-1])[0]["result"] == "end"
+
+
+def _two_player_room(monkeypatch):
+    monkeypatch.setattr(rm, "_rooms", {})
+    monkeypatch.setattr(rm, "_dc_tasks", {})
+    monkeypatch.setattr(persistence, "_enabled", False)
+    ended = []
+    monkeypatch.setattr(rm, "_game_end_callback", lambda r: ended.append(deepcopy(r)))
+    room = rm.create_room({"id": 41, "username": "host", "nickname": None}, None, None, "spider")
+    rm.join_room(room["code"], {"id": 42, "username": "peer", "nickname": None}, None)
+    for player in room["players"]:
+        player["connected"] = True
+    room["players"][1]["ready"] = True
+    assert rm.start_game(room["code"], 41) is not None
+    return room, ended
+
+
+def test_host_can_end_round_after_own_board_finished(monkeypatch):
+    room, ended = _two_player_room(monkeypatch)
+    assert rm.spider_action(room["code"], 41, {"action": "end", "revision": 0}).get("error") is None
+    assert room["status"] == "playing" and room["game_state"]["boards"][41]["finished"]
+    result = rm.spider_action(room["code"], 41, {"action": "end_round", "revision": 1})
+    assert result["game_over"] and result["all_boards"]
+    assert room["status"] == "waiting"
+    assert all(board["finished"] for board in room["game_state"]["boards"].values())
+    assert [entry["result"] for entry in _build_results_record(room)] == ["end", "end"]
+    assert len(ended) == 1
+
+
+def test_non_host_and_stale_revision_cannot_end_round(monkeypatch):
+    room, ended = _two_player_room(monkeypatch)
+    before = deepcopy(room["game_state"])
+    assert "房主" in rm.spider_action(room["code"], 42, {"action": "end_round", "revision": 0})["error"]
+    assert "更新" in rm.spider_action(room["code"], 41, {"action": "end_round", "revision": 9})["error"]
+    assert room["status"] == "playing" and room["game_state"] == before and not ended
+
+
+def test_offline_finished_player_is_abandoned_when_all_online_players_finish(monkeypatch):
+    room, ended = _two_player_room(monkeypatch)
+    room["players"][1]["connected"] = False
+    result = rm.spider_action(room["code"], 41, {"action": "end", "revision": 0})
+    assert result["game_over"]
+    assert room["status"] == "waiting"
+    assert room["game_state"]["boards"][42]["finished"]
+    assert room["game_state"]["boards"][42]["reason"] == "abandoned"
+    assert len(ended) == 1
+
+
+def test_disconnect_settles_when_remaining_online_player_already_finished(monkeypatch):
+    room, ended = _two_player_room(monkeypatch)
+    assert rm.spider_action(room["code"], 41, {"action": "end", "revision": 0}).get("error") is None
+    assert room["status"] == "playing"  # 对方还在线，不能提前替他收尾
+    rm.handle_player_disconnect(room["code"], 42, None)
+    assert room["status"] == "waiting"
+    assert room["game_state"]["boards"][42]["finished"]
+    assert room["game_state"]["boards"][42]["reason"] == "abandoned"
+    assert len(ended) == 1
 
 
 def test_disconnect_timeout_and_normal_room_cleanup(solo_room):

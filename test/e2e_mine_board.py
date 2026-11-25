@@ -81,6 +81,7 @@ def main():
         # A 建扫雷房（1 人即可开）—— 难度**进房之后**由房主选
         goto_tab(page, '房间')
         page.get_by_text('创建', exact=True).first.click()
+        page.get_by_test_id('create-game-picker').click()
         page.get_by_text('扫雷', exact=True).last.click()
         page.get_by_text('创建', exact=True).last.click()
         page.get_by_text('房间号', exact=True).wait_for(timeout=15000)

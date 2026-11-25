@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, fontSize, radius, spacing, unoInk, unoOnTable } from './theme';
 import { cardLabel } from './uno';
@@ -8,7 +8,7 @@ const OVERLAP = 22;
 const TILT = 5;
 const PRESS_LIFT = 10;
 
-type PreviewSource = 'hover' | 'focus' | 'hold';
+type PreviewSource = 'hover' | 'focus' | 'hold' | 'tap';
 
 interface Props {
   hand: string[];
@@ -22,6 +22,8 @@ interface Props {
 
 export default function UnoHand({ hand, effects, playable, jumpable, isMyTurn, finished, onPlay }: Props) {
   const [preview, setPreview] = useState<{ index: number; card: string; source: PreviewSource } | null>(null);
+  /** 本次按压是否已经触发了长按；松手时即使平台补发 onPress 也不能出牌。 */
+  const longPressed = useRef<string | null>(null);
   const effect = preview && hand[preview.index] === preview.card ? effects?.[preview.card] : undefined;
   const mid = (hand.length - 1) / 2;
 
@@ -39,13 +41,15 @@ export default function UnoHand({ hand, effects, playable, jumpable, isMyTurn, f
         const canJump = !isMyTurn && jumpable.has(card);
         const can = canPlay || canJump;
         const tilt = mid > 0 ? (index - mid) / mid : 0;
+        const pressKey = `${card}-${index}`;
         const showEffect = (source: PreviewSource) => setPreview({ index, card, source });
         const hideEffect = (source: PreviewSource) => setPreview(current => (
           current?.index === index && current.card === card && current.source === source ? null : current
         ));
         return (
           <Pressable
-            key={`${card}-${index}`}
+            key={pressKey}
+            onPressIn={() => { longPressed.current = null; }}
             onHoverIn={() => showEffect('hover')}
             onHoverOut={() => hideEffect('hover')}
             onFocus={event => {
@@ -55,11 +59,22 @@ export default function UnoHand({ hand, effects, playable, jumpable, isMyTurn, f
               }
             }}
             onBlur={() => hideEffect('focus')}
-            onLongPress={() => showEffect('hold')}
+            onLongPress={() => { longPressed.current = pressKey; showEffect('hold'); }}
             delayLongPress={400}
             onPressOut={() => hideEffect('hold')}
             onPress={() => {
-              if (!can) return;
+              // 某些触屏路径会在长按后仍补发 onPress；松手绝不能把牌打出去。
+              if (longPressed.current === pressKey) {
+                longPressed.current = null;
+                setPreview(null);
+                return;
+              }
+              if (!can) {
+                // 不可出的牌也是可点击的 Pressable；点它必须给反馈，不能静默。
+                // 直接把牌效留在提示位，用户能知道这张牌为什么/什么时候能用。
+                showEffect('tap');
+                return;
+              }
               setPreview(null);
               onPlay(card);
             }}

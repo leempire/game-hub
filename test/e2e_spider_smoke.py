@@ -174,11 +174,19 @@ def browser_checks(api):
             assert host.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
             assert host.get_by_test_id("spider-board").evaluate("el => el.scrollWidth > el.clientWidth")
             expect(host.get_by_test_id("spider-card-0-5")).to_be_in_viewport(ratio=.4)
-            for control in ("spider-deal", "spider-undo", "spider-end", "spider-back"):
+            for control in ("spider-deal", "spider-undo", "spider-end", "spider-end-round", "spider-back"):
                 box = host.get_by_test_id(control).bounding_box()
-                assert box and box["height"] >= 44 and 0 <= box["y"] <= height - box["height"]
+                # RNW 的 44pt 目标会出现 43.999… 的亚像素测量，留 0.5px 容差。
+                assert box and box["height"] >= 43.5 and 0 <= box["y"] <= height - box["height"]
             host.screenshot(path=str(OUT / f"spider-portrait-{width}.png"))
-        print("PASS 3: 刷新恢复个人进度，320px 和 390px 竖屏可滚动且操作按钮完整", flush=True)
+        host.set_viewport_size({"width": 390, "height": 844})
+        full = host.get_by_test_id("spider-fullscreen")
+        full.click()
+        expect(full).to_have_attribute("aria-label", "退出横屏全屏")
+        host.wait_for_timeout(200)
+        host.keyboard.press("Escape")
+        expect(full).to_have_attribute("aria-label", "横屏全屏")
+        print("PASS 3: 刷新恢复个人进度，320px 和 390px 竖屏可滚动、操作按钮完整、全屏可进可退", flush=True)
 
         host.get_by_test_id("game-shell-spider").get_by_test_id("help-btn-spider").click()
         host.get_by_text("蜘蛛纸牌规则", exact=True).wait_for()
@@ -201,12 +209,12 @@ def browser_checks(api):
         expect(peer.get_by_text("结束 0/8", exact=True)).to_be_visible()
         assert latest[1] == dealt
         move(1, latest[1]["legal_moves"][0])
-        peer.get_by_test_id("spider-end").click()
-        peer.get_by_text("确认结束", exact=True).click()
+        peer.get_by_test_id("spider-end-round").click()
+        peer.get_by_text("确认结束本局", exact=True).click()
         state(1, lambda game: game["finished"])
         peer.get_by_test_id("spider-back").click()
         peer.get_by_text("房间号", exact=True).wait_for()
-        print("PASS 4: 退出只结束本人，房主移交，另一玩家继续并结算", flush=True)
+        print("PASS 4: 退出只结束本人，房主移交；新房主结束本局并结算", flush=True)
 
         host.get_by_text("准 备", exact=True).click()
         peer.get_by_text("开始游戏", exact=True).click()
@@ -222,7 +230,7 @@ def browser_checks(api):
         expect(peer.get_by_test_id("spider-board")).to_have_count(0)
         expect(peer.get_by_text("本局进行中", exact=True)).to_be_visible()
         expect(peer.get_by_text("开始游戏", exact=True)).to_have_count(0)
-        expect(peer.get_by_text("7/8 组", exact=True)).to_be_visible()
+        expect(peer.get_by_text("7/8 组", exact=True).first).to_be_visible()
         host.get_by_test_id("spider-end").tap()
         host.get_by_text("确认结束", exact=True).tap()
         expect(host.get_by_test_id("game-result")).to_contain_text("你的牌局已结束")

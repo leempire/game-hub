@@ -64,6 +64,7 @@ def run_case(browser, game, label, marker):
         pa.get_by_text('房间', exact=True).last.click()
         pa.wait_for_timeout(600)
         pa.get_by_text('创建', exact=True).first.click()
+        pa.get_by_test_id('create-game-picker').click()
         pa.get_by_text(label, exact=True).last.click()
         pa.get_by_text('创建', exact=True).last.click()
         pa.get_by_text('房间号', exact=True).wait_for(timeout=15000)

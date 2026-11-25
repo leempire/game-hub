@@ -56,7 +56,7 @@ def checks(api):
         page.set_default_timeout(20000)
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(BASE, timeout=90000)
-        page.get_by_text('每日挑战 · 排行榜', exact=True).click()
+        page.get_by_text('每日挑战', exact=True).click()
         expect(page.get_by_test_id('competition-screen')).to_be_visible()
         for game in ('2048', 'tetris', 'minesweeper'):
             expect(page.get_by_test_id('challenge-start-' + game)).to_be_visible()
@@ -109,7 +109,10 @@ def checks(api):
         page.goto(BASE + '/competition')
         page.get_by_text('排行榜', exact=True).click()
         expect(page.get_by_text('你还没有符合本榜条件的成绩', exact=True)).to_be_visible()
+        # 游戏 / 时间 / 房规都收进了弹窗选择，不再是一排排常驻芯片。
+        page.get_by_test_id('board-filters').click()
         page.get_by_text('近 7 天', exact=True).click()
+        page.get_by_text('完成', exact=True).click()
         expect(page.get_by_text('暂无成绩，完成正式对局后再来看看。', exact=True)).to_be_visible()
         for width, height in ((360, 640), (390, 844), (1024, 768)):
             page.set_viewport_size({'width': width, 'height': height})

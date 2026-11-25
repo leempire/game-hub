@@ -14,7 +14,7 @@ import {
   HomeHero, RecentGames, GameFilters, type CategoryFilter,
 } from '../homeSections';
 // 游戏目录（名字 / 说明 / 徽标 / 分类 / 图标）的唯一来源。
-import { GAMES, GAME_CATEGORIES, type GameEntry, type GameKey } from '../games';
+import { GAMES, HOME_GAMES, HOME_GAME_CATEGORIES, type HomeGameEntry, type GameEntry, type GameKey } from '../games';
 
 interface Props {
   onNavigateToRooms: () => void;
@@ -147,22 +147,25 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
   };
 
   const q = query.trim().toLowerCase();
-  const matches = (g: GameEntry) => {
+  const matches = (g: HomeGameEntry) => {
     if (category !== 'all' && g.category !== category) return false;
     if (!q) return true;
     return [g.title, g.short, g.desc, g.badge]
       .some((text) => text.toLowerCase().includes(q));
   };
-  const filtered = GAMES.filter(matches);
+  const filtered = HOME_GAMES.filter(matches);
   // 「全部 + 无搜索」时按分类分组；一旦筛选或搜索就平铺，省掉多余的分组头
   const grouped = category === 'all' && q === '';
 
-  const renderCard = (g: GameEntry) => (
+  const renderCard = (g: HomeGameEntry) => (
     <TouchableOpacity
       key={g.key}
       testID={`game-card-${g.key}`}
       style={styles.gameCard}
-      onPress={() => setPicked(g)}
+      onPress={() => {
+        if (g.key === 'lighthouse') navigation.navigate('Lighthouse');
+        else setPicked({ ...g, key: g.key });
+      }}
       activeOpacity={0.8}
     >
       <View style={styles.cardIconWrap}>
@@ -195,9 +198,11 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
           onJoin={() => setShowJoinModal(true)}
           onBrowse={onNavigateToRooms}
         />
-        <TouchableOpacity style={styles.competitionLink} onPress={() => navigation.navigate('Competition')} accessibilityRole="button">
-          <Ionicons name="podium-outline" size={20} color={colors.primary} />
-          <Text style={styles.competitionText}>每日挑战 · 排行榜</Text>
+        {/* 游戏页只保留「每日挑战」；排行榜入口在「我的」里，两者互不挤占。 */}
+        <TouchableOpacity style={styles.competitionLink}
+          onPress={() => navigation.navigate('Competition', { tab: 'daily' })} accessibilityRole="button">
+          <Ionicons name="flash-outline" size={20} color={colors.primary} />
+          <Text style={styles.competitionText}>每日挑战</Text>
           <Text style={styles.competitionText}>›</Text>
         </TouchableOpacity>
         <RecentGames
@@ -215,7 +220,7 @@ export default function GamesTab({ onNavigateToRooms, onNavigateToRoom }: Props)
         />
 
         {grouped ? (
-          GAME_CATEGORIES.map((cat) => {
+          HOME_GAME_CATEGORIES.map((cat) => {
             const games = filtered.filter((g) => g.category === cat.key);
             if (games.length === 0) return null;
             return (

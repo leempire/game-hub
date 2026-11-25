@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
@@ -27,20 +27,27 @@ import UltimateTicTacToeScreen from './screens/UltimateTicTacToeScreen';
 import TetrisScreen from './screens/TetrisScreen';
 import UnoScreen from './screens/UnoScreen';
 import StasisScreen from './screens/StasisScreen';
+import AbyssScreen from './screens/AbyssScreen';
 import ProfileTab from './screens/ProfileTab';
+import SocialTab from './screens/SocialTab';
+import ChatScreen from './screens/ChatScreen';
+import { getSocialSummary } from './contacts';
+import useForegroundPolling from './useForegroundPolling';
 import AdminScreen from './screens/AdminScreen';
 import HistoryScreen from './screens/HistoryScreen';
+import LighthouseScreen from './screens/LighthouseScreen';
 import CompetitionScreen from './screens/CompetitionScreen';
 import SharedReplayScreen from './screens/SharedReplayScreen';
 import SpectatorScreen from './screens/SpectatorScreen';
 // 对局页标题也取目录表（`games.tsx`）—— 标题写第二遍就是「改名漏一处」的来源
 import { gameTitle } from './games';
-import { colors } from './theme';
+import { abyssColors, colors } from './theme';
 
 // Navigation types
 export type RootStackParamList = {
   Auth: undefined;
   MainTabs: undefined;
+  Lighthouse: undefined;
   Room: { code: string };
   Gomoku: { code: string };
   Reversi: { code: string };
@@ -57,16 +64,20 @@ export type RootStackParamList = {
   Tetris: { code: string };
   Uno: { code: string };
   Stasis: { code: string };
+  Abyss: { code: string };
   Admin: undefined;
   History: undefined;
-  Competition: undefined;
+  /** 每日挑战与排行榜是两个入口（游戏页只展示每日挑战，我的页各一条）。 */
+  Competition: { tab?: 'daily' | 'boards' } | undefined;
   SharedReplay: { token: string };
   Watch: { code: string };
+  Chat: { userId: number };
 };
 
 export type TabParamList = {
   Games: undefined;
   Rooms: undefined;
+  Social: undefined;
   Profile: undefined;
 };
 
@@ -79,6 +90,7 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   const iconMap: Record<string, { name: keyof typeof Ionicons.glyphMap; filled: keyof typeof Ionicons.glyphMap }> = {
     Games: { name: 'game-controller-outline', filled: 'game-controller' },
     Rooms: { name: 'home-outline', filled: 'home' },
+    Social: { name: 'people-outline', filled: 'people' },
     Profile: { name: 'person-outline', filled: 'person' },
   };
   const entry = iconMap[label];
@@ -166,6 +178,21 @@ export function navigateToTabs(): void {
 
 // Inner tabs navigator - needs access to navigation
 function MainTabs() {
+  const { token } = useAuth();
+  const [badge, setBadge] = useState<{ token: string | null; count: number; stale: boolean }>({ token: null, count: 0, stale: false });
+  useForegroundPolling(`social-badge:${token}`, async valid => {
+    if (!token) return;
+    const summary = await getSocialSummary(token);
+    if (valid()) setBadge({
+      token,
+      count: summary.unread_total + summary.incoming_total + summary.invite_total,
+      stale: false,
+    });
+  }, () => {
+    // Retain the last known count on transient errors; the social page supplies retry UI.
+    setBadge(value => ({ token, count: value.token === token ? value.count : 0, stale: true }));
+  }, 5000);
+  const unread = badge.token === token ? badge.count : 0;
   const insets = useSafeAreaInsets();
   useExitBackGuard(useIsFocused());
   return (
@@ -198,6 +225,9 @@ function MainTabs() {
         component={RoomsTabWrapper}
         options={{ title: '房间' }}
       />
+      <Tab.Screen name="Social" component={SocialTab}
+        options={{ title: '社交', tabBarBadge: unread ? (unread > 99 ? '99+' : unread) : undefined,
+          tabBarAccessibilityLabel: badge.stale ? '社交，未读数量暂未更新' : `社交${unread ? `，${unread}条未读、申请或房间邀请` : ''}` }} />
       <Tab.Screen
         name="Profile"
         component={ProfileTabWrapper}
@@ -272,6 +302,8 @@ function RoomScreenWrapper({ route, navigation }: { route: any; navigation: any 
           navigation.navigate('Tetris', { code: c });
         } else if (game === 'uno') {
           navigation.navigate('Uno', { code: c });
+        } else if (game === 'abyss') {
+          navigation.navigate('Abyss', { code: c });
         } else if (game === 'stasis') {
           navigation.navigate('Stasis', { code: c });
         } else {
@@ -357,6 +389,18 @@ function UnoScreenWrapper({ route, navigation }: { route: any; navigation: any }
       onLeave={() => navigation.goBack()}
     />
   );
+}
+
+function AbyssScreenWrapper({ route, navigation }: { route: any; navigation: any }) {
+  const { code } = route.params;
+  const backToRoom = () => {
+    const state = navigation.getState();
+    const prior = state.routes[state.index - 1];
+    if (prior?.name === 'Room' && prior.params?.code === code) navigation.goBack();
+    else navigation.replace('Room', { code });
+  };
+  return <AbyssScreen code={code} onBack={backToRoom}
+    onExit={() => navigation.reset({ index: 0, routes: [{ name: 'MainTabs' }] })} />;
 }
 
 // Stasis screen wrapper
@@ -452,6 +496,16 @@ export default function AppNavigation() {
       ) : (
         <>
           <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="Lighthouse" component={LighthouseScreen}
+            options={({ navigation }) => ({
+              headerShown: true,
+              title: '潮汐灯塔',
+              headerStyle: { backgroundColor: colors.card },
+              headerLeft: () => <Pressable accessibilityRole="button" accessibilityLabel="返回游戏大厅"
+                style={loadingStyles.lighthouseBack} onPress={() => navigation.popTo('MainTabs')}>
+                <Ionicons name="chevron-back" size={24} color={colors.primary} />
+              </Pressable>,
+            })} />
           <Stack.Screen
             name="Room"
             component={RoomScreenWrapper}
@@ -527,6 +581,11 @@ export default function AppNavigation() {
             options={{ headerShown: true, title: gameTitle('uno'), headerStyle: { backgroundColor: colors.card } }}
           />
           <Stack.Screen
+            name="Abyss"
+            component={AbyssScreenWrapper}
+            options={{ headerShown: true, title: gameTitle('abyss'), headerTintColor: abyssColors.text, headerStyle: { backgroundColor: abyssColors.deep } }}
+          />
+          <Stack.Screen
             name="Stasis"
             component={StasisScreenWrapper}
             options={{ headerShown: true, title: gameTitle('stasis'), headerStyle: { backgroundColor: colors.card } }}
@@ -536,6 +595,8 @@ export default function AppNavigation() {
             component={AdminScreen}
             options={{ headerShown: true, title: '用户管理', headerStyle: { backgroundColor: colors.card } }}
           />
+          <Stack.Screen name="Chat" component={ChatScreen}
+            options={{ headerShown: true, title: '好友聊天', headerStyle: { backgroundColor: colors.card } }} />
           <Stack.Screen name="Watch" component={SpectatorScreen}
             options={{ headerShown: true, title: '只读观战', headerStyle: { backgroundColor: colors.card } }} />
           <Stack.Screen name="Competition" component={CompetitionScreen}
@@ -554,6 +615,7 @@ export default function AppNavigation() {
 }
 
 const loadingStyles = StyleSheet.create({
+  lighthouseBack: { minWidth: 48, minHeight: 48, justifyContent: 'center' },
   container: {
     flex: 1,
     backgroundColor: colors.primary,

@@ -89,3 +89,37 @@ test('指引最多三步，跳过按账号和游戏记忆；练习请求并发�
   reject(new Error('创建失败')); await flush(); assert.match(JSON.stringify(view.render()), /创建失败/);
   view.unmount();
 });
+
+test('深渊回声指引补齐三步并记住首次完成', async () => {
+  const stored = new Map();
+  const storage = {
+    '@react-native-async-storage/async-storage': {
+      getItem: async key => stored.get(key) ?? null,
+      setItem: async (key, value) => { stored.set(key, value); },
+    },
+  };
+  const props = { game: 'abyss', userId: 21 };
+  const first = mount('GameIntro', props, storage);
+  first.render();
+  await flush();
+  assert.equal(first.has('game-intro'), true);
+  assert.equal(first.has('start-practice'), false);
+  for (const title of ['拖动移动，武器自动开火', '捡信标，选强化', '躲开警示圈，打倒守卫']) {
+    assert.match(JSON.stringify(first.render()), new RegExp(title));
+    first.press('guide-next');
+  }
+  assert.equal(first.has('game-intro'), false);
+  first.unmount();
+
+  const sameAccount = mount('GameIntro', props, storage);
+  sameAccount.render();
+  await flush();
+  assert.equal(sameAccount.has('game-intro'), false);
+  sameAccount.unmount();
+
+  const otherAccount = mount('GameIntro', { ...props, userId: 22 }, storage);
+  otherAccount.render();
+  await flush();
+  assert.equal(otherAccount.has('game-intro'), true);
+  otherAccount.unmount();
+});

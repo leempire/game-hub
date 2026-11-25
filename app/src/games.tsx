@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon,
   Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon,
-  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon,
+  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon,
 } from './icons';
 
 /**
@@ -23,9 +23,9 @@ import {
 /** 服务端的 `game` 值。帮助系统 `GAME_HELP` 也拿它当键（少一个游戏会编译不过）。 */
 export type GameKey =
   | 'gomoku' | 'minesweeper' | 'reversi' | 'battleship' | 'dots' | 'ludo'
-  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt';
+  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt' | 'abyss';
 
-export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop';
+export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop' | 'single';
 
 export interface GameEntry {
   key: GameKey;
@@ -89,6 +89,8 @@ export const GAMES: GameEntry[] = [
   { key: 'spider', title: '蜘蛛纸牌', short: '蜘蛛纸牌', desc: '各自整理黑桃顺牌，收齐八组 K 到 A',
     badge: '1–4 人 · 独立牌桌', category: 'solo', ionicon: 'layers', Icon: SpiderIcon },
 
+  { key: 'abyss', title: '深渊回声', short: '深渊回声', desc: '潜入沉没回收站，合力打退深海怪潮',
+    badge: '1–4 人 · 合作', category: 'coop', ionicon: 'water-outline', Icon: AbyssIcon },
   { key: 'stasis', title: '深空休眠', short: '深空休眠', desc: '实时合作守舱，打死静默体',
     badge: '2–6 人 · 合作', category: 'coop', ionicon: 'planet', Icon: StasisIcon },
 ];
@@ -110,3 +112,20 @@ export function gameShort(key: string): string {
 export function gameIonicon(key: string): React.ComponentProps<typeof Ionicons>['name'] {
   return BY_KEY[key]?.ionicon ?? 'ellipse';
 }
+
+export const HOME_GAME_CATEGORIES: typeof GAME_CATEGORIES = [
+  ...GAME_CATEGORIES,
+  { key: 'single', name: '单机游戏', blurb: '一个人玩，随时续玩' },
+];
+
+export type HomeGameEntry = Omit<GameEntry, 'key'> & { key: GameKey | 'lighthouse' };
+
+export const HOME_GAMES: HomeGameEntry[] = [
+  ...GAMES,
+  {
+    key: 'lighthouse', title: '潮汐灯塔', short: '潮汐灯塔',
+    desc: '修复海岛灯塔，经营群岛航线', badge: '1 人 · 放置经营',
+    category: 'single', ionicon: 'boat-outline',
+    Icon: ({ size = 44 }) => <Ionicons name="boat-outline" size={size} color="#b17b35" />,
+  },
+];

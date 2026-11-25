@@ -35,7 +35,7 @@ function closeTopModal(): void {
 // 玩家看到的就是闪一下。深空休眠（`Stasis`）就这么漏了一整轮。
 // `test/visual_audit.py` 的 `audit_back_wiring` 拿 navigation.tsx 的路由表逐个对账，
 // **新增对局屏时那条静态检查会直接报红**，别再靠人肉记。
-const PROTECTED_SCREENS = new Set(['Gomoku', 'Minesweeper', 'Reversi', 'Battleship', 'Dots', 'Ludo', 'Game2048', 'Xiangqi', 'ConnectFour', 'Tetris', 'Uno', 'Luzhanqi', 'Stasis', 'Spider', 'UltimateTicTacToe']);
+const PROTECTED_SCREENS = new Set(['Gomoku', 'Minesweeper', 'Reversi', 'Battleship', 'Dots', 'Ludo', 'Game2048', 'Xiangqi', 'ConnectFour', 'Tetris', 'Uno', 'Luzhanqi', 'Stasis', 'Spider', 'UltimateTicTacToe', 'Abyss']);
 let suppressPop = false;
 let suppressTimer: ReturnType<typeof setTimeout> | null = null;
 let webListenerInstalled = false;
@@ -166,6 +166,15 @@ export function onWebOnline(handler: () => void): () => void {
   return () => window.removeEventListener('online', handler);
 }
 
+export function onWebUserInteraction(handler: (event: Event) => void): () => void {
+  if (!IS_WEB) return () => {};
+  const events = ['pointerup', 'click', 'keydown'];
+  for (const event of events) document.addEventListener(event, handler, true);
+  return () => {
+    for (const event of events) document.removeEventListener(event, handler, true);
+  };
+}
+
 // 网页端的键盘操作（俄罗斯方块、2048 这类「按方向」的对局屏共用）。原生端没有
 // 物理键盘，什么也不做。处理器返回 true 表示「这个键我用了」→ preventDefault，
 // 免得方向键 / 空格顺带把页面滚走。输入框里的按键、带 Ctrl/Alt/Meta 的组合键
@@ -189,6 +198,40 @@ export function useWebKeys(
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, [enabled]);
+}
+
+// 「按住 / 松开 / 失焦」三件套的网页键盘监听（深渊回声这类持续移动屏用）。
+// 原生端 no-op。键名统一转小写（ArrowUp → arrowup），处理器返回 true 表示
+// 这个键被消费 → preventDefault，避免方向键滚走页面。输入框与组合键不接管。
+export function useWebHeldKeys(
+  onDown: (key: string, repeated: boolean) => boolean | void,
+  onUp: (key: string) => void,
+  onBlur: () => void,
+  enabled = true,
+): void {
+  const ref = useRef({ onDown, onUp, onBlur });
+  ref.current = { onDown, onUp, onBlur };
+  useEffect(() => {
+    if (!IS_WEB || !enabled) return;
+    const keyOf = (e: KeyboardEvent) => e.key.toLowerCase();
+    const down = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+        || target.isContentEditable)) return;
+      if (ref.current.onDown(keyOf(e), e.repeat)) e.preventDefault();
+    };
+    const up = (e: KeyboardEvent) => ref.current.onUp(keyOf(e));
+    const blur = () => ref.current.onBlur();
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
   }, [enabled]);
 }
 

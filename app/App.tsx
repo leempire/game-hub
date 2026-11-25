@@ -16,8 +16,9 @@ const LINKING = {
   config: {
     screens: {
       Auth: 'auth',
-      MainTabs: { screens: { Games: '', Rooms: 'rooms', Profile: 'profile' } },
+      MainTabs: { screens: { Games: '', Rooms: 'rooms', Social: 'social', Profile: 'profile' } },
       Room: 'room/:code',
+      Chat: { path: 'chat/:userId', parse: { userId: Number } },
       Watch: 'watch/:code',
       Spider: 'spider/:code',
       Gomoku: 'gomoku/:code',
@@ -34,8 +35,10 @@ const LINKING = {
       Tetris: 'tetris/:code',
       Uno: 'uno/:code',
       Stasis: 'stasis/:code',
+      Abyss: 'abyss/:code',
       History: 'history',
       Competition: 'competition',
+      Lighthouse: 'lighthouse',
       SharedReplay: 'replay/:token',
       Admin: 'admin',
     },

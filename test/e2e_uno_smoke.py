@@ -132,6 +132,9 @@ def check_hand_effects(mouse, touch):
         'type': 'touchStart', 'touchPoints': [{'x': box['x'] + 20, 'y': box['y'] + 35}],
     })
     try:
+        # 必须压住超过 delayLongPress（400ms）才算长按；只看提示出现就松手，
+        # 触屏聚焦也可能立刻显示提示，会把长按测成一次普通点击。
+        touch.wait_for_timeout(500)
         expect(touch_hint).to_have_text(short_effect)
     finally:
         client.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
