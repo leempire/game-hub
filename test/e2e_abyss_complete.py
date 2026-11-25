@@ -1098,11 +1098,14 @@ def main(minutes):
            f'间隔中位数 {frame_stats["median"]:.1f} ms，P95 {frame_stats["p95"]:.1f} ms')
 
         def prepare_pickup_audio(gs):
-            gs.update(xp=0, spawn_budget=-1000)
+            # 音频用例只关心提示音优先级：把等级抬到 10 级，避免几次 1 XP
+            # 拾取触发升级提示音；同时清掉可能残留的选卡暂停。
+            gs.update(xp=0, level=10, pick_until=0, spawn_budget=-1000)
             gs['enemies'].clear()
             gs['loot'].clear()
             for player in gs['players'].values():
                 player['invincible'] = 0
+                player['choices'] = []
 
         in_match(code, prepare_pickup_audio)
         host.get_by_test_id('abyss-audio').click()
@@ -1938,7 +1941,7 @@ def main(minutes):
         solo.get_by_test_id('room-settings-row').click()
         for size in ('small', 'medium', 'large', 'endless'):
             solo.get_by_test_id(f'room-settings-map_size-{size}').wait_for()
-        solo.get_by_text('守卫在战斗进行到 11:00 时出现。升级选卡暂停战斗计时。', exact=True).wait_for()
+        solo.get_by_text('守卫在战斗进行到 11:00 时出现。短局升级门槛降为 75%，更容易成型；升级选卡暂停战斗计时。', exact=True).wait_for()
         solo.get_by_test_id('room-settings-map_size-endless').click()
         solo.get_by_text('地图没有边界，墙壁反弹不会触发，对局时长仍按房规。', exact=True).wait_for()
         solo.get_by_test_id('room-settings-close').click()

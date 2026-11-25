@@ -29,6 +29,22 @@ WALL_INSET = 22
 STEP = .05
 DEFAULT_DURATION = 720
 FULL_MILESTONE_DURATION = 1800
+
+# 短局补偿：VS 的等级曲线是按 30 分钟局设计的，12 分钟局沿用同一条曲线只能到
+# 50 级上下，约一半槽位升不满。这里按局长缩放**基础升级门槛**：12 分钟 75%、
+# 30 分钟 100%，中间线性过渡。20/40 级的额外门槛仍由 milestone_scale 单独缩放。
+XP_THRESHOLD_MIN_DURATION = 720
+XP_THRESHOLD_FULL_DURATION = 1800
+XP_THRESHOLD_AT_MIN_DURATION = .75
+
+
+def xp_threshold_scale(duration):
+    """短局基础升级门槛倍率：12 分钟 0.75，30 分钟 1.0。"""
+    span = XP_THRESHOLD_FULL_DURATION - XP_THRESHOLD_MIN_DURATION
+    shortfall = max(0.0, min(1.0, (XP_THRESHOLD_FULL_DURATION - float(duration)) / span))
+    return 1.0 - (1.0 - XP_THRESHOLD_AT_MIN_DURATION) * shortfall
+
+
 FRAMES_PER_SECOND = 20
 UPGRADE_CHOICE_TICKS = 10 * FRAMES_PER_SECOND
 RESCUE_RADIUS = 52
@@ -99,6 +115,7 @@ def create(players, seed, duration=DEFAULT_DURATION, xp_pace=1.0, map_size="medi
         "rng": random.Random(seed), "frame": 0, "elapsed": 0,
         "duration": duration, "xp_pace": float(xp_pace), "map_size": map_size,
         "milestone_scale": max(0.0, min(1.0, milestone_scale)),
+        "xp_threshold_scale": xp_threshold_scale(duration),
         "warden_hp_scale": WARDEN_HP_BY_DURATION.get(duration, 1.0),
         "level": 1, "xp": 0, "growth_boost": 1.0,
         "players": {},
@@ -213,7 +230,8 @@ def _scale(gs):
 def threshold(gs):
     # Pre-existing saves continue with the originally advertised threshold.
     base = data.xp_step(gs["level"], milestone_scale=gs.get("milestone_scale", 1.0))
-    return max(1, math.ceil(base * _scale(gs) * gs["xp_pace"]))
+    scale = gs.get("xp_threshold_scale", 1.0)
+    return max(1, math.ceil(base * _scale(gs) * gs["xp_pace"] * scale))
 
 
 def snapshot_interval(gs):
