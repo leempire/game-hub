@@ -33,7 +33,7 @@
 from dataclasses import dataclass
 from typing import Callable
 
-from app.game import battleship, minesweeper, stasis as stasis_engine, stasis_map, uno_rules
+from app.game import abyss, battleship, minesweeper, stasis as stasis_engine, stasis_map, uno_rules
 
 KIND_CHOICE = "choice"
 KIND_TOGGLE = "toggle"
@@ -290,10 +290,15 @@ def _abyss_settings():
         Setting(
             key="map_size", label="地图大小", kind=KIND_CHOICE,
             store="abyss_map_size", default="medium", in_summary=True,
-            choices=(
-                {"value": "small", "label": "小", "blurb": "1080 × 750，紧凑走位。"},
-                {"value": "medium", "label": "中", "blurb": "1440 × 1000，原版战场。"},
-                {"value": "large", "label": "大", "blurb": "2160 × 1500，留出更多走位空间。"},
+            choices=tuple(
+                {"value": size, "label": label,
+                 "blurb": f"{abyss.MAP_SIZES[size][0]} × {abyss.MAP_SIZES[size][1]}，{detail}"}
+                for size, label, detail in (
+                    ("small", "小", "紧凑走位。"),
+                    ("medium", "中", "兼顾汇合与探索。"),
+                    ("large", "大", "留出更多探索空间。"),
+                )
+            ) + (
                 {"value": "endless", "label": "无尽", "blurb": "地图没有边界，墙壁反弹不会触发，对局时长仍按房规。"},
             ),
         ),

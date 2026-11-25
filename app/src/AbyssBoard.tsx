@@ -5,8 +5,10 @@ import Svg, {
   RadialGradient, Rect, Stop, Text, Use,
 } from 'react-native-svg';
 import { abyssLowPressure, abyssRescue, abyssWorld, type AbyssState, type AbyssWardenAttack, type AbyssWeapon, type XY } from './abyss';
+import { abyssItemArt } from './abyssItemArt';
 import { abyssColors as c } from './theme';
 import AbyssObjective from './AbyssObjective';
+import { AbyssCacheMarker } from './AbyssMinimap';
 import { CreatureDefinitions, wardenImage } from './AbyssCreatures';
 
 const floorImage = require('../assets/abyss/recovery-floor.webp');
@@ -93,49 +95,30 @@ const shotWeapons = new Set<AbyssWeapon>([
 ]);
 const radialShotWeapons = new Set<AbyssWeapon>(['charge', 'hellfire', 'rune', 'no_future']);
 
+// Rotate equipment art into the projectile's local +X direction before aiming it.
+const shotTexture: Partial<Record<AbyssWeapon, [size: number, rotation: number]>> = {
+  harpoon: [53, 38], thousand_edge: [48, 0],
+  axe: [46, 35], death_spiral: [44, 0],
+  cross: [40, 0], heaven_sword: [52, 43],
+  charge: [40, -135], hellfire: [42, -138],
+  rune: [29, 0], no_future: [29, 0],
+};
+
+const areaTextures = ['bible', 'unholy_vespers', 'ring', 'soul_eater', 'spore', 'la_borra'] as const;
+
 function ShotArt({ weapon }: { weapon: AbyssWeapon }) {
   const color = weaponColor(weapon);
-  if (weapon === 'harpoon' || weapon === 'thousand_edge') return <>
-    <Path d="M-28 0L-11-3L-12 0L-11 3Z" fill={color} opacity=".42" />
-    <Path d={weapon === 'thousand_edge'
-      ? 'M-15-3L4-3L9-9L22 0L9 9L4 3L-15 3L-11 0Z'
-      : 'M-13-2H4L8-6L20 0L8 6L4 2H-13L-10 0Z'}
-      fill={color} stroke={c.shadow} strokeWidth="1.5" strokeLinejoin="round" />
-    <Path d="M-8 0H14" fill="none" stroke={c.text} strokeWidth="1.5" strokeLinecap="round" />
-  </>;
-  if (weapon === 'axe' || weapon === 'death_spiral') return <>
-    <Path d="M-17 2Q-13-12 2-16Q17-17 21-2L14-6Q14 4 1 13Q-8 19-18 13L-9 10Z"
-      fill={color} stroke={c.shadow} strokeWidth="2" strokeLinejoin="round" />
-    <Path d="M-13 2Q-7-13 8-13Q15-13 18-6M-11 13Q3 13 10 3"
-      fill="none" stroke={c.text} strokeWidth="1.7" strokeLinecap="round" />
-    <Circle r="3.5" fill={c.deep} stroke={color} strokeWidth="1.4" />
-  </>;
-  if (weapon === 'heaven_sword') return <>
-    <Path d="M-22 0L-14-3H-7L-10-9L-4-10L0-5L12-4L26 0L12 4L0 5L-4 10L-10 9L-7 3H-14Z"
-      fill={color} stroke={c.shadow} strokeWidth="2" strokeLinejoin="round" />
-    <Path d="M-7 0H20" fill="none" stroke={c.text} strokeWidth="2" strokeLinecap="round" />
-  </>;
-  if (weapon === 'cross') return <>
-    <Path d="M0-16L5-6L15-8L8 0L15 8L5 6L0 16L-5 6L-15 8L-8 0L-15-8L-5-6Z"
-      fill={color} stroke={c.shadow} strokeWidth="2" strokeLinejoin="round" />
-    <Path d="M-5 0L0-5L5 0L0 5Z" fill={c.deep} stroke={c.text} strokeWidth="1.3" />
-  </>;
-  const r = 12;
-  if (weapon === 'charge' || weapon === 'hellfire') return <>
-    <Path d={weapon === 'hellfire'
-      ? 'M-29-10L-13-6L-19-15Q-5-7 3-12Q14-10 14 0Q14 10 3 12Q-5 7-19 15L-13 6L-29 10L-21 0Z'
-      : 'M-22-7L-9-4L-13-11Q-4-6 3-10Q12-8 12 0Q12 8 3 10Q-4 6-13 11L-9 4L-22 7L-15 0Z'}
-      fill={color} stroke={c.shadow} strokeWidth="1.6" strokeLinejoin="round" />
-    <Path d="M-10 0Q-2-2 3-6Q8-4 9 0Q8 4 3 6Q-2 2-10 0Z" fill={c.text} />
-  </>;
-  if (weapon === 'rune' || weapon === 'no_future') return <>
-    <Circle r={r} fill={c.deep} stroke={c.shadow} strokeWidth="3.5" />
-    <Circle r={r * .88} fill="none" stroke={color} strokeWidth="2"
-      strokeDasharray={weapon === 'no_future' ? `${r * .5} ${r * .19}` : undefined} />
-    <Path d={`M${-r * .55} 0L0 ${-r * .47}L${r * .47} 0L0 ${r * .47}Z`}
-      fill={color} opacity=".7" />
-    <Line x1={r * .25} x2={r * .88} y1={0} y2={0} stroke={c.text} strokeWidth="2" strokeLinecap="round" />
-  </>;
+  const texture = shotTexture[weapon];
+  if (texture) {
+    const [size, rotation] = texture;
+    const sonar = weapon === 'rune' || weapon === 'no_future';
+    return <>
+      <Path d="M-23 0L-6-4L-6 4Z" fill={color} opacity=".35" />
+      <SvgImage href={abyssItemArt[weapon]} x={-size / 2} y={-size / 2} width={size} height={size}
+        rotation={rotation} />
+      {sonar && <Line x1={3} x2={10} y1={0} y2={0} stroke={c.text} strokeWidth="1.5" strokeLinecap="round" />}
+    </>;
+  }
   return <>
     <Path d="M-22 0L-8-3L-9 3Z" fill={color} opacity=".4" />
     <Path d={weapon === 'holy_wand' ? 'M-12 0L-5-6H7L17 0L7 6H-5Z' : 'M-10-3H5L12 0L5 3H-10L-7 0Z'}
@@ -152,6 +135,9 @@ const ShotDefinitions = memo(function ShotDefinitions({ prefix }: { prefix: stri
         stroke={c.signal} strokeWidth="2" strokeLinecap="round" />
       <Path d="M0-7L5 0L0 7L-5 0Z" fill={c.text} />
     </G>
+    {areaTextures.map(weapon => <G key={weapon} id={`${prefix}-area-${weapon}`}>
+      <SvgImage href={abyssItemArt[weapon]} x="-1" y="-1" width="2" height="2" />
+    </G>)}
     {Array.from(shotWeapons, weapon => {
       const color = weaponColor(weapon);
       return <React.Fragment key={weapon}>
@@ -274,20 +260,25 @@ function Effect({ prefix, effect, points, fade, reduceMotion }: {
   const y = effect.y ?? 0;
   const r = effect.r ?? 0;
   if (kind === 'whip') {
-    return <G opacity={fade}>
-      <Ellipse cx={x} cy={y} rx={r * .78} ry={r * .22} fill={color} fillOpacity={fade * .16}
-        stroke={color} strokeWidth="4" />
-      <Line x1={x - r * .8} y1={y} x2={x + r * .8} y2={y} stroke={c.text} strokeWidth="2" opacity=".8" />
+    const lash = `M${x - r} ${y} Q${x - r * .65} ${y - r * .38} ${x} ${y}
+      T${x + r} ${y}`;
+    return <G testID={`abyss-effect-${effect.id}`} opacity={fade}>
+      <Path d={lash} fill="none" stroke={color} strokeWidth="13" strokeOpacity=".28" strokeLinecap="round" />
+      <Path d={lash} fill="none" stroke={color} strokeWidth="5" strokeLinecap="round" />
+      <Path d={lash} fill="none" stroke={c.text} strokeWidth="1.5" strokeOpacity=".8" />
     </G>;
   }
   if (kind === 'bolt') {
-    const points = [
-      [x, y - r], [x - 9, y - r * .55], [x + 8, y - r * .3], [x - 7, y],
-      [x + 9, y + r * .35], [x - 5, y + r * .62], [x, y + r],
-    ].map(([px, py]) => `${px},${py}`).join(' ');
-    return <G opacity={fade}>
-      <Polyline points={points} fill="none" stroke={color} strokeWidth="5" strokeLinejoin="round" />
-      <Polyline points={points} fill="none" stroke={c.text} strokeWidth="1.5" strokeLinejoin="round" />
+    const bolt = `M${x - r * .32} ${y - r} l${r * .53} ${r * .46} l${-r * .37} ${r * .12}
+      L${x + r * .15} ${y - r * .19} L${x} ${y}
+      M${x + r * .21} ${y - r * .54} l${r * .32} ${-r * .19} l${r * .15} ${r * .09}`;
+    return <G testID={`abyss-effect-${effect.id}`} opacity={fade}>
+      <Path d={bolt} fill="none" stroke={color} strokeWidth="9" strokeOpacity=".37" strokeLinejoin="round" />
+      <Path d={bolt} fill="none" stroke={color} strokeWidth="4" strokeLinejoin="round" />
+      <Path d={bolt} fill="none" stroke={c.text} strokeWidth="1.3" strokeLinejoin="round" />
+      <Circle cx={x} cy={y} r={r} fill="none" stroke={color} strokeOpacity=".65" strokeWidth="2" />
+      {effect.weapon === 'thunder_loop' && <Circle cx={x} cy={y} r={r * .72} fill="none"
+        stroke={color} strokeWidth="2" />}
     </G>;
   }
   if (kind === 'impact') {
@@ -319,6 +310,8 @@ function Effect({ prefix, effect, points, fade, reduceMotion }: {
     return <G testID={`abyss-effect-${effect.id}`} opacity={fade}>
       <Circle cx={x} cy={y} r={radius} fill="none" stroke={color} strokeWidth="8" />
       <Circle cx={x} cy={y} r={radius * .82} fill="none" stroke={c.text} strokeWidth="2" opacity=".65" />
+      <Circle cx={x} cy={y} r={radius * .64} fill="none" stroke={color} strokeWidth="3"
+        strokeOpacity=".5" strokeDasharray={effect.weapon === 'gorgeous_moon' ? '12 9' : undefined} />
     </G>;
   }
   if (kind === 'burst' && (effect.weapon === 'charge' || effect.weapon === 'hellfire')) {
@@ -422,12 +415,13 @@ interface Props {
   offlinePeers: ReadonlySet<number>;
   bannerHeight: number;
   noticeHeight: number;
+  minimap: { width: number; height: number; bottom: number } | null;
   size: { width: number; height: number };
   input: React.RefObject<XY>;
   connected: boolean;
 }
 
-const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers, bannerHeight, noticeHeight, size, input, connected }: Props) {
+const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers, bannerHeight, noticeHeight, minimap, size, input, connected }: Props) {
   const [reduceMotion, setReduceMotion] = useState(false);
   useEffect(() => {
     let mounted = true;
@@ -729,15 +723,20 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
         fill="none" stroke={distantNovaColor} strokeWidth={5 / zoom} strokeOpacity={distantNovaOpacity * .65} />}
       <G testID="abyss-world" transform={`translate(${-left} ${-top})`}>
         {worldWidth !== null && worldHeight !== null && <Wall width={worldWidth} height={worldHeight} />}
+        {game.caches?.map(([id, kind, x, y]) => visible(x, y) &&
+          <AbyssCacheMarker key={id} id={id} kind={kind} x={x} y={y} />)}
         {wardenAttack && !!warningZones?.length && <WardenAttack attack={wardenAttack} zones={warningZones} sampleAge={attackAge} reduceMotion={reduceMotion} />}
         {scene.auras.map(([owner, weapon, x, y, r]) => {
           const old = previous?.players.get(owner)?.position;
           const px = owner === uid && ownPosition ? ownPosition[0] : old ? mix(old[0], x, fraction) : x;
           const py = owner === uid && ownPosition ? ownPosition[1] : old ? mix(old[1], y, fraction) : y;
           if (!visible(px, py, Math.max(r, 75))) return null;
-          return <Circle key={`aura-${owner}-${weapon}`} cx={px} cy={py} r={r}
-            fill={weaponColor(weapon)} fillOpacity=".07" stroke={weaponColor(weapon)}
-            strokeOpacity=".35" strokeWidth="2" strokeDasharray="4 6" />;
+          return <G key={`aura-${owner}-${weapon}`}>
+            <Circle cx={px} cy={py} r={r} fill={weaponColor(weapon)} fillOpacity=".06"
+              stroke={weaponColor(weapon)} strokeOpacity=".45" strokeWidth="2" />
+            <Use href={`#${artPrefix}-area-${weapon}`} opacity=".36"
+              transform={`translate(${px} ${py}) scale(${r})`} />
+          </G>;
         })}
         {scene.fields.map(([id, kind, x, y, r]) => {
           const old = previous?.fields.get(id);
@@ -748,9 +747,8 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
           return <G key={id}>
             <Circle testID="abyss-field" cx={px} cy={py} r={radius} fill={weaponColor(kind)} fillOpacity=".18"
               stroke={weaponColor(kind)} strokeDasharray={kind === 'spore' || kind === 'la_borra' ? undefined : '5 6'} />
-            {(kind === 'spore' || kind === 'la_borra') && [-1, 0, 1].map(i =>
-              <Circle key={i} cx={px + 24 * i} cy={py + 12 * (i * i - 1)} r={7}
-                fill={weaponColor(kind)} fillOpacity=".5" />)}
+            <Use href={`#${artPrefix}-area-${kind}`} opacity=".55"
+              transform={`translate(${px} ${py}) scale(${radius})`} />
           </G>;
         })}
         {scene.loot.map(([id, x, y]) => {
@@ -859,8 +857,7 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
           if (!visible(px, py)) return null;
           return <G testID="abyss-orbit" key={key} transform={`translate(${px} ${py})`}>
             <Circle r={hitRadius + 4} fill={weaponColor(weapon)} fillOpacity=".16" />
-            <Rect x="-5" y="-5" width="10" height="10" rx="2"
-              fill={weaponColor(weapon)} stroke={c.shadow} strokeWidth="1.5" />
+            <Use href={`#${artPrefix}-area-${weapon}`} transform={`scale(${hitRadius + 2})`} />
           </G>;
         })}
         {visibleShots.map(([id, weapon, x, y, angle, r, launch]) => {
@@ -906,7 +903,7 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
         {connected && !game.result && !game.choice_seconds && me && me.hp > 0 && ownPosition &&
           <AbyssObjective game={game} uid={me.id} position={ownPosition} offlinePeers={offlinePeers}
             left={left} top={top} width={width} height={height} zoom={zoom}
-            bannerHeight={bannerHeight} noticeHeight={noticeHeight} />}
+            bannerHeight={bannerHeight} noticeHeight={noticeHeight} minimap={minimap} />}
       </G>
     </Svg>
   </View>;

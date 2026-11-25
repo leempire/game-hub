@@ -5,6 +5,7 @@ import { useIsFocused, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AbyssBoard from '../AbyssBoard';
+import AbyssMinimap, { abyssMinimapLayout } from '../AbyssMinimap';
 import AbyssAudio from '../AbyssAudio';
 import AbyssResult from '../AbyssResult';
 import { abyssItemArt } from '../abyssItemArt';
@@ -461,6 +462,8 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
       ? `${rescuer?.name ?? '队友'}正在救援 · ${rescuePercent}% · 剩 ${me.down}s`
       : `待救援 ${me.down}s · 等待队友靠近`);
   const showArenaNotice = !!game && !finished && !game.choice_seconds && !!(networkStatus || rescueNotice);
+  const minimap = game && !finished && !game.choice_seconds
+    ? abyssMinimapLayout(size.width, size.height, showArenaNotice ? noticeHeight : 0) : null;
   const rescueSeconds = me?.hp ? nearestRescue?.down : me && !me.out ? me.down : undefined;
   const rescueUrgent = rescueSeconds !== undefined && rescueSeconds <= 3;
   const growthBoost = game?.growth_boost ?? 1;
@@ -546,7 +549,9 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
       onResponderRelease={() => stopDrag(true)} onResponderTerminate={() => stopDrag()}>
       {game && <AbyssBoard game={game} uid={user?.id} watching={watchedDiver?.id} offlinePeers={offlinePeers} size={size} input={input} connected={liveConnection}
         bannerHeight={showChestRewards || wardenWarning ? bannerHeight : 0}
-        noticeHeight={showArenaNotice ? noticeHeight : 0} />}
+        noticeHeight={showArenaNotice ? noticeHeight : 0} minimap={minimap} />}
+      {game && minimap && <AbyssMinimap game={game} uid={user?.id} watching={watchedDiver?.id}
+        offlinePeers={offlinePeers} {...minimap} />}
       <Animated.View testID="abyss-stick" pointerEvents="none" accessible={false}
         style={[styles.stick, { opacity: stick.opacity, transform: stick.anchor.getTranslateTransform() }]}>
         <Animated.View testID="abyss-stick-thumb" style={[styles.stickThumb, { transform: stick.thumb.getTranslateTransform() }]} />

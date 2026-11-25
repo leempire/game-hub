@@ -62,6 +62,7 @@ export const abyssUtility = {
 
 export type AbyssChoice = AbyssWeapon | AbyssPassive | keyof typeof abyssUtility;
 export type AbyssEnemy = 'drifter' | 'eel' | 'crab' | 'needlefish' | 'jelly' | 'angler' | 'elite' | 'warden';
+export type AbyssCacheKind = 'xp' | 'repair' | 'gear' | 'salvage';
 export type XY = [number, number];
 
 export interface AbyssStats {
@@ -190,6 +191,7 @@ export interface AbyssState {
   enemies: [number, AbyssEnemy, number, number, number, number, number, number?][];
   loot: [number, number, number][];
   chests: [number, number, number][];
+  caches?: [number, AbyssCacheKind, number, number][];
   chest_events: AbyssChestEvent[];
   fields: [number, AbyssWeapon, number, number, number][];
   shots: [number, AbyssWeapon, number, number, number, number, launch?: [number, number, number]][];

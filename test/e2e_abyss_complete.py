@@ -268,7 +268,7 @@ def main(minutes):
         # 下面的移动 / 重连 / 低速断言默认玩家站着挨打；怪潮版本里自然刷怪会
         # 让两人在断言前掉血甚至倒地。这里先压住自然刷怪，后续用例按需手动
         # 生成敌人或恢复状态。
-        in_match(code, lambda gs: (gs.update(spawn_budget=-10000), gs['enemies'].clear()))
+        in_match(code, lambda gs: (gs.update(spawn_budget=-10000), gs['enemies'].clear(), gs['caches'].clear()))
 
         def host_input():
             return in_match(code, lambda gs: (gs['players'][host_id]['dx'], gs['players'][host_id]['input_until']))
@@ -876,13 +876,14 @@ def main(minutes):
 
         def bounce_rune(gs):
             diver = gs['players'][host_id]
-            diver.update(x=1320, y=500)
+            width, _ = abyss._bounds(gs)
+            diver.update(x=width - 120, y=500)
             stats = abyss.data.weapon_stats('rune', 1, diver['stats'])
-            abyss._shot(gs, diver, 'rune', stats, abyss.WIDTH - 22, 600, 800, 0,
+            abyss._shot(gs, diver, 'rune', stats, width - 22, 600, 800, 0,
                         kind='rune', life=18, radius=12, bounce=True)
             rune_id = gs['shots'][-1]['id']
             stats = abyss.data.weapon_stats('charge', 1, diver['stats'])
-            abyss._shot(gs, diver, 'charge', stats, 1320, 540, -200, 0,
+            abyss._shot(gs, diver, 'charge', stats, diver['x'], 540, -200, 0,
                         kind='fire', life=18, radius=24)
             return rune_id
 
@@ -898,6 +899,20 @@ def main(minutes):
         fireball = host.locator(r'use[href$="-shot-charge"], use[xlink\:href$="-shot-charge"]').first
         fireball.wait_for()
         assert fireball.evaluate('node => node.transform.baseVal.getItem(2).matrix.a') == 2
+        host.wait_for_function("""async () => {
+          const board = document.querySelector('[data-testid="abyss-world"]')?.ownerSVGElement;
+          if (!board) return false;
+          const names = ['shot-harpoon', 'shot-charge', 'shot-rune', 'area-bible', 'area-la_borra'];
+          return (await Promise.all(names.map(async name => {
+            const image = board.querySelector(`g[id$="-${name}"] image`);
+            const src = image?.href.baseVal;
+            if (!src || !src.includes('/items/')) return false;
+            const asset = new Image();
+            asset.src = src;
+            try { await asset.decode(); } catch { return false; }
+            return asset.naturalWidth > 0;
+          }))).every(Boolean);
+        }""")
         ok('火球和声呐弹复用 SVG，火球按半径缩放，声呐亮纹随反弹转向')
 
         def place_dense_wave(gs):

@@ -15,9 +15,10 @@ interface Props {
   zoom: number;
   bannerHeight: number;
   noticeHeight: number;
+  minimap: { width: number; height: number; bottom: number } | null;
 }
 
-export default memo(function AbyssObjective({ game, uid, position, offlinePeers, left, top, width, height, zoom, bannerHeight, noticeHeight }: Props) {
+export default memo(function AbyssObjective({ game, uid, position, offlinePeers, left, top, width, height, zoom, bannerHeight, noticeHeight, minimap }: Props) {
   const viewWidth = width * zoom;
   const viewHeight = height * zoom;
   if (viewWidth < 44 || viewHeight < 50) return null;
@@ -92,8 +93,17 @@ export default memo(function AbyssObjective({ game, uid, position, offlinePeers,
     (viewWidth / 2 - (compact ? 16 : 42)) / Math.abs(dx),
     (bottomEdge - centerY) / Math.abs(dy),
   );
-  const atX = left + width / 2 + dx * ray / zoom;
-  const atY = top + (centerY + dy * ray) / zoom;
+  let screenX = viewWidth / 2 + dx * ray;
+  let screenY = centerY + dy * ray;
+  const halfLabel = compact ? 11 : 36;
+  const mapLeft = minimap ? viewWidth - minimap.width - 9 : viewWidth;
+  const mapTop = minimap ? viewHeight - minimap.height - minimap.bottom - 2 : viewHeight;
+  if (minimap && screenX + halfLabel > mapLeft && screenY + 14 > mapTop) {
+    if (mapTop - 18 >= topEdge) screenY = mapTop - 18;
+    else screenX = Math.max(halfLabel, mapLeft - halfLabel - 4);
+  }
+  const atX = left + screenX / zoom;
+  const atY = top + screenY / zoom;
   // The camera may be clamped at a wall while the diver is off-center.
   const angle = Math.atan2(y - py, x - px) * 180 / Math.PI;
   const color = regroupName !== undefined ? c.signal : trackingWarden ? c.warden : rescueSeconds === undefined ? c.chest : c.charge;

@@ -128,6 +128,9 @@ def main(browser_name='chromium', executable_path=None, isolated=False):
         pa.get_by_text('开始游戏', exact=True).click()
         for pg in (pa, pb):
             pg.locator('[data-testid="abyss-arena"]').wait_for(timeout=20000)
+            pg.get_by_test_id('abyss-minimap').wait_for()
+            assert pg.locator('[data-testid^="abyss-map-player-"]').count() == 2
+            assert pg.locator('[data-testid^="abyss-map-cache-"]').count() == 6
         ok('双方进入战场')
 
         clock = pa.locator('[data-testid="abyss-clock"]').inner_text()
@@ -160,6 +163,22 @@ def main(browser_name='chromium', executable_path=None, isolated=False):
             finally:
                 pa.keyboard.up('d')
             ok('队友视角看到了实时移动')
+
+            def approach_salvage(gs):
+                cache = next(item for item in gs['caches'] if item['kind'] == 'salvage')
+                gs['players'][lead].update(x=cache['x'] - 68, y=cache['y'])
+                return cache['id']
+
+            cache_id = in_match(code, approach_salvage)
+            pa.get_by_test_id(f'abyss-cache-{cache_id}').wait_for()
+            pa.keyboard.down('d')
+            try:
+                for pg in (pa, pb):
+                    pg.get_by_test_id(f'abyss-map-cache-{cache_id}').wait_for(state='detached')
+            finally:
+                pa.keyboard.up('d')
+            pa.get_by_text(re.compile(r'打捞储备 · 全队打捞分 \+100')).wait_for()
+            ok('走近打捞补给后获得奖励，双方小地图同时移除标记')
             in_match(code, lambda gs: gs.update(xp=abyss.threshold(gs)))
 
         pa.get_by_text('选择强化 ·', exact=False).wait_for(timeout=90000)
