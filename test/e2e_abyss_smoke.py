@@ -155,6 +155,14 @@ def main(browser_name='chromium', executable_path=None, isolated=False):
         pa.get_by_text('选择强化 ·', exact=False).wait_for(timeout=90000)
         choices = pa.locator('[data-testid^="abyss-choice-"]')
         assert choices.count() >= 3, f'升级候选不足 3 个：{choices.count()}'
+        art = choices.get_by_test_id('abyss-item-art')
+        assert art.count() == choices.count()
+        for choice in choices.all():
+            assert choice.get_by_test_id('abyss-item-kind').inner_text() in ('武器', '道具')
+        pa.wait_for_function("""count => {
+          const images = [...document.querySelectorAll('[data-testid="abyss-item-art"] img')];
+          return images.length === count && images.every(img => img.complete && img.naturalWidth > 0);
+        }""", arg=choices.count(), timeout=5000)
         text = body(pa)
         assert '等待队友选择' not in text, '自己的升级候选没有下发'
         pa.keyboard.press('1')
