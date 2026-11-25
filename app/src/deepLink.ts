@@ -35,6 +35,7 @@ const ROUTE_BY_PATH: Record<string, string> = {
   uttt: 'UltimateTicTacToe',
   tetris: 'Tetris',
   uno: 'Uno',
+  undercover: 'Undercover',
   stasis: 'Stasis',
   abyss: 'Abyss',
   spider: 'Spider',

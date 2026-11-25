@@ -6,7 +6,9 @@ import { AppModal } from './ui';
 import { createReplayLink, revokeReplay } from './sharing';
 import { colors, fontSize, radius, spacing } from './theme';
 
-export default function RecordShareActions({ token, recordId }: { token: string; recordId: number }) {
+export default function RecordShareActions({ token, recordId, resultOnly }: {
+  token: string; recordId: number; resultOnly?: boolean;
+}) {
   const [url, setUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +38,8 @@ export default function RecordShareActions({ token, recordId }: { token: string;
       <Text style={styles.buttonText}>{busy ? '正在处理…' : url ? '重新获取链接' : '生成回放分享链接'}</Text>
     </TouchableOpacity>
     {url && <>
-      <Text style={styles.hint}>持有链接的人可免登录查看最终局面；不会公开房间号或 UNO 手牌。</Text>
+      <Text style={styles.hint}>{resultOnly ? '持有链接的人可免登录查看对局结果。词语和阵营仅在参赛者的战绩中显示。'
+        : '持有链接的人可免登录查看最终局面；不会公开房间号或 UNO 手牌。'}</Text>
       <Text selectable style={styles.url}>{url}</Text>
       <View style={styles.row}>
         <TouchableOpacity style={styles.button} onPress={event => { event.stopPropagation(); copy(); }}>

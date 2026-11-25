@@ -10,8 +10,8 @@ const require = createRequire(path.join(appRoot, 'package.json'));
 const React = require('react'), ts = require('typescript');
 const { renderToStaticMarkup } = require('react-dom/server');
 
-export function mountGame(name, initial, { game = name.toLowerCase(), os = 'web', width = 390, height = 844, room: customRoom } = {}) {
-  const slots = [], effects = [], sockets = [], nodes = new Map(), handlers = [], notices = [], calls = [], navigationCalls = [], animations = [];
+export function mountGame(name, initial, { game = name.toLowerCase(), os = 'web', width = 390, height = 844, room: customRoom, api } = {}) {
+  const slots = [], effects = [], sockets = [], nodes = new Map(), buttons = new Map(), handlers = [], notices = [], calls = [], navigationCalls = [], animations = [], appEvents = new Map();
   let cursor = 0;
   const useState = initial => {
     const index = cursor++;
@@ -31,6 +31,8 @@ export function mountGame(name, initial, { game = name.toLowerCase(), os = 'web'
     useMemo: memo, useCallback: (callback, deps) => memo(() => callback, deps), useEffect: effect, useLayoutEffect: effect };
   const host = name => props => {
     if (props.testID) nodes.set(props.testID, props);
+    const label = props.children?.props?.children;
+    if (name === 'button' && typeof label === 'string') buttons.set(label, props);
     if (props.panHarness) handlers.push(props.panHarness);
     return React.createElement(name, { 'data-testid': props.testID, 'aria-label': props.accessibilityLabel }, props.children);
   };
@@ -44,6 +46,8 @@ export function mountGame(name, initial, { game = name.toLowerCase(), os = 'web'
   const animation = (value, config) => { if (config) animations.push(config); return { start() {}, stop() {} }; };
   const rn = { View: host('div'), Text: host('span'), TouchableOpacity: host('button'), Pressable: host('button'),
     ScrollView: host('section'), KeyboardAvoidingView: host('section'), ActivityIndicator: host('i'),
+    TextInput: host('textarea'),
+    AppState: { addEventListener(event, listener) { appEvents.set(event, listener); return { remove: () => appEvents.delete(event) }; } },
     Modal: ({ visible, children }) => visible ? children : null, Platform: { OS: os },
     StyleSheet: { create: value => value, absoluteFill: {}, absoluteFillObject: {} },
     Vibration: { vibrate() {} }, useWindowDimensions: () => ({ width, height }),
@@ -55,7 +59,7 @@ export function mountGame(name, initial, { game = name.toLowerCase(), os = 'web'
     isConnected = true; handlers = {};
     constructor() { sockets.push(this); }
     on(name, callback) { this.handlers[name] = callback; }
-    connect(open) { open?.(); } close() {} send(value) { calls.push(value); }
+    connect(open, close) { this.opened = open; this.closed = close; open?.(); } close() {} send(value) { calls.push(value); }
     move(x, y) { calls.push(['move', x, y]); } drop(...args) { calls.push(['drop', ...args]); }
     xiangqiUndo() { calls.push(['undo']); } unoChallengeWild4() { calls.push(['challenge']); }
     unoCatch(target) { calls.push(['catch', target]); }
@@ -69,10 +73,11 @@ export function mountGame(name, initial, { game = name.toLowerCase(), os = 'web'
   const adapters = {
     react: hooks, 'react-native': rn, '@expo/vector-icons': { Ionicons: host('i') },
     '@react-navigation/native': { useNavigation: () => navigation },
-    '@react-navigation/elements': { HeaderBackButton: host('button') },
+    '@react-navigation/elements': { HeaderBackButton: host('button'), useHeaderHeight: () => 56 },
+    'react-native-safe-area-context': { useSafeAreaInsets: () => ({ bottom: 0 }) },
     'react-native-svg': { __esModule: true, default: host('svg'), ...Object.fromEntries(['Circle', 'Rect', 'Line', 'Path', 'Polygon', 'G', 'Text', 'Defs', 'Ellipse', 'ClipPath', 'LinearGradient', 'Stop'].map(name => [name, host('g')])) },
     auth: { useAuth: () => ({ token: 'test', user: { id: 1 } }) },
-    api: { getRoom: async () => room, leaveRoom: async () => {} }, socket: { RoomSocket },
+    api: { getRoom: async () => room, leaveRoom: async () => {}, ...api }, socket: { RoomSocket },
     QuickChatControls: { __esModule: true, default: () => null },
     help, backGuard: guards, disconnect: { useDisconnectCountdown: () => 120 },
     games: { gameTitle: value => value }, theme, utils: { notify: (...args) => notices.push(args) },
@@ -92,17 +97,21 @@ export function mountGame(name, initial, { game = name.toLowerCase(), os = 'web'
       assert.ok(specifier.startsWith('.'), `Unexpected dependency ${specifier}`);
       const target = ['.tsx', '.ts', ''].map(ext => path.resolve(path.dirname(file), specifier + ext)).find(existsSync);
       assert.ok(target, `Missing module ${specifier}`); return load(target);
-    }, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {}, Date });
+    }, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {}, Date, Error });
     return exports;
   }
   const Component = load(path.join(appRoot, `src/screens/${name}Screen.tsx`)).default;
   const props = { code: 'TEST01', onLeave() {} };
   const view = {
-    render() { cursor = 0; nodes.clear(); handlers.length = 0;
+    render() { cursor = 0; nodes.clear(); buttons.clear(); handlers.length = 0;
       const html = renderToStaticMarkup(Component(props)); for (const callback of effects.splice(0)) callback(); return html; },
     receive(type, message) { sockets[0].handlers[type]({ type, room, ...message }); return view.render(); },
     get: id => nodes.get(id), count: prefix => [...nodes.keys()].filter(key => key.startsWith(prefix)).length,
     press(id) { const node = nodes.get(id); assert.ok(node, `Missing ${id}`); if (!node.disabled) node.onPress(); return view.render(); },
+    pressText(label) { const button = buttons.get(label); assert.ok(button, `Missing button ${label}`); if (!button.disabled) button.onPress(); return view.render(); },
+    disconnect() { sockets[0].isConnected = false; sockets[0].closed?.(); return view.render(); },
+    reconnect() { sockets[0].isConnected = true; sockets[0].opened?.(); return view.render(); },
+    background() { appEvents.get('change')?.('background'); },
     handlers, nodes, calls, notices, navigationCalls, animations,
   };
   view.render();

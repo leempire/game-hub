@@ -1,8 +1,8 @@
 """Room-level deadlines: monotonic anchors and one sleeping task per timed room.
 
 Only remaining milliseconds are persisted in the game state. A restored game
-gets a fresh anchor, so server downtime is never charged. Player disconnects do
-not pause clocks or setup deadlines; the existing disconnect-forfeit also runs.
+gets a fresh anchor, so server downtime is never charged. Undercover pauses
+while none of its active players are connected.
 """
 
 import asyncio
@@ -48,9 +48,21 @@ def initialize(room: dict):
     schedule(room)
 
 
+def undercover_online(room: dict) -> bool:
+    alive = (room.get("game_state") or {}).get("alive", ())
+    return any(p["connected"] and p["id"] in alive for p in room["players"])
+
+
+def reset_deadline(room: dict):
+    _anchors[room["code"]] = (room["game_state"], _now())
+    schedule(room)
+
+
 def settle(room: dict, *, now: float | None = None) -> str | None:
-    """Charge elapsed service uptime. Caller handles a 'clock' or 'setup' event."""
+    """Charge elapsed service uptime and report a deadline reached this step."""
     if room.get("status") != "playing" or not room.get("game_state"):
+        return None
+    if room["game"] == "undercover" and not undercover_online(room):
         return None
     now = _now() if now is None else now
     last = _anchor(room, now)
@@ -58,6 +70,9 @@ def settle(room: dict, *, now: float | None = None) -> str | None:
     # Preserve sub-millisecond remainders, including under repeated bad input.
     _anchors[room["code"]] = (room["game_state"], last + elapsed / 1000)
     gs = room["game_state"]
+    if room["game"] == "undercover":
+        gs["remaining_ms"] = max(0, gs["remaining_ms"] - elapsed)
+        return "undercover" if not gs["remaining_ms"] else None
     if room["game"] == "luzhanqi" and luzhanqi.advance_setup(gs, elapsed):
         return "setup"
     if chess_clock.advance(gs.get("clock"), elapsed):
@@ -82,6 +97,10 @@ def decorate(room: dict, view: dict) -> dict:
     now = _now()
     last = _anchor(room, now)
     elapsed = max(0, int((now - last) * 1000)) if room.get("status") == "playing" else 0
+    if room["game"] == "undercover":
+        view["paused"] = not undercover_online(room)
+        if not view["paused"]:
+            view["remaining_ms"] = max(0, gs["remaining_ms"] - elapsed)
     if gs.get("clock"):
         projected = chess_clock.view(gs["clock"])
         chess_clock.advance(projected, elapsed)
@@ -94,6 +113,8 @@ def decorate(room: dict, view: dict) -> dict:
 
 def _delay_ms(room: dict) -> int | None:
     gs = room.get("game_state") or {}
+    if room["game"] == "undercover":
+        return gs.get("remaining_ms") if undercover_online(room) else None
     if room["game"] == "luzhanqi" and gs.get("phase") == "setup":
         return gs.get("setup_remaining_ms")
     clock = gs.get("clock")
@@ -113,19 +134,23 @@ def schedule(room: dict):
     if room.get("status") != "playing" or _delay_ms(room) is None:
         return
     state = room.get("game_state")
+    phase_id = state.get("phase_id") if room["game"] == "undercover" else None
     _anchor(room, _now())
+
+    def is_current():
+        return (_resolve(room["code"]) is room and room.get("status") == "playing"
+                and room.get("game_state") is state
+                and (phase_id is None or state["phase_id"] == phase_id))
 
     async def wait_deadline():
         current = asyncio.current_task()
         try:
-            while (_resolve(room["code"]) is room and room.get("status") == "playing"
-                   and room.get("game_state") is state):
+            while is_current():
                 delay = _delay_ms(room)
                 if delay is None:
                     break
                 await asyncio.sleep(max(0.001, min(5.0, delay / 1000)))
-                if (_resolve(room["code"]) is not room or room.get("status") != "playing"
-                        or room.get("game_state") is not state):
+                if not is_current():
                     break
                 event = settle(room)
                 if event:

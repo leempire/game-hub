@@ -249,6 +249,7 @@ export function leaveRoom(token: string, code: string): Promise<{ ok: boolean }>
 // --- History API ---
 
 export interface HistoryPlayer {
+  user_id?: number;
   username: string;
   nickname: string | null;
   seat: number;
@@ -436,11 +437,11 @@ export interface UtttSnapshot {
 
 export type AbyssSnapshot = { game: 'abyss' } & import('./abyss').AbyssSummary;
 
-export type GameSnapshot = AbyssSnapshot | GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot;
+export type GameSnapshot = AbyssSnapshot | GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot | import('./undercover').UndercoverSnapshot;
 
 export interface GameRecord {
   id: number;
-  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis' | 'uttt' | 'abyss';
+  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis' | 'uttt' | 'abyss' | 'undercover';
   room_code: string;
   players: HistoryPlayer[];
   results: HistoryResult[];

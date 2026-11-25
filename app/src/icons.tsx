@@ -702,3 +702,14 @@ export function AbyssIcon({ size = 56 }: { size?: number }) {
     <Path d="M28 25q4-4 8 0" fill="none" stroke={c.text} strokeWidth="2" strokeLinecap="round" />
   </Svg>;
 }
+
+export function UndercoverIcon({ size = 56 }: { size?: number }) {
+  return <Svg width={size} height={size} viewBox="0 0 64 64">
+    <Rect x="3" y="3" width="58" height="58" rx="14" fill={colors.primaryDark} />
+    <Path d="M16 15h26a5 5 0 0 1 5 5v16a5 5 0 0 1-5 5H26l-10 8v-8a5 5 0 0 1-5-5V20a5 5 0 0 1 5-5Z"
+      fill={colors.white} />
+    <Path d="M19 24h20m-20 7h11" stroke={colors.primaryDark} strokeWidth="3" strokeLinecap="round" />
+    <Circle cx="43" cy="39" r="8" fill={colors.primaryDark} stroke={colors.white} strokeWidth="3" />
+    <Path d="m49 45 6 6" stroke={colors.white} strokeWidth="4" strokeLinecap="round" />
+  </Svg>;
+}

@@ -302,6 +302,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const isTetris = room.game === 'tetris';
   const isUno = room.game === 'uno';
   const isStasis = room.game === 'stasis';
+  const isUndercover = room.game === 'undercover';
   // **房间级设置**（v1.15）：扫雷难度 / 军棋玩法 / 深空休眠地图 / 海战棋棋盘 /
   // UNO 档位与房规全部收进这一份结构，界面只按 `kind` 通用渲染 —— 客户端不认识
   // 任何 `key` 的语义，一行规则都不写。没有可调项的游戏（五子棋等）服务端不下发它。
@@ -310,15 +311,17 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const supportsBots = room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi' || room.game === 'uttt';
   // 房间只有两种状态：非游戏中即大厅（对局结束的房间回到等待态，可续开）
   const isLobbyStatus = room.status !== 'playing';
-  // 掉线只在游戏中存在：等待房没有「掉线」概念（人不在房里就没有掉线一说）
-  const showOffline = room.status === 'playing';
+  // 我是卧底要求所有座位在线才能开局，等待时也需要显示离线成员。
+  const showOffline = room.status === 'playing' || isUndercover;
   const canAddBot = isHost && !isFull && isLobbyStatus && supportsBots;
   // 人数要求：扫雷 1 人即可开（单机）；2048 / 俄罗斯方块 / 蜘蛛纸牌 1-4 人各自独立盘
-  // （1 人即可开）；飞行棋 / UNO 2-4 人、深空休眠 2-6 人（≥2 可开，对齐 max_players）；其余须满员
+  // （1 人即可开）；飞行棋 / UNO / 深空休眠至少 2 人，我是卧底至少 4 人；其余须满员
+  const minPlayers = isUndercover ? 4 : (isLudo || isUno || isStasis) ? 2 : room.max_players;
   const needMorePlayers = isMine || is2048 || isTetris || room.game === 'spider' || room.game === 'abyss'
     ? false
-    : (isLudo || isUno || isStasis) ? room.players.length < 2 : !isFull;
-  const canStart = allReady && !needMorePlayers;
+    : room.players.length < minPlayers;
+  const waitingForOnlinePlayers = isUndercover && room.players.some(player => !player.connected);
+  const canStart = allReady && !needMorePlayers && !waitingForOnlinePlayers;
   // 邀请好友：只在能进人的等待房出现。密码房 / 挑战房 / 练习房服务端也会拒，
   // 这里先不显示按钮，免得用户点开才看到一句「不能邀请」。
   const canInvite = isLobbyStatus && !isFull && !room.has_password && !room.practice && !room.challenge;
@@ -439,7 +442,9 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
                 {BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? '普通'}难度
               </Text>}
               <View style={styles.playerSpacer} />
-              {showOffline && !p.connected && <Text style={[styles.statusPill, styles.disconnectedPill]}>断线</Text>}
+              {showOffline && !p.connected && <Text style={[styles.statusPill, styles.disconnectedPill]}>
+                {isLobbyStatus ? '离线' : '断线'}
+              </Text>}
               {p.spider_progress && <Text style={[styles.statusPill, styles.progressPill]}>{spiderProgressLabel(p.spider_progress)}</Text>}
               {isLobbyStatus && !p.is_bot && p.ready && <Text style={[styles.statusPill, styles.readyPill]}>已准备</Text>}
               {isLobbyStatus && !p.is_bot && !p.ready && !p.is_host && <Text style={[styles.statusPill, styles.unreadyPill]}>未准备</Text>}
@@ -493,7 +498,8 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
               disabled={!canStart}
             >
               <Text style={styles.startBtnText}>
-                {needMorePlayers ? `等待玩家 (${room.players.length}/${room.max_players})` : !allReady ? '等待准备' : '开始游戏'}
+                {needMorePlayers ? `等待玩家 (${room.players.length}/${isUndercover ? minPlayers : room.max_players})`
+                  : waitingForOnlinePlayers ? '等待玩家上线' : !allReady ? '等待准备' : '开始游戏'}
               </Text>
             </TouchableOpacity>
           )}

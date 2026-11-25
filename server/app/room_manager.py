@@ -5,8 +5,10 @@ import string
 import asyncio
 import logging
 from copy import deepcopy
+from hashlib import sha256
 import time as _time
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from app import persistence
 from app import room_settings
@@ -16,7 +18,7 @@ from app import room_timing
 from app.competition_rules import challenge_seed, challenge_info
 from app.game import spider, uttt, uttt_ai, xiangqi as xiangqi_engine
 from app.game import stasis as stasis_engine
-from app.game import abyss, stasis_ai
+from app.game import abyss, stasis_ai, undercover
 
 # Room idle TTL in seconds. Sweeper deletes rooms exceeding this.
 # Monkeypatch this constant in tests to avoid real 30-minute waits.
@@ -374,10 +376,15 @@ def restore_rooms() -> int:
                 _bot_id_counter = min(_bot_id_counter, p["id"] - 1)
             else:
                 p["connected"] = False
+                if room["game"] == "undercover":
+                    p["disconnected_at"] = _time.time()
         if room.get("status") == "playing":
             if room.get("empty_since") is None:
                 room["empty_since"] = _time.time()
         _rooms[code] = room
+        if room["game"] == "undercover" and (room.get("game_state") or {}).get("summary"):
+            # The final room checkpoint can survive an interruption before history commits.
+            _notify_game_end(room)
         restored += 1
     return restored
 
@@ -510,12 +517,12 @@ def create_room(
 ) -> dict:
     """Create a new room."""
     if game not in ("gomoku", "reversi", "minesweeper", "battleship", "dots", "ludo",
-                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider", "uttt", "abyss"):
+                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider", "uttt", "abyss", "undercover"):
         raise ValueError("不支持的游戏类型")
     code = _generate_code()
     room_name = name or f"{user['username']}的房间"
     # 深空休眠 6 人（12 间舱室 / 12 个座位），其余多人游戏 4 人上限
-    max_players = 6 if game == "stasis" else (
+    max_players = undercover.MAX_PLAYERS if game == "undercover" else 6 if game == "stasis" else (
         4 if game in ("minesweeper", "ludo", "2048", "tetris", "uno", "spider", "abyss") else 2)
     room = {
         "code": code,
@@ -578,6 +585,8 @@ def join_room(code: str, user: dict, password: str | None) -> dict:
         if p["id"] == user["id"]:
             if room["game"] == "abyss" and room["status"] == "playing" and not user_in_game(room, user["id"]):
                 raise ValueError("你已退出本次试潜，请等待下一局")
+            if room["game"] == "undercover" and room["status"] == "playing":
+                return room  # Only a WebSocket reconnect can release the paused deadline.
             room["empty_since"] = None
             # 房主已不在房里时把房主转给回来的这位
             if not any(q["id"] == room["host_id"] for q in room["players"]):
@@ -788,6 +797,8 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
             return _leave_spider(room, user_id)
         if room["game"] == "abyss":
             return _leave_abyss(room, user_id)
+        if room["game"] == "undercover":
+            return _leave_undercover(room, user_id, "leave")
         if room["game"] == "stasis":
             # 主动退出 = 弃守（舱室失压），遗产平分给队友。**队友还在守就继续**
             # ——与扫雷「本人淘汰、其他人继续」同一套语义，人留在 players 里算排名。
@@ -958,6 +969,8 @@ def _start_game_engine(code: str, user_id: int, *, prepared_spider: dict | None 
         return _start_tetris(room)
     if room["game"] == "uno":
         return _start_uno(room)
+    if room["game"] == "undercover":
+        return _start_undercover(room)
     if room["game"] == "abyss":
         return _start_abyss(room)
     if room["game"] == "stasis":
@@ -1380,6 +1393,111 @@ def _start_uno(room: dict) -> dict | None:
     _prepare_uno_series(room, gs)
     _touch_activity(room)
     return gs
+
+
+def _start_undercover(room: dict) -> dict:
+    players = room["players"]
+    if not undercover.MIN_PLAYERS <= len(players) <= undercover.MAX_PLAYERS:
+        raise ValueError("我是卧底需要 4–8 名玩家")
+    if any(not p["connected"] or p.get("is_bot") for p in players):
+        raise ValueError("请等待所有玩家上线后再开始")
+    previous = (room.get("game_state") or {}).get("summary", {}).get("word_pair")
+    rng = random.SystemRandom()
+    word_pair = undercover.choose_word_pair(rng, tuple(previous.values()) if previous else None)
+    gs = undercover.create_game([p["id"] for p in players], word_pair, uuid4().hex, rng)
+    gs["_receipts"] = {}
+    room["_undercover_roster"] = [
+        {"id": p["id"], "username": p["username"], "nickname": p["nickname"]} for p in players
+    ]
+    room.update(status="playing", game_started_at=_now_iso(), empty_since=None, game_state=gs)
+    return gs
+
+
+def _commit_undercover(room: dict, previous_phase: int):
+    gs = room["game_state"]
+    if gs["phase"] == "finished":
+        summary = undercover.snapshot(gs)
+        terminal = {"match_id": gs["match_id"], "phase": "finished", "summary": summary,
+                    "winner": summary["winner"], "reason": summary["reason"]}
+        gs.clear()
+        gs.update(terminal)
+        _back_to_lobby(room)
+        room_timing.forget(room["code"])
+        _cancel_all_dc_tasks(room["code"])
+        _touch_activity(room)
+        _notify_game_end(room)
+        return
+    if gs["phase_id"] != previous_phase:
+        room_timing.reset_deadline(room)
+    _touch_activity(room)
+
+
+def expire_undercover(room: dict) -> bool:
+    gs = room.get("game_state")
+    if room["status"] != "playing" or not gs or gs["remaining_ms"] != 0:
+        return False
+    previous_phase = gs["phase_id"]
+    undercover.expire(gs)
+    _commit_undercover(room, previous_phase)
+    return True
+
+
+def undercover_action(room: dict, user_id: int, data: dict) -> tuple[str | None, bool]:
+    if room["status"] != "playing" or not any(p["id"] == user_id for p in room["players"]):
+        return "你不在本局游戏中", False
+    if room_timing.settle(room) == "undercover":
+        expire_undercover(room)
+        return "这次操作已超时，请查看最新回合", True
+    gs = room["game_state"]
+    previous_phase = gs["phase_id"]
+    phase_id = data.get("phase_id")
+    if data.get("match_id") != gs["match_id"] or type(phase_id) is not int:
+        return "这次操作不属于当前对局或阶段", False
+    clue = data["type"] == "undercover_clue"
+    value = data.get("text" if clue else "target_id")
+    receipts = gs["_receipts"]
+    receipt = sha256(value.encode("utf-8", "surrogatepass")).hexdigest() if clue and isinstance(value, str) else value
+    stored = receipts.get(phase_id, {}).get(user_id)
+    if type(stored) is (str if clue else int) and type(stored) is type(receipt) and stored == receipt:
+        return None, False
+    if user_id not in gs["alive"]:
+        return "你已出局，无法提交操作", False
+    revision = gs["revision"]
+    apply = undercover.apply_clue if clue else undercover.apply_vote
+    error = apply(gs, user_id, value, phase_id)
+    if error or gs["revision"] == revision:
+        return error, False
+    receipts.setdefault(phase_id, {})[user_id] = receipt
+    _commit_undercover(room, previous_phase)
+    return None, True
+
+
+def _leave_undercover(room: dict, user_id: int, reason: str) -> tuple[str, dict]:
+    gs = room["game_state"]
+    if room_timing.settle(room) == "undercover":
+        expire_undercover(room)
+    room["players"] = [p for p in room["players"] if p["id"] != user_id]
+    _transfer_host(room)
+    _prune_swap_requests(room)
+    task = _dc_tasks.pop((room["code"], user_id), None)
+    if task and not task.done():
+        task.cancel()
+    if room["status"] == "playing":
+        phase_id = gs["phase_id"]
+        can_settle = room_timing.undercover_online(room) or gs["alive"] == [user_id]
+        if gs["phase"] in ("vote", "runoff"):
+            by_player = gs["_receipts"].get(phase_id, {})
+            for voter, target in list(by_player.items()):
+                if user_id in (voter, target):
+                    by_player.pop(voter)
+        if not undercover.depart(gs, user_id, reason, settle=can_settle):
+            gs["departed"].append(user_id)
+            gs["revision"] += 1
+        _commit_undercover(room, phase_id)
+        if not room_timing.undercover_online(room):
+            room_timing.cancel(room["code"])
+    _maybe_destroy_or_mark(room)
+    return ("game_over" if room["status"] == "waiting" else "removed", room)
 
 
 def set_room_setting(code: str, user_id: int, key: str, value) -> dict:
@@ -2202,6 +2320,8 @@ def user_in_game(room: dict, user_id: int) -> bool:
     game = room["game"]
     if game == "abyss":
         return not gs["players"].get(user_id, {}).get("departed", True)
+    if game == "undercover":
+        return user_id in gs.get("alive", ())
     if game == "spider":
         board = gs.get("boards", {}).get(user_id)
         return board is not None and not board["finished"]
@@ -3416,9 +3536,20 @@ def handle_player_disconnect(code: str, user_id: int, loop: asyncio.AbstractEven
         if p["id"] == user_id:
             if p.get("is_bot"):
                 return
+            if room["game"] == "undercover" and room_timing.settle(room) == "undercover":
+                expire_undercover(room)
             p["connected"] = False
             p["disconnected_at"] = _time.time()   # 供重连倒计时算剩余秒数
             break
+    else:
+        return
+    if room["game"] == "undercover":
+        if room["status"] == "playing" and user_in_game(room, user_id):
+            _start_dc_timer(code, user_id, loop)
+        if not room_timing.undercover_online(room):
+            room_timing.cancel(code)
+        _maybe_destroy_or_mark(room)
+        return
     if room["game"] == "abyss" and room["status"] == "playing":
         abyss.stop(room["game_state"], user_id)
         _maybe_destroy_or_mark(room)
@@ -3444,6 +3575,21 @@ def handle_player_reconnect(code: str, user_id: int):
     room = _rooms.get(code)
     if not room:
         return False
+    if room["game"] == "undercover" and room["status"] == "playing":
+        player = next((p for p in room["players"] if p["id"] == user_id), None)
+        if player is None:
+            return False
+        disconnected_at = player.get("disconnected_at")
+        if (not player["connected"] and disconnected_at is not None and user_in_game(room, user_id)
+                and (_time.time() - disconnected_at) >= _disconnect_timeout):
+            task = _dc_tasks.get((code, user_id))
+            if task is not None:
+                task.cancel()
+            _on_dc_timeout(code, user_id)
+            return False
+        resume = user_in_game(room, user_id) and not room_timing.undercover_online(room)
+    else:
+        resume = False
     key = (code, user_id)
     task = _dc_tasks.pop(key, None)
     if task and not task.done():
@@ -3451,7 +3597,15 @@ def handle_player_reconnect(code: str, user_id: int):
     for p in room["players"]:
         if p["id"] == user_id:
             p["connected"] = True
+            p.pop("disconnected_at", None)
             room["empty_since"] = None
+            if resume:
+                gs = room["game_state"]
+                phase_id = gs["phase_id"]
+                if undercover.resolve_departures(gs):
+                    _commit_undercover(room, phase_id)
+                    return True
+                room_timing.reset_deadline(room)
             _touch_activity(room)
             return True
     return False
@@ -3463,10 +3617,17 @@ def _start_dc_timer(code: str, user_id: int, loop: asyncio.AbstractEventLoop):
     old = _dc_tasks.pop(key, None)
     if old and not old.done():
         old.cancel()
+    room = _rooms.get(code)
+    state = room.get("game_state") if room else None
 
     async def _timeout():
         try:
             await asyncio.sleep(_disconnect_timeout)
+            if room and room["game"] == "undercover" and (
+                _rooms.get(code) is not room or room.get("game_state") is not state
+                or _dc_tasks.get(key) is not asyncio.current_task()
+            ):
+                return
             _on_dc_timeout(code, user_id)
         except asyncio.CancelledError:
             pass
@@ -3492,6 +3653,18 @@ def _on_dc_timeout(code: str, user_id: int):
     _dc_tasks.pop((code, user_id), None)
     room = _rooms.get(code)
     if not room or room["status"] != "playing" or room["game"] == "spider":
+        return
+    if room["game"] == "undercover":
+        if not any(p["id"] == user_id and not p["connected"] for p in room["players"]):
+            return
+        state = room["game_state"]
+        _leave_undercover(room, user_id, "disconnect")
+        if _dc_timeout_callback:
+            event = {"game_state": state, "revision": state.get("revision")}
+            try:
+                asyncio.get_running_loop().create_task(_dc_timeout_callback(code, user_id, event))
+            except RuntimeError:
+                pass
         return
     if room["game"] == "abyss":
         _mark_abyss_departure(room, user_id)

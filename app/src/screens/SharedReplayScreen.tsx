@@ -32,7 +32,8 @@ export default function SharedReplayScreen({ route }: { route: { params: { token
       <Text style={styles.hint}>{record.players.map(player => player.nickname || player.username).join(' / ')}</Text>
       <Text style={styles.hint}>{record.ended_at} · 只读分享</Text>
       <BoardSnapshot rec={record} />
-      <Text style={styles.hint}>分享不包含 UNO 剩余手牌、抽牌堆或房间邀请。此页面不能加入或操作对局。</Text>
+      <Text style={styles.hint}>{record.game === 'undercover' ? '词语和阵营仅在参赛者的战绩中显示。'
+        : '分享不包含 UNO 剩余手牌、抽牌堆或房间邀请。此页面不能加入或操作对局。'}</Text>
     </Card>}
   </ScrollView>;
 }

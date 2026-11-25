@@ -63,6 +63,7 @@ function harness() {
     '../help': { GameHelpButton: () => null }, '../games': { gameTitle: game => game },
     '../spider': require('../app/src/spider.ts'),
     '../InviteFriendsModal': { __esModule: true, default: () => null },
+    '../TalentTree': { TalentTreeRow: () => null, TalentTreeSheet: () => null },
   };
   const exports = {};
   const source = ts.transpileModule(readFileSync(new URL('../app/src/screens/RoomScreen.tsx', import.meta.url), 'utf8'), {

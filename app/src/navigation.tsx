@@ -26,6 +26,7 @@ import ConnectFourScreen from './screens/ConnectFourScreen';
 import UltimateTicTacToeScreen from './screens/UltimateTicTacToeScreen';
 import TetrisScreen from './screens/TetrisScreen';
 import UnoScreen from './screens/UnoScreen';
+import UndercoverScreen from './screens/UndercoverScreen';
 import StasisScreen from './screens/StasisScreen';
 import AbyssScreen from './screens/AbyssScreen';
 import ProfileTab from './screens/ProfileTab';
@@ -63,6 +64,7 @@ export type RootStackParamList = {
   UltimateTicTacToe: { code: string };
   Tetris: { code: string };
   Uno: { code: string };
+  Undercover: { code: string };
   Stasis: { code: string };
   Abyss: { code: string };
   Admin: undefined;
@@ -302,6 +304,8 @@ function RoomScreenWrapper({ route, navigation }: { route: any; navigation: any 
           navigation.navigate('Tetris', { code: c });
         } else if (game === 'uno') {
           navigation.navigate('Uno', { code: c });
+        } else if (game === 'undercover') {
+          navigation.navigate('Undercover', { code: c });
         } else if (game === 'abyss') {
           navigation.navigate('Abyss', { code: c });
         } else if (game === 'stasis') {
@@ -389,6 +393,10 @@ function UnoScreenWrapper({ route, navigation }: { route: any; navigation: any }
       onLeave={() => navigation.goBack()}
     />
   );
+}
+
+function UndercoverScreenWrapper({ route }: { route: { params: RootStackParamList['Undercover'] } }) {
+  return <UndercoverScreen key={route.params.code} code={route.params.code} />;
 }
 
 function AbyssScreenWrapper({ route, navigation }: { route: any; navigation: any }) {
@@ -579,6 +587,11 @@ export default function AppNavigation() {
             name="Uno"
             component={UnoScreenWrapper}
             options={{ headerShown: true, title: gameTitle('uno'), headerStyle: { backgroundColor: colors.card } }}
+          />
+          <Stack.Screen
+            name="Undercover"
+            component={UndercoverScreenWrapper}
+            options={{ headerShown: true, title: gameTitle('undercover'), headerStyle: { backgroundColor: colors.card } }}
           />
           <Stack.Screen
             name="Abyss"

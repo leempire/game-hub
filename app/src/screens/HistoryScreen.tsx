@@ -1,5 +1,7 @@
 import { abyssResults } from '../abyss';
 import AbyssResult from '../AbyssResult';
+import UndercoverSummary from '../UndercoverSummary';
+import { undercoverWinnerLabels, type UndercoverSnapshot } from '../undercover';
 // 历史战绩页面：列表 + 点击展开棋盘快照详情。
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -11,7 +13,7 @@ import RecordShareActions from '../RecordShareActions';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, AbyssSnapshot, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
-import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon } from '../icons';
+import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
@@ -98,6 +100,7 @@ export default function HistoryScreen() {
   };
 
   const renderGameIcon = (game: string) => {
+    if (game === 'undercover') return <UndercoverIcon size={36} />;
     if (game === 'abyss') return <AbyssIcon size={36} />;
     if (game === 'uttt') return <UltimateTicTacToeIcon size={36} />;
     if (game === 'spider') return <SpiderIcon size={36} />;
@@ -159,7 +162,7 @@ export default function HistoryScreen() {
                   {rec.players.map((p) => {
                     const difficulty = p.ai_difficulty && { easy: '简单', normal: '普通', hard: '困难' }[p.ai_difficulty];
                     return `${p.nickname || p.username}${difficulty ? ' · ' + difficulty : ''}`;
-                  }).join(rec.game === 'abyss' ? ' / ' : ' vs ')}
+                  }).join(rec.game === 'abyss' || rec.game === 'undercover' ? ' / ' : ' vs ')}
                 </Text>
               </View>
               <Text style={styles.arrow}>{expanded ? '∨' : '›'}</Text>
@@ -177,7 +180,7 @@ export default function HistoryScreen() {
                   ))}
                 </View>
                 <BoardSnapshot rec={rec} viewerId={user?.id} />
-                <RecordShareActions token={token} recordId={rec.id} />
+                <RecordShareActions token={token} recordId={rec.id} resultOnly={rec.game === 'undercover'} />
               </View>
             )}
           </TouchableOpacity>
@@ -279,6 +282,14 @@ export function BoardSnapshot({ rec, viewerId }: { rec: GameRecord; viewerId?: n
     return <View style={styles.abyssSummary}>
       <Text style={styles.abyssTitle}>{dive.result ? abyssResults[dive.result] : '对局已结束'}</Text>
       <AbyssResult game={dive} uid={viewerId} />
+    </View>;
+  }
+  if (view.game === 'undercover') {
+    const summary: UndercoverSnapshot = view;
+    const names = new Map(rec.players.map(player => [player.user_id, player.nickname || player.username]));
+    return <View testID="undercover-history">
+      <Text style={styles.gameLabel}>{undercoverWinnerLabels[summary.winner]}</Text>
+      <UndercoverSummary summary={summary} name={id => names.get(id) ?? `玩家 ${id}`} />
     </View>;
   }
   if (view.game === 'uttt') {

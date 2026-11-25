@@ -403,7 +403,8 @@ def _build_players_record(room: dict) -> list[dict]:
     gs = room.get("game_state") or {}
     colors = gs.get("player_colors", {})
     players = []
-    for idx, p in enumerate(room["players"]):
+    roster = room["_undercover_roster"] if room["game"] == "undercover" else room["players"]
+    for idx, p in enumerate(roster):
         entry: dict = {
             "user_id": p["id"],
             "username": p["username"],
@@ -423,6 +424,22 @@ def _build_players_record(room: dict) -> list[dict]:
 def _build_results_record(room: dict) -> list[dict]:
     """Build the per-player result list."""
     gs = room.get("game_state") or {}
+    if room["game"] == "undercover":
+        summary = gs["summary"]
+        roles = {entry["user_id"]: entry["role"] for entry in summary["roles"]}
+        forfeited = summary["forfeited"]
+        results = []
+        for p in room["_undercover_roster"]:
+            if p["id"] in forfeited:
+                result = "lose"
+            elif summary["winner"] == "draw":
+                result = "draw"
+            elif summary["winner"] == "aborted":
+                result = "end"
+            else:
+                result = "win" if roles[p["id"]] == summary["winner"] else "lose"
+            results.append({"username": p["username"], "result": result})
+        return results
     if room["game"] == "abyss":
         return [{"username": p["username"], "score": gs["players"][p["id"]]["kills"],
                  "result": "win" if gs["result"] == "won" and not gs["players"][p["id"]]["departed"] else "lose"}
@@ -522,6 +539,8 @@ def _build_results_record(room: dict) -> list[dict]:
 def _build_snapshot(room: dict) -> dict:
     """Build the final-position snapshot stored with each record."""
     gs = room.get("game_state") or {}
+    if room["game"] == "undercover":
+        return gs["summary"]
     game = room["game"]
     if game == "abyss":
         from app.game.abyss import record_summary

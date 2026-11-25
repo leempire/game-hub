@@ -34,6 +34,7 @@ const LINKING = {
       UltimateTicTacToe: 'uttt/:code',
       Tetris: 'tetris/:code',
       Uno: 'uno/:code',
+      Undercover: 'undercover/:code',
       Stasis: 'stasis/:code',
       Abyss: 'abyss/:code',
       History: 'history',

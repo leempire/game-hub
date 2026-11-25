@@ -1,5 +1,7 @@
 """Room REST routes: create, list, get, join, leave."""
 
+import asyncio
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from app.database import get_conn, row_to_user
@@ -63,10 +65,10 @@ def get_room(code: str, user_id: int = Depends(get_current_user_id)):
 
 
 @router.post("/{code}/join")
-def join_room(
+async def join_room(
     code: str, req: JoinRoomRequest, user_id: int = Depends(get_current_user_id)
 ):
-    user = _get_user(user_id)
+    user = await asyncio.to_thread(_get_user, user_id)
     try:
         room = rm.join_room(code, user, req.password)
     except ValueError as e:
@@ -79,7 +81,8 @@ def join_room(
             raise HTTPException(409, msg)
         raise HTTPException(409, msg)
     # Mark player connected if reconnecting
-    rm.handle_player_reconnect(code, user["id"])
+    if room["game"] != "undercover":
+        rm.handle_player_reconnect(code, user["id"])
     return rm.room_to_dict(room)
 
 
@@ -90,7 +93,7 @@ async def leave_room(code: str, background_tasks: BackgroundTasks, user_id: int 
         return {"ok": True}
     if not any(p["id"] == user_id for p in room["players"]):
         raise HTTPException(403, "你不在房间中")
-    if room["game"] in ("uttt", "abyss"):
+    if room["game"] in ("uttt", "abyss", "undercover"):
         from app.ws import _handle_leave
         await _handle_leave(code, user_id)
         return {"ok": True}

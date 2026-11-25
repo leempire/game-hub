@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon,
   Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon,
-  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon,
+  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon,
 } from './icons';
 
 /**
@@ -23,7 +23,7 @@ import {
 /** 服务端的 `game` 值。帮助系统 `GAME_HELP` 也拿它当键（少一个游戏会编译不过）。 */
 export type GameKey =
   | 'gomoku' | 'minesweeper' | 'reversi' | 'battleship' | 'dots' | 'ludo'
-  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt' | 'abyss';
+  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt' | 'abyss' | 'undercover';
 
 export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop' | 'single';
 
@@ -51,7 +51,7 @@ export interface GameEntry {
  *  「我要一局棋」/「想拉几个人围一桌」，而不是「我想玩个海上的」。 */
 export const GAME_CATEGORIES: Array<{ key: GameCategoryKey; name: string; blurb: string }> = [
   { key: 'board', name: '棋类对战', blurb: '两人轮流落子，一局定胜负' },
-  { key: 'table', name: '多人桌游', blurb: '2-4 人围一桌，轮流出牌 / 掷骰' },
+  { key: 'table', name: '多人桌游', blurb: '2–8 人围一桌，出牌、掷骰或推理' },
   { key: 'solo', name: '各玩各的', blurb: '同时开打，各自算成绩' },
   { key: 'coop', name: '合作', blurb: '一起扛同一局，输赢同担' },
 ];
@@ -78,6 +78,8 @@ export const GAMES: GameEntry[] = [
     badge: '2–4 人 · 轮流行动', category: 'table', ionicon: 'albums', Icon: UnoIcon },
   { key: 'ludo', title: '飞行棋', short: '飞行棋', desc: '掷骰起飞，撞敌回基地抢先终点',
     badge: '2–4 人 · 对战', category: 'table', ionicon: 'airplane', Icon: LudoIcon },
+  { key: 'undercover', title: '我是卧底', short: '我是卧底', desc: '偷偷看词，轮流给线索，投票找卧底',
+    badge: '4–8 人 · 文字推理', category: 'table', ionicon: 'search-outline', Icon: UndercoverIcon },
 
   { key: '2048', title: '2048 竞速', short: '2048', desc: '同序列公平竞速，比谁先合成 2048',
     badge: '1–4 人 · 竞速', category: 'solo', ionicon: 'calculator-outline', Icon: Game2048Icon },

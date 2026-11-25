@@ -40,7 +40,7 @@ from app.game.connect4 import (
     COLS as C4_COLS, ROWS as C4_ROWS,
     BLACK as C4_BLACK, WHITE as C4_WHITE,
 )
-from app.game import abyss
+from app.game import abyss, undercover
 from app.game import stasis as stasis_engine
 from app.game import (battleship_ai, gomoku_ai, reversi_ai, dots_ai, ludo_ai, xiangqi_ai,
                  connect4_ai, uno_ai, luzhanqi_ai)
@@ -58,6 +58,11 @@ def _register_dc_timeout_callback():
 
     async def _on_timeout(code: str, winner: str | int, timeout_event: dict | None = None):
         room = rm.get_room(code)
+        if room and room["game"] == "undercover":
+            gs = room["game_state"]
+            if timeout_event and gs is timeout_event["game_state"] and gs.get("revision") == timeout_event["revision"]:
+                _send_undercover_update(room, lobby=True)
+            return
         if room and room["game"] == "2048":
             if timeout_event is None:
                 return
@@ -119,20 +124,28 @@ async def ws_room(websocket: WebSocket, code: str):
         await websocket.close(code=4003, reason="你不在房间中")
         return
     await websocket.accept()
+    is_undercover = room["game"] == "undercover"
+    if is_undercover and (rm.get_room(code) is not room
+                          or not any(p["id"] == user_id for p in room["players"])):
+        await websocket.close(code=4003, reason="你不在房间中")
+        return
     # Register connection
     if code not in _connections:
         _connections[code] = {}
     _connections[code][user_id] = websocket
     try:
-        # Mark player connected
-        for p in room["players"]:
-            if p["id"] == user_id:
-                p["connected"] = True
-                break
-        # Cancel any disconnect timer (reconnect case)
-        rm.handle_player_reconnect(code, user_id)
-        # Send sync
-        await websocket.send_json(_build_sync(room, user_id))
+        was_paused = (is_undercover and room["status"] == "playing"
+                      and not rm.room_timing.undercover_online(room))
+        reconnected = rm.handle_player_reconnect(code, user_id)
+        if is_undercover:
+            if not reconnected:
+                await websocket.close(code=4003, reason="你不在房间中")
+                return
+            _stasis_enqueue(websocket, _build_sync(room, user_id))
+            if was_paused and (rm.room_timing.undercover_online(room) or room["status"] == "waiting"):
+                _send_undercover_update(room, exclude={user_id})
+        else:
+            await websocket.send_json(_build_sync(room, user_id))
         # Broadcast lobby so every client sees the fresh connected flag
         await _broadcast(code, {
             "type": "lobby", "room": rm.room_to_dict(room)
@@ -147,6 +160,8 @@ async def ws_room(websocket: WebSocket, code: str):
             # 僵尸连接自愈：本页连接被同用户新连接替换后又被弹出（如对局结束返回房间页），
             # 旧连接再发消息时若表位空缺则重新注册；表位有新连接时不抢占（防旧连接 ping 夺位）
             conns = _connections.setdefault(code, {})
+            if is_undercover and (rm.get_room(code) is not room or conns.get(user_id) is not websocket):
+                break
             if room["game"] == "abyss" and conns.get(user_id) is not websocket:
                 break
             if user_id not in conns:
@@ -166,20 +181,30 @@ async def ws_room(websocket: WebSocket, code: str):
         # (a newer connection from the same user may have replaced it)
         conns = _connections.get(code, {})
         current = conns.get(user_id)
+        owns_slot = current is websocket
         superseded = current is not None and current is not websocket
-        if current is websocket:
+        if owns_slot:
             conns.pop(user_id, None)
         if not conns:
             _connections.pop(code, None)
         # 被新连接顶替的旧连接关闭时**不能**走掉线流程：它的关闭事件往往在新连接
         # 注册之后才到达，无条件标记会把刚置上的在线态覆盖回掉线。症状就是「对局
         # 结束点返回房间后概率性显示『断线』」（房间里还会误启 120s 判负计时）。
-        room = rm.get_room(code) if not superseded else None
+        current_room = rm.get_room(code)
+        should_disconnect = (owns_slot and current_room is room) if is_undercover else not superseded
+        room = current_room if should_disconnect else None
         if room:
             status_before = room["status"]
+            state = room.get("game_state") or {}
+            revision_before = state.get("revision")
+            had_active = is_undercover and rm.room_timing.undercover_online(room)
             loop = asyncio.get_event_loop()
             rm.handle_player_disconnect(code, user_id, loop)
-            if status_before == "playing":
+            if is_undercover and status_before == "playing" and (
+                state.get("revision") != revision_before or (had_active and not rm.room_timing.undercover_online(room))
+            ):
+                _send_undercover_update(room)
+            if status_before == "playing" and (not is_undercover or room["status"] == "playing"):
                 await _broadcast(code, {
                     "type": "player_disconnected", "user_id": user_id,
                     # 重连倒计时的起点（测试会把超时调小，客户端别写死 120）
@@ -215,7 +240,25 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
     room = rm.get_room(code)
     if not room:
         return
-    if not await _time_guard(code):
+    if msg_type in ("undercover_clue", "undercover_vote"):
+        if room["game"] != "undercover":
+            await _send_error(code, user_id, "这不是我是卧底房间")
+            return
+        error, changed = rm.undercover_action(room, user_id, data)
+        ws = _connections.get(code, {}).get(user_id)
+        if error:
+            if ws:
+                _stasis_enqueue(ws, {"type": "error", "message": error})
+        if changed or room["status"] == "playing":
+            _send_undercover_update(room, only=None if changed else user_id)
+        elif ws and (result := _undercover_result(room, user_id)) and data.get("match_id") == result["match_id"]:
+            _stasis_enqueue(ws, _build_sync(room, user_id))
+        return
+    if room["game"] == "undercover":
+        if msg_type not in ("ping", "ready", "unready", "start", "add_bot", "remove_bot", "room_setting",
+                            "swap_request", "swap_respond", "surrender", "leave"):
+            return
+    elif not await _time_guard(code):
         return
     if msg_type == "ping":
         conns = _connections.get(code, {})
@@ -410,6 +453,9 @@ async def _handle_start(code: str, user_id: int):
         return
     if room["game"] == "uno":
         await _broadcast_uno_start(code, room, gs)
+        return
+    if room["game"] == "undercover":
+        _send_undercover_update(room, kind="game_start")
         return
     if room["game"] == "abyss":
         _stasis_send_all(code, {"type": "game_start", "game": abyss.snapshot(gs)})
@@ -829,6 +875,10 @@ async def _handle_surrender(code: str, user_id: int):
     room = rm.get_room(code)
     if not room:
         return
+    if room["game"] == "undercover":
+        if room["status"] == "playing":
+            await _handle_leave(code, user_id)
+        return
     if room["game"] == "abyss":
         await _handle_leave(code, user_id)
         return
@@ -960,6 +1010,8 @@ async def _handle_leave(code: str, user_id: int):
     if ws is not None and conns.get(user_id) is ws:
         conns.pop(user_id)
         try:
+            if room["game"] == "undercover" and (tail := _pending_send(ws)) is not None:
+                await tail
             await ws.close()
         except Exception:
             pass
@@ -967,6 +1019,12 @@ async def _handle_leave(code: str, user_id: int):
 
 async def _broadcast_leave(code: str, user_id: int, action: str,
                            updated_room: dict | None, game_state: dict | None):
+    if updated_room and updated_room["game"] == "undercover":
+        if action == "game_over" or updated_room["status"] == "playing":
+            _send_undercover_update(updated_room, lobby=True)
+        else:
+            await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(updated_room)})
+        return
     if (updated_room and updated_room["game"] == "spider"
             and (rm.get_room(code) is not updated_room or updated_room["game_state"] is not game_state)):
         return
@@ -1056,6 +1114,12 @@ async def _broadcast(code: str, message: dict, exclude: set[int] | None = None):
     conns = _connections.get(code, {})
     room = rm.get_room(code)
     exclude = exclude or set()
+    if room and room["game"] == "undercover":
+        for p in room["players"]:
+            uid = p["id"]
+            if uid not in exclude and uid in conns:
+                _stasis_enqueue(conns[uid], message)
+        return
     for uid, ws in list(conns.items()):
         if uid in exclude:
             continue
@@ -1113,6 +1177,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = tetris_game_to_sync(room["game_state"], user_id)
         elif room["game"] == "uno":
             game_info = uno_game_to_sync(room["game_state"], user_id)
+        elif room["game"] == "undercover":
+            game_info = _undercover_view(room, user_id)
         elif room["game"] == "abyss":
             game_info = abyss.snapshot(room["game_state"])
         elif room["game"] == "stasis":
@@ -1123,7 +1189,7 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = lzq.game_to_sync(room["game_state"], user_id)
         else:
             game_info = _game_state_for_sync(room["game_state"], user_id)
-    if game_info is not None:
+    if game_info is not None and room["game"] != "undercover":
         game_info = _timed_view(room, user_id, game_info)
     if game_info is not None and room.get("challenge_date"):
         game_info["challenge"] = rm.challenge_info(room)
@@ -1136,7 +1202,43 @@ def _build_sync(room: dict, user_id: int) -> dict:
         **({"abyss_result": abyss.snapshot(room["game_state"])}
            if room["game"] == "abyss" and room["status"] == "waiting"
            and (room.get("game_state") or {}).get("finished") else {}),
+        **({"undercover_result": result} if room["game"] == "undercover"
+           and (result := _undercover_result(room, user_id)) is not None else {}),
     }
+
+
+def _undercover_view(room: dict, user_id: int) -> dict:
+    return rm.room_timing.decorate(room, {"game": "undercover", **undercover.view_for(room["game_state"], user_id)})
+
+
+def _undercover_result(room: dict, user_id: int) -> dict | None:
+    gs = room.get("game_state") or {}
+    summary = gs.get("summary")
+    if not summary or not any(p["id"] == user_id for p in room["_undercover_roster"]):
+        return None
+    return {"type": "game_over", "game": "undercover", "match_id": gs["match_id"],
+            "winner": summary["winner"], "reason": summary["reason"], "summary": deepcopy(summary),
+            "forfeited": list(summary["forfeited"])}
+
+
+def _send_undercover_update(room: dict, *, only=None, exclude=(), kind="undercover_state", lobby=False):
+    # Enqueue every projection in the same turn of the event loop as the committed revision.
+    conns = _connections.get(room["code"], {})
+    members = {p["id"] for p in room["players"]}
+    playing = room["status"] == "playing"
+    room_view = rm.room_to_dict(room) if lobby or not playing or kind == "game_start" else None
+    for uid, ws in list(conns.items()):
+        if uid in exclude or (only is not None and uid != only):
+            continue
+        if playing and uid in members:
+            payload = {"type": kind, "game": _undercover_view(room, uid)}
+            if kind == "game_start":
+                payload["room"] = room_view
+            _stasis_enqueue(ws, payload)
+        elif not playing and (result := _undercover_result(room, uid)) is not None:
+            _stasis_enqueue(ws, result)
+        if (lobby or not playing) and uid in members:
+            _stasis_enqueue(ws, {"type": "lobby", "room": room_view})
 
 
 def _game_state_for_sync(gs: dict, user_id: int) -> dict:
@@ -2879,6 +2981,10 @@ async def reschedule_after_restore():
                     if rm.user_in_game(room, p["id"]):
                         rm._start_dc_timer(room["code"], p["id"], asyncio.get_running_loop())
                 rm._ensure_abyss_tick(room)
+            elif room["game"] == "undercover":
+                for p in room["players"]:
+                    if not p["connected"] and rm.user_in_game(room, p["id"]):
+                        rm._start_dc_timer(room["code"], p["id"], asyncio.get_running_loop())
             elif room["game"] == "battleship" and gs.get("phase") == "placing":
                 for pid in gs["player_colors"]:
                     if _is_bot(room, pid) and not gs["placement_ready"].get(pid):
@@ -2919,6 +3025,8 @@ def _broadcast_lobby_after_game_end(room: dict):
     callback preserves the old lobby-only notification while reading the final
     membership, rather than capturing stale room_to_dict data during the save.
     """
+    if room["game"] == "undercover":
+        return  # The result and lobby are enqueued together for each recipient.
     room["_lobby_after_game_over"] = True
     try:
         loop = asyncio.get_running_loop()
@@ -2965,6 +3073,9 @@ async def _on_room_deadline(code: str, room: dict, event: str):
         rm._touch_activity(room)
         await _broadcast(code, {"type": "setup_left", "remaining_ms": 0})
         await _luzhanqi_broadcast_begin(code, room, gs)
+    elif event == "undercover":
+        if rm.expire_undercover(room):
+            _send_undercover_update(room)
     elif event == "checkpoint" and room["status"] == "playing":
         if gs.get("clock"):
             await _broadcast(code, {"type": "clock_update", "clock": rm.room_timing.decorate(room, {})["clock"]})
