@@ -111,7 +111,7 @@ def test_bonus_numbers_stay_small_and_stack_with_passives():
     assert bonus["might"] == pytest.approx(.15)
     assert bonus["cooldown"] == pytest.approx(-.08)
     assert bonus["area"] == pytest.approx(.12)
-    assert bonus["armor"] == 1
+    assert bonus["armor"] == pytest.approx(.08)
     assert bonus["recovery"] == pytest.approx(.24)
     assert bonus["magnet"] == pytest.approx(.30)
     assert bonus["luck"] == pytest.approx(.12)

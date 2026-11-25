@@ -35,8 +35,8 @@ BRANCHES = (
         "nodes": (
             {"key": "vitality", "name": "深潜体质", "detail": "最大生命 +4%",
              "max": 5, "cost": 1, "effect": {"max_hp": .04}},
-            {"key": "pressure_shell", "name": "抗压壳", "detail": "受到伤害 -1",
-             "max": 1, "cost": 3, "effect": {"armor": 1}},
+            {"key": "pressure_shell", "name": "抗压壳", "detail": "受到伤害 -8%",
+             "max": 1, "cost": 3, "effect": {"armor": .08}},
             {"key": "self_heal", "name": "自愈膜", "detail": "每秒回复 +0.08",
              "max": 3, "cost": 2, "effect": {"recovery": .08}},
             {"key": "emergency_float", "name": "应急上浮", "detail": "开局 6 秒无敌",

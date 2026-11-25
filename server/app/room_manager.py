@@ -328,6 +328,20 @@ def _restore_spider(room: dict) -> None:
     room["game_state"] = {"boards": boards, "finished": False}
 
 
+def _restore_abyss(room: dict) -> None:
+    """v1.29.1 护甲从固定点数改成百分比后，刷新进行中存档的属性。
+
+    旧 `game_state` 里 `stats["armor"]` 是 0–6 的固定减伤点数；直接恢复会让
+    属性面板显示「减伤 500%」。这里按当前公式重算一次，受击也立即用新语义。
+    """
+    gs = room.get("game_state")
+    if not isinstance(gs, dict):
+        return
+    for p in (gs.get("players") or {}).values():
+        if isinstance(p, dict) and "passives" in p:
+            abyss._refresh_stats(p)
+
+
 def restore_rooms() -> int:
     """热重启：从磁盘恢复全部房间。startup 时 persistence.init() 后调用。
 
@@ -352,6 +366,8 @@ def restore_rooms() -> int:
         room.pop("rematch_votes", None)  # 旧数据兼容：rematch 已删除
         if room["game"] == "spider":
             _restore_spider(room)
+        elif room["game"] == "abyss":
+            _restore_abyss(room)
         _normalize_restored_rules(room)
         for p in room.get("players", []):
             if p.get("is_bot"):

@@ -1227,7 +1227,9 @@ def pick(gs, uid, level, choice):
 def _hurt_diver(gs, p, damage):
     if not p["hp"] or p["invincible"] > gs["elapsed"]:
         return
-    p["hp"] = max(0, p["hp"] - max(0, damage - p["stats"]["armor"]))
+    reduction = min(data.MAX_ARMOR_REDUCTION, p["stats"]["armor"])
+    p["hp"] = max(0, p["hp"] - max(data.MIN_HIT_DAMAGE,
+                                   damage * (1.0 - reduction)))
     p["invincible"] = gs["elapsed"] + 20
     if not p["hp"]:
         stop(gs, p["id"])
@@ -1485,7 +1487,8 @@ def _choice_changes(player):
         elif choice in data.PASSIVES:
             passives = {**player["passives"], choice: player["passives"].get(choice, 0) + 1}
             before = player["stats"]
-            after = data.player_stats(passives)
+            # 局外天赋也要带上，否则带天赋的玩家会看到「升级后属性反而下降」。
+            after = data.player_stats(passives, player.get("talent"))
             keys = (data.PASSIVES[choice]["stat"],)
         else:
             continue
