@@ -4,7 +4,7 @@ import React from 'react';
 import Svg, { Circle, Defs, Ellipse, G, Line, LinearGradient, Path, Polygon, Rect, Stop, Text } from 'react-native-svg';
 // UNO 的牌色直接取 theme（「颜色只有 theme.ts 一个来源」是硬规则——本文件其余
 // 图标用的是各自的局部常量，UNO 不再复制一份 hex）
-import { unoColors, unoWild, unoInk, unoOnWild, colors, spiderTable, abyssColors } from './theme';
+import { unoColors, unoWild, unoInk, unoOnWild, colors, spiderTable, abyssColors, fishColors } from './theme';
 // 深空休眠的整套令牌也一律从 theme 取（同上：不在图标里写死 hex）
 // **v5 起只剩这一组**：各单位的贴图搬到 `stasisArt.tsx` 了（那边的贴图是
 // 「整格 44px 的俯视 sprite」，与这里 64px 的「正面图标」不是一套画法）。
@@ -700,5 +700,17 @@ export function AbyssIcon({ size = 56 }: { size?: number }) {
     <Path d="M21 46V26a11 11 0 0 1 22 0v20L32 51Z" fill={c.brass} stroke={c.deep} strokeWidth="2" />
     <Circle cx="32" cy="29" r="10" fill={c.visor} stroke={c.signal} strokeWidth="2" />
     <Path d="M28 25q4-4 8 0" fill="none" stroke={c.text} strokeWidth="2" strokeLinecap="round" />
+  </Svg>;
+}
+
+export function FishIcon({ size = 44 }: { size?: number }) {
+  return <Svg width={size} height={size} viewBox="0 0 56 56">
+    <Circle cx="28" cy="28" r="26" fill={fishColors.deep} />
+    <Path d="M19 28 L7 18 L10 28 L7 38 Z" fill={fishColors.peer} />
+    <Path d="M16 28 C24 11 44 14 49 28 C43 43 24 44 16 28 Z" fill={fishColors.cyan} />
+    <Path d="M30 29 Q25 38 35 33 L39 29" fill={fishColors.peer} />
+    <Circle cx="41" cy="26" r="2.9" fill={fishColors.deep} />
+    <Circle cx="18" cy="14" r="2" fill={fishColors.green} />
+    <Circle cx="10" cy="11" r="1.4" fill={fishColors.green} />
   </Svg>;
 }

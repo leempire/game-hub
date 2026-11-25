@@ -540,3 +540,10 @@ export const abyssColors = {
   hellfire: '#FF7A5C', soul_eater: '#9AE6A8', la_borra: '#6FD6C7',
   no_future: '#FFA35C', thunder_loop: '#87C3FF', gorgeous_moon: '#FFE5AD',
 };
+
+export const fishColors = {
+  deep: '#061a30', panel: '#09263c', glass: '#071e34e8', line: '#30536a',
+  text: '#f1fbff', muted: '#a2c0d2', cyan: '#81e9ff', green: '#93f7d4',
+  coral: '#ff9a83', amber: '#ffce82', peer: '#c5adff',
+  currentTint: '#8065c31c', schoolTint: '#18ba951a', harmTint: '#ff593f29',
+};

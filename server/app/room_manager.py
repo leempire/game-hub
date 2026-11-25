@@ -16,7 +16,7 @@ from app import room_timing
 from app.competition_rules import challenge_seed, challenge_info
 from app.game import spider, uttt, uttt_ai, xiangqi as xiangqi_engine
 from app.game import stasis as stasis_engine
-from app.game import abyss, stasis_ai
+from app.game import abyss, fish, stasis_ai
 
 # Room idle TTL in seconds. Sweeper deletes rooms exceeding this.
 # Monkeypatch this constant in tests to avoid real 30-minute waits.
@@ -510,13 +510,13 @@ def create_room(
 ) -> dict:
     """Create a new room."""
     if game not in ("gomoku", "reversi", "minesweeper", "battleship", "dots", "ludo",
-                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider", "uttt", "abyss"):
+                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider", "uttt", "abyss", "fish"):
         raise ValueError("不支持的游戏类型")
     code = _generate_code()
     room_name = name or f"{user['username']}的房间"
     # 深空休眠 6 人（12 间舱室 / 12 个座位），其余多人游戏 4 人上限
     max_players = 6 if game == "stasis" else (
-        4 if game in ("minesweeper", "ludo", "2048", "tetris", "uno", "spider", "abyss") else 2)
+        4 if game in ("minesweeper", "ludo", "2048", "tetris", "uno", "spider", "abyss", "fish") else 2)
     room = {
         "code": code,
         "name": room_name,
@@ -576,8 +576,9 @@ def join_room(code: str, user: dict, password: str | None) -> dict:
     # 会把「凭房号回到自己所在的房」误判成「你已在房间中」。
     for p in room["players"]:
         if p["id"] == user["id"]:
-            if room["game"] == "abyss" and room["status"] == "playing" and not user_in_game(room, user["id"]):
-                raise ValueError("你已退出本次试潜，请等待下一局")
+            if room["game"] in ("abyss", "fish") and room["status"] == "playing" and not user_in_game(room, user["id"]):
+                activity = "本次试潜" if room["game"] == "abyss" else "本局"
+                raise ValueError(f"你已退出{activity}，请等待下一局")
             room["empty_since"] = None
             # 房主已不在房里时把房主转给回来的这位
             if not any(q["id"] == room["host_id"] for q in room["players"]):
@@ -786,6 +787,8 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
     if room["status"] == "playing":
         if room["game"] == "spider":
             return _leave_spider(room, user_id)
+        if room["game"] == "fish":
+            return _leave_fish(room, user_id)
         if room["game"] == "abyss":
             return _leave_abyss(room, user_id)
         if room["game"] == "stasis":
@@ -958,6 +961,8 @@ def _start_game_engine(code: str, user_id: int, *, prepared_spider: dict | None 
         return _start_tetris(room)
     if room["game"] == "uno":
         return _start_uno(room)
+    if room["game"] == "fish":
+        return _start_fish(room)
     if room["game"] == "abyss":
         return _start_abyss(room)
     if room["game"] == "stasis":
@@ -1411,6 +1416,95 @@ def set_room_setting(code: str, user_id: int, key: str, value) -> dict:
     room_settings.apply(room, spec, room_settings.coerce(spec, value))
     _touch_activity(room)
     return room
+
+
+_fish_tasks: dict[str, asyncio.Task] = {}
+
+
+def _start_fish(room: dict) -> dict:
+    gs = fish.create(room["players"], random.randrange(2**32), room.get("fish_map_size", "medium"),
+                     room.get("fish_items", True), room.get("fish_events", True))
+    room.update(status="playing", game_state=gs, game_started_at=_now_iso(), empty_since=None)
+    persistence.save_room(room)
+    _ensure_fish_tick(room)
+    return gs
+
+
+def _ensure_fish_tick(room: dict):
+    code = room["code"]
+    task = _fish_tasks.get(code)
+    if task and not task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _fish_tasks[code] = loop.create_task(_fish_tick(room))
+
+
+async def _fish_tick(room: dict):
+    from app import ws
+    code, gs = room["code"], room["game_state"]
+    loop = asyncio.get_running_loop()
+    deadline = loop.time()
+
+    def active():
+        return _rooms.get(code) is room and room["status"] == "playing" and room["game_state"] is gs
+
+    try:
+        while active():
+            deadline += fish.STEP
+            await asyncio.sleep(max(0, deadline - loop.time()))
+            if not active():
+                return
+            deadline = max(deadline, loop.time() - .15)
+            online = {p["id"] for p in room["players"] if p["connected"]}
+            if not online:
+                continue
+            fish.advance(gs, online)
+            if gs["finished"]:
+                _settle_fish(room)
+                ws.send_fish_end(room)
+                return
+            if gs["frame"] % 3 == 0:
+                ws.send_fish_tick(room)
+            if gs["frame"] % 90 == 0:
+                persistence.save_room(room)
+    finally:
+        _fish_tasks.pop(code, None)
+        if _rooms.get(code) is room and room["status"] == "playing" and room["game_state"] is not gs:
+            _ensure_fish_tick(room)
+
+
+def _settle_fish(room: dict):
+    _cancel_all_dc_tasks(room["code"])
+    _back_to_lobby(room)
+    _touch_activity(room)
+    _notify_game_end(room)
+    room["players"] = [p for p in room["players"] if not room["game_state"]["players"][p["id"]]["departed"]]
+    _transfer_host(room)
+    room["empty_since"] = None if _has_human_online(room) else _time.time()
+    persistence.save_room(room)
+
+
+def _leave_fish(room: dict, uid: int):
+    gs = room["game_state"]
+    if gs["players"][uid]["departed"]:
+        return ("removed", None)
+    fish.depart(gs, uid)
+    for p in room["players"]:
+        if p["id"] == uid:
+            p["connected"] = False
+    if room["host_id"] == uid:
+        room["host_id"] = next((p["id"] for p in room["players"] if not gs["players"][p["id"]]["departed"]), uid)
+    if gs["finished"]:
+        _settle_fish(room)
+        if not room["players"]:
+            _destroy_room(room["code"])
+            return ("closed", None)
+        return ("game_over", room)
+    _maybe_destroy_or_mark(room)
+    return ("removed", room)
 
 
 _abyss_tasks: dict[str, asyncio.Task] = {}
@@ -2200,7 +2294,7 @@ def user_in_game(room: dict, user_id: int) -> bool:
         return False
     gs = room.get("game_state") or {}
     game = room["game"]
-    if game == "abyss":
+    if game in ("abyss", "fish"):
         return not gs["players"].get(user_id, {}).get("departed", True)
     if game == "spider":
         board = gs.get("boards", {}).get(user_id)
@@ -3419,6 +3513,9 @@ def handle_player_disconnect(code: str, user_id: int, loop: asyncio.AbstractEven
             p["connected"] = False
             p["disconnected_at"] = _time.time()   # 供重连倒计时算剩余秒数
             break
+    if room["game"] == "fish" and room["status"] == "playing":
+        fish.stop(room["game_state"], user_id)
+        _maybe_destroy_or_mark(room)
     if room["game"] == "abyss" and room["status"] == "playing":
         abyss.stop(room["game_state"], user_id)
         _maybe_destroy_or_mark(room)
@@ -3492,6 +3589,14 @@ def _on_dc_timeout(code: str, user_id: int):
     _dc_tasks.pop((code, user_id), None)
     room = _rooms.get(code)
     if not room or room["status"] != "playing" or room["game"] == "spider":
+        return
+    if room["game"] == "fish":
+        from app import ws
+        action, updated = _leave_fish(room, user_id)
+        if action == "game_over":
+            ws.send_fish_end(updated)
+        elif updated:
+            ws.send_fish_lobby(updated)
         return
     if room["game"] == "abyss":
         _mark_abyss_departure(room, user_id)
