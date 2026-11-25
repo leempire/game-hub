@@ -164,7 +164,6 @@ def main(browser_name='chromium', executable_path=None, isolated=False):
         ok('双方用数字键选完强化，战斗恢复')
 
         pa.get_by_test_id('abyss-audio').click()
-        pa.get_by_test_id('abyss-music').click()
         pa.get_by_test_id('abyss-music-level-loud').click()
         pa.get_by_test_id('abyss-audio-close').click()
         pa.wait_for_function("""() => {

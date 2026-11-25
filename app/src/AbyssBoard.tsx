@@ -370,6 +370,9 @@ const frameMs = 50;
 const interpolationDelay = 125;
 const maxJitterBuffer = 95;
 const snapshotFreshnessMs = 400;
+// 服务端会继续模拟全部敌人；这里只限制单帧挂载的 SVG 实例数。超宽窗口能看到
+// 半个战场时，避免几百个 <use> 把 React/SVG 逐帧重组拖慢。
+const enemyDrawLimit = 160;
 const predictionWindowMs = 180;
 const hitIndicatorMs = 320;
 const pickupIndicatorMs = 240;
@@ -690,6 +693,14 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
   const top = worldHeight === null ? centerY - height / 2 : clamp(centerY - height / 2, 0, Math.max(0, worldHeight - height));
   const visible = (x: number, y: number, padding = 75) => x > left - padding && x < left + width + padding
     && y > top - padding && y < top + height + padding;
+  const drawableEnemies = visibleEnemies.length > enemyDrawLimit
+    ? new Set(visibleEnemies
+      .filter(([, , x, y]) => visible(x, y))
+      .sort((a, b) => ((a[2] - centerX) ** 2 + (a[3] - centerY) ** 2)
+        - ((b[2] - centerX) ** 2 + (b[3] - centerY) ** 2))
+      .slice(0, enemyDrawLimit)
+      .map(([id]) => id))
+    : null;
   const effectInView = ({ minX, maxX, minY, maxY }: EffectBounds) =>
     maxX >= left && minX <= left + width && maxY >= top && minY <= top + height;
   // A distant teammate's screen-clearing weapon also hits enemies around this viewport.
@@ -751,7 +762,7 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
         })}
         {scene.chests.filter(([, x, y]) => visible(x, y)).map(([id, x, y]) =>
           <Use key={id} href={`#${artPrefix}-chest`} x={x} y={y} />)}
-        {visibleEnemies.map(([id, kind, x, y, angle, hp, max]) => {
+        {visibleEnemies.map(([id, kind, x, y, angle, hp, max, slow = 0]) => {
           const old = previous?.enemies.get(id);
           const departure = departingEnemies.get(id);
           const end = departure ? departure.start ?? scene.frame : scene.frame;
@@ -760,15 +771,24 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
             ? clamp((sceneTime - previous.game.frame) / Math.max(1, end - previous.game.frame), 0, 1) : fraction;
           const px = old ? mix(old[2], departure?.x ?? x, leadIn) : x;
           const py = old ? mix(old[3], departure?.y ?? y, leadIn) : y;
-          if (!visible(px, py)) return null;
-          const degrees = (old ? mixAngle(old[4], angle, fraction) : angle) * radians;
           const heavy = kind === 'warden' || kind === 'elite';
+          if (!visible(px, py)) return null;
+          // 精英与守卫永远保留，避免被普通怪的数量预算挤掉。
+          if (drawableEnemies && !heavy && !drawableEnemies.has(id)) return null;
+          const degrees = (old ? mixAngle(old[4], angle, fraction) : angle) * radians;
           const hitPulse = !reduceMotion && old && hp < old[5] ? Math.sin(Math.PI * Math.pow(fraction, .38)) : 0;
           const hitScale = 1 + (heavy ? .12 : .38) * hitPulse;
           const recoil = hitScale === 1 ? '' : ` scale(${hitScale} ${1 / hitScale})`;
+          const frost = slow > 0
+            ? <Use testID={`abyss-slow-${id}`} href={`#${artPrefix}-slow-mark`}
+              opacity={Math.min(1, .45 + slow)} />
+            : null;
           if (!heavy) {
-            return <Use testID={`abyss-enemy-${id}`} key={id} href={`#${artPrefix}-creature-${kind}`}
-              transform={`translate(${px} ${py}) rotate(${degrees})${recoil}`} />;
+            return <G key={id}>
+              <Use testID={`abyss-enemy-${id}`} href={`#${artPrefix}-creature-${kind}`}
+                transform={`translate(${px} ${py}) rotate(${degrees})${recoil}`} />
+              {frost && <G transform={`translate(${px} ${py})`}>{frost}</G>}
+            </G>;
           }
           return <G key={id} transform={`translate(${px} ${py})`}>
             <G testID={`abyss-enemy-${id}`} transform={`rotate(${degrees})${recoil}`}>
@@ -776,6 +796,7 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
                 ? <SvgImage href={wardenImage} x={-39} y={-39} width={78} height={78} />
                 : <Use href={`#${artPrefix}-creature-elite`} />}
             </G>
+            {frost}
             <Rect x="-33" y={kind === 'warden' ? -48 : -36} width="66" height="5" rx="2" fill={c.shadow} />
             <Rect x="-33" y={kind === 'warden' ? -48 : -36} width={66 * hp / max} height="5" rx="2" fill={c[kind]} />
           </G>;

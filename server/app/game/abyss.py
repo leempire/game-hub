@@ -34,6 +34,33 @@ WARDEN_RECOVERY_TICKS = 74
 WARDEN_ENRAGED_RECOVERY_TICKS = 54
 WARDEN_HP_BY_DURATION = {1200: 1.35, 1800: 2.0}
 
+# 刷怪密度：《吸血鬼幸存者》按「最低同屏数 + 补刷」维持怪潮，而不是固定每秒
+# 吐固定数量。这里用「基础预算 + 低于同屏下限时补刷 + 同屏上限」近似：玩家清得
+# 越快补得越快，即使成型 build 也始终有一片怪可割。数值见
+# docs/游戏设计/深渊回声/设计.md。
+SPAWN_PHASES = ((1.4, 12, 35), (3.2, 30, 70), (5.5, 55, 100), (10.0, 90, 150))
+BOSS_SPAWN = (6.0, 70, 120)
+SPAWN_TOPUP_RATE = 24.0
+SPAWN_DENSITY_PER_PLAYER = .2
+SPAWN_HARD_CAP = 320
+
+# 击退按 VS 的「反推一小段」实现：距离取敌人自身移速 × 武器击退 × 受击者的
+# 击退承伤倍率；精英与守卫只吃 20%。荧孢光环每次命中叠加击退承伤（VS 的大蒜）。
+STAGGER_TICKS = 3
+KNOCKBACK_CAP = 60.0
+KNOCKBACK_TAKEN_MAX = 3.0
+KNOCKBACK_RESIST = {"elite": .2, "warden": .2}
+
+# 减速是 VS 基础 12 把之外唯一新增的状态：VS 用「冻结/击退抗性削弱」表示控制，
+# 本作没有冻结，改由荧孢光环与腐潮水池施加减速。精英与守卫吃一半效果。
+SLOW_RESIST = {"elite": .5, "warden": .5}
+
+# 高密度时把 10 Hz 快照降到约 6.7 Hz：带宽和客户端解析量下降三分之一，客户端
+# 仍按 frame 插值，画面不会跳。低于 100 只时保持 10 Hz。
+DENSE_SNAPSHOT_THRESHOLD = 100
+DENSE_SNAPSHOT_INTERVAL = 3
+SNAPSHOT_INTERVAL = 2
+
 ENEMIES = {
     # 血量按「VS 前几分钟的杂兵」重定：Magic Wand 10 点伤害能一枪打死漂囊，
     # 裂鳍鳗与锈甲蟹各多挨一枪。旧版血条配的是 0.6 秒冷却的铆钉，换成 VS 的
@@ -44,7 +71,9 @@ ENEMIES = {
 }
 
 XP_UNITS = {"warden": 30, "elite": 18, "crab": 2, "jelly": 2, "angler": 3}
-CONTACT_DAMAGE = {"needlefish": 4, "jelly": 8, "angler": 10, "warden": 12}
+# 怪潮密度大幅提高后，接触伤害同步下调：否则「同屏 100+」等价于每秒掉 2~5 点，
+# 玩家没有发挥空间。基数 2，高威胁怪仍保留更高值。
+CONTACT_DAMAGE = {"needlefish": 1, "jelly": 3, "angler": 5, "warden": 12}
 WAVE_KINDS = ("drifter", "eel", "crab", "needlefish", "jelly", "angler")
 WAVE_WEIGHTS = (
     (17, 0, 0, 3, 0, 0),
@@ -167,6 +196,11 @@ def threshold(gs):
     return max(1, math.ceil(base * _scale(gs) * gs["xp_pace"]))
 
 
+def snapshot_interval(gs):
+    """Snapshot cadence in simulation frames (20 Hz tick)."""
+    return DENSE_SNAPSHOT_INTERVAL if len(gs["enemies"]) >= DENSE_SNAPSHOT_THRESHOLD else SNAPSHOT_INTERVAL
+
+
 def _refresh_stats(p):
     old_max = p.get("max_hp", data.BASE_MAX_HP)
     stats = data.player_stats(p["passives"])
@@ -213,6 +247,8 @@ def _spawn(gs, kind, player):
     gs["enemies"].append({
         "id": _id(gs), "kind": kind, **best, "hp": hp, "max_hp": hp,
         "angle": 0, "speed": speed, "radius": radius,
+        "kb_taken": 1.0, "stagger_until": 0,
+        "slow_until": 0, "slow_factor": 1.0,
     })
 
 
@@ -263,7 +299,8 @@ def _drop_loot(gs, enemy, units):
 
 
 def _damage(gs, owner, enemy, damage, *, src=None, knockback=0.0, crit=False,
-            heal=0.0, drop_chance=1.0, xp_mult=1):
+            heal=0.0, drop_chance=1.0, xp_mult=1, kb_stack=0.0,
+            slow=0.0, slow_ticks=0):
     """对单个敌人结算伤害。返回是否击杀。"""
     if not enemy or enemy["hp"] <= 0:
         return False
@@ -274,14 +311,25 @@ def _damage(gs, owner, enemy, damage, *, src=None, knockback=0.0, crit=False,
     if enemy["kind"] == "warden" and not was_enraged and _warden_enraged(enemy) and "next_attack" in enemy:
         remaining = enemy["next_attack"] - (WARDEN_RECOVERY_TICKS - WARDEN_ENRAGED_RECOVERY_TICKS)
         enemy["next_attack"] = max(gs["elapsed"] + 1, remaining)
-    if knockback and src is not None:
+    if kb_stack:
+        enemy["kb_taken"] = min(KNOCKBACK_TAKEN_MAX, enemy.get("kb_taken", 1.0) + kb_stack)
+    if slow > 0 and slow_ticks:
+        resist = SLOW_RESIST.get(enemy["kind"], 1.0)
+        factor = 1.0 - slow * resist
+        expired = gs["elapsed"] >= enemy.get("slow_until", 0)
+        if expired or factor < enemy.get("slow_factor", 1.0):
+            enemy["slow_factor"] = factor
+        enemy["slow_until"] = max(enemy.get("slow_until", 0), gs["elapsed"] + slow_ticks)
+    if knockback > 0 and src is not None:
         angle = math.atan2(enemy["y"] - src[1], enemy["x"] - src[0])
-        push = min(42.0, 6.0 * knockback)
-        if enemy["kind"] in ("elite", "warden"):
-            push *= .2
+        push = min(KNOCKBACK_CAP, enemy["speed"] * knockback * .25
+                   * enemy.get("kb_taken", 1.0))
+        if enemy["kind"] in KNOCKBACK_RESIST:
+            push *= KNOCKBACK_RESIST[enemy["kind"]]
         width, height = _bounds(gs)
         enemy["x"] = _clamp(enemy["x"] + push * math.cos(angle), width)
         enemy["y"] = _clamp(enemy["y"] + push * math.sin(angle), height)
+        enemy["stagger_until"] = max(enemy.get("stagger_until", 0), gs["elapsed"] + STAGGER_TICKS)
     if crit and heal and owner and owner["hp"] > 0:
         if gs["elapsed"] >= owner["last_crit_heal"] + FRAMES_PER_SECOND:
             owner["hp"] = min(owner["max_hp"], owner["hp"] + heal)
@@ -307,7 +355,8 @@ def _roll(gs, stats):
 
 
 def _area_damage(gs, owner, x, y, radius, damage, *, weapon, knockback=0.0,
-                 drop_chance=1.0, xp_mult=1, stats=None, crit=True):
+                 drop_chance=1.0, xp_mult=1, stats=None, crit=True,
+                 kb_stack=0.0, slow=0.0, slow_ticks=0):
     stats = stats or {"crit": 0, "crit_mult": 1}
     source = (x, y)
     heal = stats.get("heal_on_crit", 0) if crit else 0
@@ -323,7 +372,8 @@ def _area_damage(gs, owner, x, y, radius, damage, *, weapon, knockback=0.0,
             mult = _roll(gs, stats) if crit else 1.0
             _damage(gs, owner, enemy, damage * mult, src=source,
                     knockback=knockback, crit=mult > 1, heal=heal,
-                    drop_chance=drop_chance, xp_mult=xp_mult)
+                    drop_chance=drop_chance, xp_mult=xp_mult,
+                    kb_stack=kb_stack, slow=slow, slow_ticks=slow_ticks)
     _effect(gs, weapon, "burst", life=6, x=x, y=y, r=radius)
 
 
@@ -336,6 +386,8 @@ def _shot(gs, owner, weapon, stats, x, y, vx, vy, *, kind, life, delay=0,
         "x": x, "y": y, "vx": vx, "vy": vy, "angle": angle,
         "damage": stats["damage"], "pierce": data.INFINITE_PIERCE if pierce is None else pierce,
         "r": radius, "knockback": stats["knockback"],
+        "kb_stack": stats.get("kb_stack", 0.0),
+        "slow": stats.get("slow", 0.0), "slow_ticks": stats.get("slow_ticks", 0),
         "crit": stats["crit"], "crit_mult": stats["crit_mult"],
         "heal_on_crit": stats.get("heal_on_crit", 0),
         "life": life, "delay": delay, "age": 0, "hit": set(),
@@ -496,7 +548,9 @@ def _fire(gs, p, weapon, level):
             if _gap_xy(enemy, p["x"], p["y"]) <= radius + enemy["radius"]:
                 mult = _roll(gs, stats)
                 if _damage(gs, p, enemy, stats["damage"] * mult, src=(p["x"], p["y"]),
-                           knockback=stats["knockback"], crit=mult > 1):
+                           knockback=stats["knockback"], crit=mult > 1,
+                           kb_stack=stats["kb_stack"], slow=stats["slow"],
+                           slow_ticks=stats["slow_ticks"]):
                     hits += 1
         if weapon == "soul_eater" and hits:
             p["hp"] = min(p["max_hp"], p["hp"] + min(3.0, hits * .5))
@@ -516,6 +570,7 @@ def _fire(gs, p, weapon, level):
                 "left": max(1, int(stats["duration"] / .5)),
                 "tick": 10, "damage": stats["damage"],
                 "knockback": stats["knockback"],
+                "slow": stats["slow"], "slow_ticks": stats["slow_ticks"],
                 "move": False, "grow": 0, "max_r": radius,
             })
 
@@ -583,6 +638,7 @@ def _fire(gs, p, weapon, level):
                 "left": max(1, int(stats["duration"] / .5)),
                 "tick": 10, "damage": stats["damage"],
                 "knockback": stats["knockback"],
+                "slow": stats["slow"], "slow_ticks": stats["slow_ticks"],
                 "move": True, "grow": (90 * stats["area"] - radius) / duration,
                 "max_r": 90 * stats["area"],
             })
@@ -753,7 +809,9 @@ def _step_shots(gs):
                 mult = _roll(gs, shot)
                 old_x = enemy["x"] if targets is not None else None
                 _damage(gs, owner, enemy, shot["damage"] * mult, src=(x, y),
-                        knockback=shot["knockback"], crit=mult > 1, heal=shot["heal_on_crit"])
+                        knockback=shot["knockback"], crit=mult > 1, heal=shot["heal_on_crit"],
+                        kb_stack=shot.get("kb_stack", 0.0),
+                        slow=shot.get("slow", 0.0), slow_ticks=shot.get("slow_ticks", 0))
                 if targets is not None and old_x is not None and enemy["x"] != old_x:
                     targets.moved(enemy, old_x)
                 first_hit = not shot["hit"]
@@ -824,7 +882,9 @@ def _step_fields(gs):
         if gs["elapsed"] >= field["next"] and field["left"] > 0:
             _area_damage(gs, owner, field["x"], field["y"], field["r"],
                          field["damage"], weapon=field["weapon"],
-                         knockback=field["knockback"])
+                         knockback=field["knockback"],
+                         slow=field.get("slow", 0.0),
+                         slow_ticks=field.get("slow_ticks", 0))
             field["next"] += field["tick"]
             field["left"] -= 1
         if field["left"] > 0:
@@ -1121,7 +1181,7 @@ def _contact_damage(gs, alive):
                 continue
             dy = enemy["y"] - y
             if dx * dx + dy * dy < reach * reach:
-                _hurt_diver(gs, p, CONTACT_DAMAGE.get(enemy["kind"], 6))
+                _hurt_diver(gs, p, CONTACT_DAMAGE.get(enemy["kind"], 2))
                 break
 
 
@@ -1261,9 +1321,17 @@ def advance(gs, *, online_ids=None):
             closest["rescues"] = closest.get("rescues", 0) + 1
 
     phase = sum(seconds >= gs["duration"] * limit for limit in (1 / 6, 5 / 12, 2 / 3))
-    rate = 1.9 if seconds >= gs["duration"] * 11 / 12 and not gs["boss_dead"] else (0.85, 1.3, 2.0, 2.7)[phase]
-    gs["spawn_budget"] += rate * _scale(gs) * STEP
-    cap = min(160, 50 + gs["count"] * 20)
+    scale = _scale(gs)
+    density = 1 + SPAWN_DENSITY_PER_PLAYER * (gs["count"] - 1)
+    if seconds >= gs["duration"] * 11 / 12 and not gs["boss_dead"]:
+        rate, min_alive, base_cap = BOSS_SPAWN
+    else:
+        rate, min_alive, base_cap = SPAWN_PHASES[phase]
+    min_alive = round(min_alive * density)
+    cap = min(SPAWN_HARD_CAP, round(base_cap * density))
+    missing = max(0, min_alive - len(gs["enemies"]))
+    topup = min(SPAWN_TOPUP_RATE * density, missing * 2.5)
+    gs["spawn_budget"] += (rate * scale + topup) * STEP
     while gs["spawn_budget"] >= 1 and len(gs["enemies"]) < cap:
         gs["spawn_budget"] -= 1
         p = alive[gs["spawn_cursor"] % len(alive)]
@@ -1287,8 +1355,11 @@ def advance(gs, *, online_ids=None):
             if distance_sq < nearest_sq:
                 nearest_sq, dx, dy = distance_sq, ox, oy
         enemy["angle"] = math.atan2(dy, dx)
-        if nearest_sq > 0:
-            fraction = min(1, enemy["speed"] * STEP / math.sqrt(nearest_sq))
+        if nearest_sq > 0 and elapsed >= enemy.get("stagger_until", 0):
+            speed = enemy["speed"]
+            if elapsed < enemy.get("slow_until", 0):
+                speed *= enemy.get("slow_factor", 1.0)
+            fraction = min(1, speed * STEP / math.sqrt(nearest_sq))
             enemy["x"] += dx * fraction
             enemy["y"] += dy * fraction
 
@@ -1441,7 +1512,10 @@ def snapshot(gs):
             },
         } for p in gs["players"].values()],
         "enemies": [[e["id"], e["kind"], *point(e), round(e["angle"], 2),
-                     round(e["hp"], 1), e["max_hp"]] for e in gs["enemies"]],
+                     round(e["hp"], 1), e["max_hp"],
+                     round(1 - e.get("slow_factor", 1.0), 2)
+                     if e.get("slow_until", 0) > gs["elapsed"] else 0]
+                    for e in gs["enemies"]],
         "loot": [[item["id"], *point(item)] for item in gs["loot"]],
         "chests": [[chest["id"], *point(chest)] for chest in gs["chests"]],
         "chest_events": [

@@ -14,8 +14,8 @@ export const abyssWeapons = {
   cross: { title: '回声十字镖', detail: '追踪最近敌人并回旋', maxLevel: 8 },
   bible: { title: '环流浮标', detail: '环绕自身持续撞击', maxLevel: 8 },
   charge: { title: '深压火球', detail: '追踪随机敌人，高伤火球', maxLevel: 8 },
-  ring: { title: '荧孢光环', detail: '灼烧身边所有敌人', maxLevel: 8 },
-  spore: { title: '腐潮水池', detail: '在附近留下持续伤害水域', maxLevel: 8 },
+  ring: { title: '荧孢光环', detail: '灼烧并减速身边敌人，叠加强击退', maxLevel: 8 },
+  spore: { title: '腐潮水池', detail: '在附近留下持续伤害与减速水域', maxLevel: 8 },
   rune: { title: '弹跳声呐', detail: '撞墙反弹的声呐浮标', maxLevel: 8 },
   arc: { title: '裂潮电弧', detail: '随机落雷，范围伤害', maxLevel: 8 },
   pentagram: { title: '深渊脉冲', detail: '清空视野内敌人，冷却极长', maxLevel: 8 },
@@ -26,8 +26,8 @@ export const abyssWeapons = {
   heaven_sword: { title: '天穹剑', detail: '回声十字镖进化：巨型回旋剑', maxLevel: 1, evolved: true, base: 'cross' },
   unholy_vespers: { title: '邪潮圣咏', detail: '环流浮标进化：永不停歇的环流', maxLevel: 1, evolved: true, base: 'bible' },
   hellfire: { title: '狱火', detail: '深压火球进化：无限穿透的狱火', maxLevel: 1, evolved: true, base: 'charge' },
-  soul_eater: { title: '噬魂光环', detail: '荧孢光环进化：汲取生命', maxLevel: 1, evolved: true, base: 'ring' },
-  la_borra: { title: '拉波拉潮', detail: '腐潮水池进化：水洼追着你移动', maxLevel: 1, evolved: true, base: 'spore' },
+  soul_eater: { title: '噬魂光环', detail: '荧孢光环进化：减速、汲取生命', maxLevel: 1, evolved: true, base: 'ring' },
+  la_borra: { title: '拉波拉潮', detail: '腐潮水池进化：减速水洼追着你移动', maxLevel: 1, evolved: true, base: 'spore' },
   no_future: { title: '未来隔绝', detail: '弹跳声呐进化：反弹时爆炸，无尽地图首次命中时爆炸', maxLevel: 1, evolved: true, base: 'rune' },
   thunder_loop: { title: '雷环', detail: '裂潮电弧进化：每道雷击两次', maxLevel: 1, evolved: true, base: 'arc' },
   gorgeous_moon: { title: '华月', detail: '深渊脉冲进化：清屏并回收全部信标', maxLevel: 1, evolved: true, base: 'pentagram' },
@@ -181,7 +181,7 @@ export interface AbyssState {
   choice_seconds: number;
   result: 'won' | 'lost' | 'timeout' | 'abandoned' | null;
   players: AbyssPlayer[];
-  enemies: [number, AbyssEnemy, number, number, number, number, number][];
+  enemies: [number, AbyssEnemy, number, number, number, number, number, number?][];
   loot: [number, number, number][];
   chests: [number, number, number][];
   chest_events: AbyssChestEvent[];

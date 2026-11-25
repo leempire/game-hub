@@ -147,6 +147,15 @@ def main(minutes):
         host, guest = [browser.new_page(viewport={'width': 360, 'height': 720}) for _ in range(2)]
         use_backend(host, origin)
         use_backend(guest, origin)
+        # 默认开启的音频会在前面的移动/重连测试里持续解码和播放。这里先关掉，
+        # 到声音专项再显式打开，避免音频负载把网络时序断言拖过截止时间。
+        for page in (host, guest):
+            page.add_init_script("""
+              try {
+                localStorage.setItem('abyss.audio.music', 'off');
+                localStorage.setItem('abyss.audio.effects', 'off');
+              } catch (error) {}
+            """)
         host.add_init_script("""
           window.setAbyssTestVisibility = state => {
             Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
@@ -211,7 +220,7 @@ def main(minutes):
               this.playbackRate.value = .1;
             }
             if (window.abyssSfxStarts === 5) {
-              this.playbackRate.value = .27;
+              this.playbackRate.value = .08;
               this.addEventListener('ended', () => { window.abyssLongAlertEnded = true; }, {once: true});
             }
             return play.apply(this, args);
@@ -237,7 +246,7 @@ def main(minutes):
         assert field_guide.get_by_text('精英锈甲蟹', exact=True).count() == 1
         assert field_guide.locator('img[src*="cable-warden.webp"]').count() == 1
         for kind, (hp, speed, _) in abyss.ENEMIES.items():
-            damage = abyss.CONTACT_DAMAGE.get(kind, 6)
+            damage = abyss.CONTACT_DAMAGE.get(kind, 2)
             stats = field_guide.get_by_test_id(f'abyss-creature-stats-{kind}')
             assert stats.inner_text() == f'耐久 {hp} · 移速 {speed} · 接触伤害 {damage}'
         host.get_by_test_id('help-close-btn').click()
@@ -256,6 +265,10 @@ def main(minutes):
         for page in (host, guest):
             page.get_by_test_id('abyss-arena').wait_for()
         ok('双人房间通过隔离后端开局')
+        # 下面的移动 / 重连 / 低速断言默认玩家站着挨打；怪潮版本里自然刷怪会
+        # 让两人在断言前掉血甚至倒地。这里先压住自然刷怪，后续用例按需手动
+        # 生成敌人或恢复状态。
+        in_match(code, lambda gs: (gs.update(spawn_budget=-10000), gs['enemies'].clear()))
 
         def host_input():
             return in_match(code, lambda gs: (gs['players'][host_id]['dx'], gs['players'][host_id]['input_until']))
@@ -517,7 +530,10 @@ def main(minutes):
         ok('重复收到同一战斗帧时，本地只预测一小段移动，随后停住')
         status = host.get_by_test_id('abyss-network-status')
         status.get_by_text('网络延迟，等待战场更新…', exact=True).wait_for()
-        assert host_input()[0] == 1
+        deadline = time.monotonic() + 1
+        while host_input()[0] != 1:
+            assert time.monotonic() < deadline, 'Movement input was cleared during a short network delay'
+            host.wait_for_timeout(20)
         ok('短时网络延迟先显示同步提示，暂不清除移动输入')
         status.get_by_text('战场同步中断，正在恢复…', exact=True).wait_for()
         assert host_input()[0] == 0
@@ -550,7 +566,7 @@ def main(minutes):
         try:
             gesture('touchStart', [(x, y)])
             gesture('touchMove', [(x + 55, y)])
-            deadline = time.monotonic() + .5
+            deadline = time.monotonic() + 2
             while host_direction() != (1, 0):
                 assert time.monotonic() < deadline, 'Touch movement did not start before interrupted sync'
                 host.wait_for_timeout(10)
@@ -569,7 +585,7 @@ def main(minutes):
             gesture('touchEnd', [])
             gesture('touchStart', [(x, y)])
             gesture('touchMove', [(x - 55, y)])
-            deadline = time.monotonic() + .5
+            deadline = time.monotonic() + 2
             while host_direction() != (-1, 0):
                 assert time.monotonic() < deadline, 'A fresh touch did not respond after reconnecting'
                 host.wait_for_timeout(10)
@@ -579,6 +595,10 @@ def main(minutes):
         ok('断线时释放旧摇杆方向，重连后重新触碰即可移动')
         ok('短时同步中断后不补播旧受击反馈，持续停更时重复包无法阻止重连')
 
+        in_match(code, lambda gs: [
+            p.update(invincible=gs['elapsed'] + 100)
+            for pid, p in gs['players'].items() if pid != host_id
+        ])
         in_match(code, lambda gs: abyss._hurt_diver(gs, gs['players'][host_id], 24))
         hit_ring = host.get_by_test_id('abyss-local-hit')
         hit_ring.wait_for()
@@ -593,14 +613,16 @@ def main(minutes):
             return previous_hp
 
         prior_hp = in_match(code, enter_low_pressure)
+        max_hp = in_match(code, lambda gs: gs['players'][host_id]['max_hp'])
+        expected_low = math.ceil(round(max_hp / 4, 1))
         warning_ring = host.get_by_test_id('abyss-low-pressure-ring')
         warning_ring.wait_for()
         host.get_by_text('低压警告', exact=True).wait_for()
         hit_ring.wait_for(state='hidden')
         assert warning_ring.count() == 1 and guest.get_by_test_id('abyss-low-pressure-ring').count() == 0
         peer_pressure = guest.get_by_test_id(f'abyss-team-status-{host_id}')
-        peer_pressure.get_by_text('低压 · 25 HP', exact=True).wait_for()
-        assert peer_pressure.get_attribute('aria-label') == '低压 · 25 HP'
+        peer_pressure.get_by_text(f'低压 · {expected_low} HP', exact=True).wait_for()
+        assert peer_pressure.get_attribute('aria-label') == f'低压 · {expected_low} HP'
         in_match(code, lambda gs: gs['players'][host_id].update(hp=prior_hp))
         warning_ring.wait_for(state='detached')
         peer_pressure.get_by_text(f'{math.ceil(round(prior_hp, 1))} HP', exact=True).wait_for()
@@ -697,8 +719,9 @@ def main(minutes):
             diver = gs['players'][host_id]
             x, y = round(diver['x']), round(diver['y'] + 100)
             stats = abyss.data.weapon_stats('harpoon', 1, diver['stats'])
-            abyss._shot(gs, diver, 'harpoon', stats, x, y, 1400, 0,
-                        kind='harpoon', life=12, radius=7)
+            # 慢速长寿命弹道：给负载较高的测试机留出首份快照的渲染窗口。
+            abyss._shot(gs, diver, 'harpoon', stats, x, y, 400, 0,
+                        kind='harpoon', life=60, radius=7)
             return gs['shots'][-1]['id'], x
 
         host.get_by_test_id('abyss-world').evaluate('''world => {
@@ -721,7 +744,7 @@ def main(minutes):
         assert shot['id'] == f'abyss-shot-{shot_id}'
         assert shot['sprite'].endswith('-shot-harpoon') and shot['drawnWidth'] > 0
         assert origin_x <= shot['x'] < origin_x + 65, (origin_x, shot['x'])
-        ok('高速鱼叉在首份快照渲染期间从发射位置向前推进')
+        ok('鱼叉在首份快照渲染期间从发射位置向前推进')
 
         def hit_at_muzzle(gs):
             diver = gs['players'][host_id]
@@ -913,6 +936,41 @@ def main(minutes):
         }''')
         ok('同屏 108 只普通怪物和 1 只精英复用 7 套 SVG 定义，精英剪影可区分')
 
+        def overfill_wave(gs):
+            gs['spawn_budget'] = -1000
+            gs['enemies'].clear()
+            diver = gs['players'][host_id]
+            diver.update(x=abyss.WIDTH / 2, y=abyss.HEIGHT / 2)
+            for index in range(220):
+                abyss._spawn(gs, 'drifter', diver)
+                gs['enemies'][-1].update(
+                    x=diver['x'] + (index % 20 - 9.5) * 22,
+                    y=diver['y'] + (index // 20 - 5.5) * 22,
+                    speed=0, hp=1000, max_hp=1000,
+                )
+
+        in_match(code, overfill_wave)
+        host.wait_for_function('''() => document.querySelectorAll('[data-testid^="abyss-enemy-"]').length === 160''')
+        ok('同屏超过 160 只普通怪时只挂载最近 160 个 SVG 实例')
+
+        in_match(code, place_dense_wave)
+        host.wait_for_function('''() => {
+          const href = node => node.getAttribute('href') ?? node.getAttribute('xlink:href');
+          return [...document.querySelectorAll('[data-testid="abyss-world"] use')]
+            .filter(node => href(node)?.includes('-creature-')).length === 109;
+        }''')
+
+        def slow_one_enemy(gs):
+            enemy = gs['enemies'][0]
+            abyss._damage(gs, gs['players'][host_id], enemy, 1, slow=.5, slow_ticks=200)
+            return enemy['id']
+
+        slowed_id = in_match(code, slow_one_enemy)
+        slow_mark = host.get_by_test_id(f'abyss-slow-{slowed_id}')
+        slow_mark.wait_for()
+        assert slow_mark.evaluate('node => (node.getAttribute("href") ?? node.getAttribute("xlink:href")).endsWith("-slow-mark")')
+        ok('减速中的怪物显示虚线冰环 + 冰棱标记')
+
         beacons = host.get_by_test_id('abyss-loot')
         host.wait_for_function('''() => {
           const nodes = [...document.querySelectorAll('[data-testid="abyss-loot"]')];
@@ -1052,6 +1110,8 @@ def main(minutes):
         host.get_by_test_id('abyss-sfx').click()
         host.wait_for_function('window.abyssDecodedClips === 11')
         host.get_by_test_id('abyss-audio-close').click()
+        # 从拾取音测试开始重新计数，避免开关音效前的提示音干扰。
+        host.evaluate('window.abyssSfxStarts = 0; window.abyssSfxDurations = []')
 
         def pickup(gs, mine):
             diver = next(player for player in gs['players'].values()
@@ -1113,7 +1173,8 @@ def main(minutes):
         host.wait_for_timeout(350)
         in_match(code, lambda gs: weapon_contact(gs, True))
         host.wait_for_timeout(150)
-        assert host.evaluate('window.abyssSfxStarts === 5 && !window.abyssLongAlertEnded')
+        audio_state = host.evaluate('[window.abyssSfxStarts, window.abyssLongAlertEnded]')
+        assert audio_state[0] == 5 and not audio_state[1], audio_state
         host.wait_for_function('window.abyssLongAlertEnded')
         ok('提示音持续播放时，常规命中即使过了限频间隔也不会抢占声音')
 

@@ -19,7 +19,7 @@ def choose_upgrade(p, choices):
         if item in p['passives']:
             return 11 if any(item == passive for _, passive in data.EVOLUTIONS.values()) else 7
         if item in data.WEAPONS:
-            return 14 + GOOD.get(item, 3) if len(p['weapons']) < 3 else 5 + GOOD.get(item, 3)
+            return 20 + GOOD.get(item, 3) if len(p['weapons']) < 5 else 5 + GOOD.get(item, 3)
         if item in data.PASSIVES:
             return 27 if any(data.WEAPONS[weapon].get('passive') == item for weapon in p['weapons']) else 10
         return 26 if item == 'repair' and p['hp'] < 36 else 0
