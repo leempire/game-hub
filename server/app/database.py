@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import logging
 import sqlite3
 import os
 import threading
@@ -268,20 +269,37 @@ def get_user_history(user_id: int, page: int = 1, size: int = 20) -> dict:
                ORDER BY r.id DESC LIMIT ? OFFSET ?""",
             (user_id, size, (page - 1) * size),
         ).fetchall()
-        return {"items": [_row_to_record(row) for row in rows], "total": total,
+        return {"items": [_row_to_record(row, user_id) for row in rows], "total": total,
                 "page": page, "size": size}
     finally:
         conn.close()
 
 
-def _row_to_record(row: sqlite3.Row) -> dict:
+def record_snapshot(snapshot_json: str, user_id: int) -> dict:
+    """Project private final boards to the history viewer or the share owner."""
+    snapshot = json.loads(snapshot_json)
+    if isinstance(snapshot, dict) and snapshot.get("game") == "spider" and "boards" in snapshot:
+        board = (snapshot.get("boards") or {}).get(str(user_id))
+        if isinstance(board, dict):
+            return board
+        # 旧记录/迁移数据缺本人牌桌时，宁可给一张空终局也不能把整房所有牌桌
+        # 返回给单个查看者（分享链接同样走这里）。
+        logging.warning("spider snapshot has no board for user %s", user_id)
+        return {"game": "spider", "columns": [], "total_runs": 8, "completed": 0,
+                "stock_count": 0, "move_count": 0, "revision": 0, "can_undo": False,
+                "can_deal": False, "legal_moves": [], "finished": True,
+                "winner": "end", "reason": None, "departed": []}
+    return snapshot
+
+
+def _row_to_record(row: sqlite3.Row, user_id: int) -> dict:
     return {
         "id": row["id"],
         "game": row["game"],
         "room_code": row["room_code"],
         "players": json.loads(row["players_json"]),
         "results": json.loads(row["results_json"]),
-        "snapshot": json.loads(row["snapshot_json"]),
+        "snapshot": record_snapshot(row["snapshot_json"], user_id),
         "started_at": row["started_at"],
         "ended_at": row["ended_at"],
     }
@@ -403,15 +421,15 @@ def _build_players_record(room: dict) -> list[dict]:
 
 def _build_results_record(room: dict) -> list[dict]:
     """Build the per-player result list."""
-    if room["game"] == "spider":
-        won = room["game_state"].get("reason") == "completed"
-        departed = room["game_state"].get("departed", [])
-        return [{"username": p["username"], "result": "win" if won and p["id"] not in departed else "end"}
-                for p in room["players"]]
     gs = room.get("game_state") or {}
     if room["game"] == "abyss":
         return [{"username": p["username"], "score": gs["players"][p["id"]]["kills"],
                  "result": "win" if gs["result"] == "won" and not gs["players"][p["id"]]["departed"] else "lose"}
+                for p in room["players"]]
+    if room["game"] == "spider":
+        boards = gs.get("boards") or {}
+        return [{"username": p["username"],
+                 "result": "win" if (boards.get(p["id"]) or {}).get("reason") == "completed" else "end"}
                 for p in room["players"]]
     winner = gs.get("winner")
     reason = gs.get("reason")
@@ -509,7 +527,7 @@ def _build_snapshot(room: dict) -> dict:
         return record_summary(gs)
     if game == "spider":
         from app.game.spider import snapshot
-        return snapshot(gs)
+        return {"game": game, "boards": {str(pid): snapshot(board) for pid, board in (gs.get("boards") or {}).items()}}
     if game == "uttt":
         from app.game.uttt import snapshot
         return snapshot(gs)

@@ -21,7 +21,7 @@ _grants: dict[str, dict] = {}
 _watchers: dict[str, dict[int, tuple]] = {}
 _UNO_PUBLIC = (
     'game', 'num_players', 'seat_uids', 'seat_colors', 'rules', 'hand_counts',
-    'discard_top', 'current_color', 'turn', 'direction', 'pending_draw',
+    'discard_top', 'current_color', 'turn', 'next_seat', 'direction', 'pending_draw',
     'pending_kind', 'uno_called', 'out', 'seat_teams', 'emptied', 'winner_team',
     'draw_pile_count', 'winner', 'reason', 'finished', 'series',
 )

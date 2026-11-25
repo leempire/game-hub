@@ -61,6 +61,7 @@ function harness() {
     '../roomSettings': { RoomSettingsRow: () => null, RoomSettingsSheet: () => null,
       settingsSummary: () => '', settingValueLabel: () => '' },
     '../help': { GameHelpButton: () => null }, '../games': { gameTitle: game => game },
+    '../spider': require('../app/src/spider.ts'),
     '../InviteFriendsModal': { __esModule: true, default: () => null },
   };
   const exports = {};

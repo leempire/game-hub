@@ -6,22 +6,19 @@ import random
 UNDO_LIMIT = 200
 _DEAL_ATTEMPTS = 6
 _SEARCH_NODES = 300
-_FALLBACK_SEEDS = {8: 1, 12: 5, 16: 21}
+_FALLBACK_SEED = 1
 
 
-def create_game(seed: int | None = None, num_players: int = 1) -> dict:
-    if type(num_players) is not int or not 1 <= num_players <= 4:
-        raise ValueError("蜘蛛纸牌支持 1–4 人合作")
-    total_runs = 8 if num_players == 1 else 12 if num_players == 2 else 16
+def create_game(seed: int | None = None) -> dict:
     rng = random.Random(seed)
     for _ in range(_DEAL_ATTEMPTS):
-        game = _shuffled_game(rng, total_runs)
+        game = _shuffled_game(rng)
         if _winning_path(game) is not None:
             return game
 
     # 同时置换等高列及对应余牌，保留已回放验证的兜底牌局的解。
-    game = _shuffled_game(random.Random(_FALLBACK_SEEDS[total_runs]), total_runs)
-    count, tall = len(game["columns"]), total_runs // 2
+    game = _shuffled_game(random.Random(_FALLBACK_SEED))
+    count, tall = len(game["columns"]), game["total_runs"] // 2
     first, rest = list(range(tall)), list(range(tall, count))
     rng.shuffle(first)
     rng.shuffle(rest)
@@ -74,7 +71,7 @@ def _settle(game: dict):
             game["completed"] += 1
             game["face_up"][i] = max(0, min(game["face_up"][i], len(column) - 1))
     if game["completed"] == game.get("total_runs", 8):
-        game.update(finished=True, winner="cooperative", reason="completed")
+        game.update(finished=True, winner="solo", reason="completed")
 
 
 def _play(game: dict, move: dict | None):
@@ -149,7 +146,9 @@ def apply_action(game: dict, action: str, source=None, index=None, target=None) 
     """成功返回 None，拒绝返回中文原因；拒绝时不改变任何状态。"""
     if game["finished"]:
         return "本局已结束，请开始新牌局"
-    if action == "undo":
+    if action == "end":
+        game.update(finished=True, winner="end", reason="abandoned")
+    elif action == "undo":
         if not game["history"]:
             return "还没有可以撤销的操作"
         game.update(game["history"].pop())

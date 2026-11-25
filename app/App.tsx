@@ -86,7 +86,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <NavigationContainer ref={navigationRef} linking={LINKING as any}>
+        <NavigationContainer
+          ref={navigationRef}
+          linking={LINKING as any}
+          documentTitle={{ formatter: () => 'GameHub' }}
+        >
           <StatusBar style="auto" />
           <AppNavigation />
         </NavigationContainer>

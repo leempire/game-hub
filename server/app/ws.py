@@ -75,12 +75,6 @@ def _register_dc_timeout_callback():
                     except Exception:
                         pass
             return
-        if room and room["game"] == "spider":
-            await _broadcast(code, {"type": "spider_state", "game": rm.spider.game_to_sync(room["game_state"])})
-            await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(room)})
-            if room["game_state"]["finished"]:
-                await _broadcast(code, {"type": "game_over", "winner": "end", "reason": "abandoned"})
-            return
         if room and room["game"] == "uno":
             # UNO 是回合制多人：一个人掉线判负之后**牌局常常还在跑**，不能发一条
             # 空洞的 game_over 了事——先同步权威状态（出局名单、当前回合），
@@ -235,17 +229,7 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
     elif msg_type == "start":
         await _handle_start(code, user_id)
     elif msg_type == "spider_action":
-        result = rm.spider_action(code, user_id, data)
-        if result.get("error"):
-            await _send_error(code, user_id, result["error"])
-            if room["game"] == "spider" and room.get("game_state"):
-                await _send_to(code, user_id, {"type": "spider_state",
-                    "actor_id": user_id, "game": rm.spider.game_to_sync(room["game_state"])})
-        else:
-            await _broadcast(code, {"type": "spider_state", "actor_id": user_id, **result})
-            if result["game"]["finished"]:
-                await _broadcast(code, {"type": "game_over", "winner": result["game"]["winner"],
-                                        "reason": result["game"]["reason"]})
+        await _handle_spider_action(code, user_id, room, data)
     elif msg_type == "move":
         await _handle_move(code, user_id, data)
     elif msg_type == "uttt_move":
@@ -372,9 +356,13 @@ async def _handle_start(code: str, user_id: int):
                 and room["host_id"] == user_id
                 and all(p["ready"] for p in room["players"] if p["id"] != user_id)):
             players = [p["id"] for p in room["players"]]
-            prepared = await asyncio.to_thread(rm.spider.create_game, num_players=len(players))
+            round_number = room.get("round", 0)
+            prepared = await asyncio.to_thread(rm.spider.create_game)
             if rm.get_room(code) is not room or players != [p["id"] for p in room["players"]]:
                 await _send_error(code, user_id, "房间人数已变化，请重新开始")
+                return
+            if room.get("round", 0) != round_number:
+                await _send_error(code, user_id, "房间已进入下一局，请重新开始")
                 return
         gs = (rm.start_game(code, user_id, prepared_spider=prepared) if prepared is not None
               else rm.start_game(code, user_id))
@@ -391,7 +379,11 @@ async def _handle_start(code: str, user_id: int):
             await _send_ws(ws, {"type": "error", "message": "无法开始游戏"})
         return
     if room["game"] == "spider":
-        await _broadcast(code, {"type": "game_start", "game": rm.spider.game_to_sync(gs)})
+        for pid, board in gs["boards"].items():
+            if rm.get_room(code) is not room or room["game_state"] is not gs or room["status"] != "playing":
+                return
+            await _send_to(code, pid, {"type": "game_start", "room": rm.room_to_dict(room),
+                                      "game": rm.spider.game_to_sync(board)})
         return
     if room["game"] == "minesweeper":
         players_info = rm._get_players_info(room)
@@ -961,9 +953,23 @@ async def _handle_leave(code: str, user_id: int):
     room = rm.get_room(code)
     if not room:
         return
+    ws = _connections.get(code, {}).get(user_id)
     action, updated_room = rm.leave_room(code, user_id)
-    if updated_room and updated_room["game"] == "spider" and updated_room.get("game_state"):
-        await _broadcast(code, {"type": "spider_state", "game": rm.spider.game_to_sync(updated_room["game_state"])})
+    await _broadcast_leave(code, user_id, action, updated_room, room.get("game_state"))
+    conns = _connections.get(code, {})
+    if ws is not None and conns.get(user_id) is ws:
+        conns.pop(user_id)
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
+async def _broadcast_leave(code: str, user_id: int, action: str,
+                           updated_room: dict | None, game_state: dict | None):
+    if (updated_room and updated_room["game"] == "spider"
+            and (rm.get_room(code) is not updated_room or updated_room["game_state"] is not game_state)):
+        return
     if action == "closed":
         # Room was destroyed (waiting room with no humans left)
         await _broadcast(code, {"type": "room_closed"})
@@ -1027,14 +1033,6 @@ async def _handle_leave(code: str, user_id: int):
         await _broadcast(code, {
             "type": "lobby", "room": rm.room_to_dict(updated_room),
         })
-    # Close this user's websocket
-    conns = _connections.get(code, {})
-    ws = conns.pop(user_id, None)
-    if ws:
-        try:
-            await ws.close()
-        except Exception:
-            pass
 
 
 async def kick_user(user_id: int, reason: str):
@@ -1065,6 +1063,11 @@ async def _broadcast(code: str, message: dict, exclude: set[int] | None = None):
             payload = message
             if room and room["game"] == "xiangqi" and message.get("type") in ("move", "clock_update"):
                 payload = _timed_view(room, uid, dict(message))
+            elif room and room["game"] == "spider" and message.get("type") == "lobby":
+                if rm.get_room(code) is not room:
+                    return
+                # 独立牌桌可同时更新。逐人读取当前进度，慢连接不会让旧大厅状态盖过结算。
+                payload = {**message, "room": rm.room_to_dict(room)}
             await _send_ordered(ws, payload)
         except Exception:
             pass
@@ -1082,7 +1085,7 @@ def _build_sync(room: dict, user_id: int) -> dict:
     # 玩家点「返回房间」会被 sync 立刻弹回对局页（v1.5.0 点格棋踩过）。
     if room["status"] == "playing" and room.get("game_state"):
         if room["game"] == "spider":
-            game_info = rm.spider.game_to_sync(room["game_state"])
+            game_info = _spider_view(room["game_state"], user_id)
         elif room["game"] == "minesweeper":
             players_info = rm._get_players_info(room)
             game_info = mine_game_to_sync(room["game_state"], players_info)
@@ -1238,6 +1241,40 @@ async def _send_to(code: str, user_id: int, message: dict):
             await _send_ordered(ws, message)
         except Exception:
             pass
+
+
+def _spider_view(gs: dict | None, user_id: int) -> dict | None:
+    board = (gs or {}).get("boards", {}).get(user_id)
+    return rm.spider.game_to_sync(board) if board is not None else None
+
+
+async def _handle_spider_action(code: str, user_id: int, room: dict, data: dict):
+    gs = room.get("game_state")
+    result = rm.spider_action(code, user_id, data)
+    if result.get("error"):
+        await _send_error(code, user_id, result["error"])
+        if room["game"] != "spider" or room["game_state"] is not gs:
+            return
+        view = _spider_view(gs, user_id)
+    elif result.get("all_boards"):
+        # 房主结束本局会同时结算所有人的牌桌，必须逐人下发各自的终局视图；
+        # 只回房主会让其他人停在未 finished 的本地状态，无法弹出结算。
+        view = None
+        if rm.get_room(code) is room and room["game_state"] is gs:
+            for pid, board in gs["boards"].items():
+                await _send_to(code, pid, {"type": "spider_state", "actor_id": user_id,
+                                           "game": rm.spider.game_to_sync(board)})
+    else:
+        view = result["game"]
+    if view is not None:
+        await _send_to(code, user_id, {"type": "spider_state", "actor_id": user_id, "game": view})
+
+    if rm.get_room(code) is not room or room["game_state"] is not gs:
+        return
+    if result.get("game_over"):
+        await _broadcast(code, {"type": "game_over", "winner": gs["winner"], "reason": gs["reason"]})
+    elif result.get("progress_changed") and room["status"] == "playing":
+        await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(room)})
 
 
 async def _send_battleship_to_all(code: str, gs: dict, msg: dict):

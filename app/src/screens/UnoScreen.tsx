@@ -18,7 +18,7 @@
 import QuickChatControls from '../QuickChatControls';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Platform, Animated, Easing,
+  View, Text, TouchableOpacity, StyleSheet, Modal, Platform, Animated, Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../auth';
@@ -27,7 +27,6 @@ import { RoomSocket, SocketMessage } from '../socket';
 import {
   colors, spacing, radius, fontSize, playerColors,
   unoColors, unoTable, unoOnTable, unoOnTableMuted, unoSeatColors, unoSeatActiveBg,
-  unoInk,
 } from '../theme';
 import { notify } from '../utils';
 import { useNavigation } from '@react-navigation/native';
@@ -35,16 +34,12 @@ import { useModalBackGuard, onConfirmLeave } from '../backGuard';
 import GameShell, { GameResult } from '../GameShell';
 import { shellPlayers } from '../gamePlayers';
 import { useDisconnectCountdown } from '../disconnect';
-import { UnoCardView, UnoHandBacks, UNO_CARD_H, UNO_CARD_W } from '../UnoCardView';
+import { UnoCardView, UnoHandBacks } from '../UnoCardView';
+import UnoHand from '../UnoHand';
 import { UnoColorBadge } from '../icons';
 import { UNO_COLOR_KEYS, UNO_COLOR_NAMES, cardLabel, cardKind, UnoSeries } from '../uno';
 
-/** 扇形手牌：相邻牌重叠这么多像素（露出 `UNO_CARD_W - OVERLAP`）。 */
-const OVERLAP = 22;
-/** 扇形每侧最大倾角（度）。再大就有牌会转出可读范围。 */
-const TILT = 5;
-/** 按下时在可出抬高的基础上再抬这么多。 */
-const PRESS_LIFT = 10;
+const SEAT_MAX_WIDTH = 112;
 /** 弃牌堆的尺寸（比手牌大一档：它是全桌的视觉焦点）。 */
 const PILE_W = 88;
 const PILE_H = 132;
@@ -60,6 +55,8 @@ interface UnoPayload {
   your_seat: number | null;
   /** **只有本人的手牌**（牌码，如 `R5` / `RS` / `W+4`）。 */
   hand: string[];
+  /** 当前房规下，本人手牌对应的简短效果说明。 */
+  hand_effects?: Record<string, string>;
   /** 本人手里此刻能出的牌（服务端给的唯一判据）。 */
   playable: string[];
   /**
@@ -89,8 +86,8 @@ interface UnoPayload {
   /** 当前有效颜色（变色牌之后由出牌者指定）。 */
   current_color: string;
   turn: number;
-  /** 1 顺时针 / -1 逆时针。 */
-  direction: number;
+  /** 沿现有出牌顺序，当前座位的下家。 */
+  next_seat?: number | null;
   pending_draw: number;
   pending_kind: string | null;
   uno_called: number[];
@@ -198,8 +195,6 @@ export default function UnoScreen({ code, onLeave }: Props) {
    */
   const [pickTargetFor, setPickTargetFor] = useState<{ card: string; jump: boolean } | null>(null);
   const [dcTimeout, setDcTimeout] = useState<number | null>(null);
-  /** 按下中的手牌下标（按下即抬高一档，HIG 要求「按下时」就给反馈）。 */
-  const [pressed, setPressed] = useState<number | null>(null);
 
   const socketRef = useRef<RoomSocket | null>(null);
   const getChatSocket = useCallback(() => socketRef.current, [code]);
@@ -575,6 +570,11 @@ export default function UnoScreen({ code, onLeave }: Props) {
   const seatColorOf = (seat: number) => (
     unoSeatColors[game?.seat_colors?.[seat] || ''] || unoOnTableMuted
   );
+  const seatLabel = (seat: number) => seat === mySeat ? '我'
+    : players[seat]?.nickname || players[seat]?.username || `座位 ${seat + 1}`;
+  const nextSeat = game?.next_seat != null && playing && players.length === game.num_players
+    ? game.next_seat : null;
+  const seatGroupWidth = players.length * SEAT_MAX_WIDTH + Math.max(0, players.length - 1) * spacing.xs + 2 * spacing.sm;
 
   // 结算文案。**组队档的胜负是队伍**：只说「某某率先出完手牌获胜」的话，赢的那队
   // 里另一个人（同样出完了、同样算赢）在结算里看起来跟输家一样。
@@ -632,81 +632,93 @@ export default function UnoScreen({ code, onLeave }: Props) {
             <Text style={styles.surrenderText}>认输</Text>
           </TouchableOpacity>
         </View>}>
-      {/* 规则入口（与象棋 / 四子棋一样放在对局屏内，不占牌桌空间） */}
-      <View style={styles.topBar}>
-
-      </View>
-
       {/* ── 牌桌（深色毡面） ────────────────────────────────── */}
       <View style={styles.table}>
         {/* 座位：昵称 + 扇形牌背 + 张数（自己那一格也画出来，一眼看清全桌） */}
-        <View style={styles.seats}>
-          {players.map((p, seat) => {
-            const isTurn = game?.turn === seat && !game?.finished;
-            const out = outSet.has(seat);
-            const isMe = seat === mySeat;
-            // 不给自己显示「掉线」：人就在看着屏幕，房间数据在游戏中又不会刷新，
-            // 万一收到一条过期的断线消息就会一直挂在自己头上（上面那条 ref 修的是
-            // 根因，这里是兜底）
-            const dc = !p.connected && !out && !isMe;
-            const sc = seatColorOf(seat);
-            const cnt = game?.hand_counts?.[String(seat)] ?? 0;
-            const mate = isMateSeat(seat);
-            return (
-              <View
-                key={p.id}
-                testID={`u-seat-${seat}`}
-                style={[
-                  styles.seat,
-                  isTurn && { borderColor: sc, backgroundColor: unoSeatActiveBg },
-                  mate && styles.seatMate,
-                  out && styles.seatOut,
-                ]}
-              >
-                {/* 第一行：身份色点 + 昵称（自己的座位写「我」） */}
-                <View style={styles.seatTop}>
-                  <View style={[styles.seatDot, { backgroundColor: sc }]} />
-                  <Text style={[styles.seatName, isTurn && { color: sc }]} numberOfLines={1}>
-                    {isMe ? '我' : (p.nickname || p.username)}
-                  </Text>
-                  {/* 组队档：队友必须有**文字**标识，不能只靠边框（WCAG 1.4.1） */}
-                  {mate ? (
-                    <Text style={styles.seatMateTag} testID={`u-mate-${seat}`}
-                      numberOfLines={1}>队友</Text>
-                  ) : null}
-                </View>
-
-                {/* 第二行：牌背扇形 + 张数；出局/掉线时换成状态文案 */}
-                {out ? (
-                  <Text style={styles.seatStatus}>
-                    {emptiedSet.has(seat) ? '已出完' : '已出局'}
-                  </Text>
-                ) : dc ? (
-                  <Text style={styles.seatStatus}>
-                    掉线{dcSeat === seat ? ` ${dcLeft}s` : ''}
-                  </Text>
-                ) : (
-                  <View style={styles.seatHandRow}>
-                    <UnoHandBacks count={cnt} />
-                    {/* 张数写出来（不只是数牌背）：E2E 直接断言这个数字，
-                        比数"牌背元素有几个"这类启发式可靠得多 */}
-                    <Text style={styles.seatCount} testID={`u-count-${seat}`}>
-                      {`${cnt} 张`}
+        <View style={[styles.seatGroup, { maxWidth: seatGroupWidth }]}>
+          <View style={styles.seats}>
+            {players.map((p, seat) => {
+              const isTurn = game?.turn === seat && !game?.finished;
+              const out = outSet.has(seat);
+              const isMe = seat === mySeat;
+              // 不给自己显示「掉线」：人就在看着屏幕，房间数据在游戏中又不会刷新，
+              // 万一收到一条过期的断线消息就会一直挂在自己头上（上面那条 ref 修的是
+              // 根因，这里是兜底）
+              const dc = !p.connected && !out && !isMe;
+              const sc = seatColorOf(seat);
+              const cnt = game?.hand_counts?.[String(seat)] ?? 0;
+              const mate = isMateSeat(seat);
+              return (
+                <View
+                  key={p.id}
+                  testID={`u-seat-${seat}`}
+                  style={[
+                    styles.seat,
+                    isTurn && { borderColor: sc, backgroundColor: unoSeatActiveBg },
+                    mate && styles.seatMate,
+                    out && styles.seatOut,
+                  ]}
+                >
+                  {/* 第一行：身份色点 + 昵称（自己的座位写「我」） */}
+                  <View style={styles.seatTop}>
+                    <View style={[styles.seatDot, { backgroundColor: sc }]} />
+                    <Text style={[styles.seatName, isTurn && { color: sc }]} numberOfLines={1}>
+                      {seatLabel(seat)}
                     </Text>
+                    {/* 组队档：队友必须有**文字**标识，不能只靠边框（WCAG 1.4.1） */}
+                    {mate ? (
+                      <Text style={styles.seatMateTag} testID={`u-mate-${seat}`}
+                        numberOfLines={1}>队友</Text>
+                    ) : null}
                   </View>
-                )}
 
-                {/* 第三行：UNO 徽标 / 出牌中标记（高度固定，座位才对得齐） */}
-                <View style={styles.seatFoot}>
-                  {isTurn ? (
-                    <Text style={[styles.seatTurnMark, { color: sc }]}>出牌中</Text>
-                  ) : unoSet.has(seat) && !out ? (
-                    <Text style={styles.seatUno}>UNO!</Text>
-                  ) : null}
+                  {/* 第二行：牌背扇形 + 张数；出局/掉线时换成状态文案 */}
+                  {out ? (
+                    <Text style={styles.seatStatus}>
+                      {emptiedSet.has(seat) ? '已出完' : '已出局'}
+                    </Text>
+                  ) : dc ? (
+                    <Text style={styles.seatStatus}>
+                      掉线{dcSeat === seat ? ` ${dcLeft}s` : ''}
+                    </Text>
+                  ) : (
+                    <View style={styles.seatHandRow}>
+                      <UnoHandBacks count={cnt} />
+                      {/* 张数写出来（不只是数牌背）：E2E 直接断言这个数字，
+                          比数"牌背元素有几个"这类启发式可靠得多 */}
+                      <Text style={styles.seatCount} testID={`u-count-${seat}`}>
+                        {`${cnt} 张`}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* 第三行：UNO 徽标 / 出牌中标记（高度固定，座位才对得齐） */}
+                  <View style={styles.seatFoot}>
+                    {isTurn ? (
+                      <Text style={[styles.seatTurnMark, { color: sc }]}>出牌中</Text>
+                    ) : unoSet.has(seat) && !out ? (
+                      <Text style={styles.seatUno}>UNO!</Text>
+                    ) : null}
+                  </View>
                 </View>
+              );
+            })}
+          </View>
+          {game && nextSeat !== null && (
+            <View style={styles.directionTrack} pointerEvents="none" testID="u-direction-arrow"
+              accessible accessibilityRole="image" accessibilityLabel={`出牌方向从 ${seatLabel(game.turn)} 指向 ${seatLabel(nextSeat)}`}>
+              <View style={[styles.directionArrow, {
+                left: `${(Math.min(game.turn, nextSeat) + 0.5) / players.length * 100}%`,
+                width: `${Math.abs(game.turn - nextSeat) / players.length * 100}%`,
+                flexDirection: nextSeat > game.turn ? 'row' : 'row-reverse',
+              }]}>
+                <View style={styles.directionLine} />
+                <Ionicons name={nextSeat > game.turn ? 'caret-forward' : 'caret-back'}
+                  testID="u-direction-head" size={14} color={unoOnTable}
+                  style={nextSeat > game.turn ? styles.directionHeadRight : styles.directionHeadLeft} />
               </View>
-            );
-          })}
+            </View>
+          )}
         </View>
 
         {/* 中央：抽牌堆（左）+ 弃牌堆 + 当前色环（右） */}
@@ -773,23 +785,14 @@ export default function UnoScreen({ code, onLeave }: Props) {
           {banner ? <Text style={styles.banner} testID="u-banner">{banner}</Text> : null}
         </View>
 
-        {/* 桌沿：当前颜色 / 方向 / 待罚 + 回合文案 */}
+        {/* 桌沿：当前颜色 / 下家 / 待罚 + 回合文案 */}
         <View style={styles.foot}>
           <View style={styles.footRow}>
             <View style={styles.footItem}>
               <UnoColorBadge color={curColor} size={14} fill={ringColor} />
               <Text style={styles.footText}>{`当前颜色 ${UNO_COLOR_NAMES[curColor] || ''}`}</Text>
             </View>
-            <View style={styles.footItem}>
-              <Ionicons
-                name={game?.direction === -1 ? 'refresh-outline' : 'sync-outline'}
-                size={14}
-                color={unoOnTableMuted}
-              />
-              <Text style={styles.footText}>
-                {game?.direction === -1 ? '逆时针' : '顺时针'}
-              </Text>
-            </View>
+            {nextSeat !== null && <Text style={[styles.footText, styles.nextSeat]} numberOfLines={1}>下家 {seatLabel(nextSeat)}</Text>}
             {game && game.pending_draw > 0 ? (
               <View style={styles.pending} testID="u-pending">
                 <Text style={styles.pendingText}>{`待罚 ${game.pending_draw} 张`}</Text>
@@ -805,68 +808,8 @@ export default function UnoScreen({ code, onLeave }: Props) {
         </View>
       </View>
 
-      {/* ── 自己的手牌：扇形重叠，可出的牌抬高 + 双环 ─────────── */}
-      <ScrollView
-        horizontal
-        style={styles.handScroll}
-        contentContainerStyle={styles.handContent}
-        showsHorizontalScrollIndicator={false}
-      >
-        {hand.map((card, i) => {
-          const canPlay = isMyTurn && playableSet.has(card);
-          // **抢出与可出是两条不同的通道**：可出 = 轮到我 + 位移 + 双环；
-          // 抢出 = 不轮到我 + 一枚写着「抢出」的角标。只靠高亮的话，玩家分不清
-          // 「轮到我了」和「我可以抢」—— 而这两件事的后果完全不同。
-          const canJump = !isMyTurn && jumpableSet.has(card);
-          const can = canPlay || canJump;
-          const n = hand.length;
-          const mid = (n - 1) / 2;
-          const t = n > 1 ? (i - mid) / mid : 0;
-          const held = pressed === i;
-          return (
-            <TouchableOpacity
-              key={`${card}-${i}`}
-              activeOpacity={0.85}
-              onPressIn={() => setPressed(i)}
-              onPressOut={() => setPressed(null)}
-              onPress={() => onCardPress(card)}
-              disabled={!can}
-              style={[
-                styles.handItem,
-                i > 0 && styles.handOverlap,
-                {
-                  zIndex: held ? 99 : i,
-                  // 弧线 + 倾斜 + 按下反馈。变换不占布局，所以横向滚动宽度
-                  // 仍然是「一张整牌 + N × 露出宽度」
-                  transform: [
-                    { translateY: (held ? -PRESS_LIFT : 0) + Math.abs(t) * 6 },
-                    { rotate: `${t * TILT}deg` },
-                  ],
-                },
-              ]}
-              testID={canPlay ? `u-play-${i}` : canJump ? `u-jump-${i}` : `u-card-${i}`}
-              accessibilityLabel={
-                `${cardLabel(card)}${canPlay ? '（可出）' : canJump ? '（可以抢出）' : ''}`
-              }
-            >
-              <UnoCardView
-                card={card}
-                width={UNO_CARD_W}
-                height={UNO_CARD_H}
-                playable={canPlay}
-              />
-              {canJump ? (
-                <View style={styles.jumpBadge} testID={`u-jumpbadge-${i}`}>
-                  <Text style={styles.jumpBadgeText}>抢出</Text>
-                </View>
-              ) : null}
-            </TouchableOpacity>
-          );
-        })}
-        {hand.length === 0 && !game?.finished ? (
-          <Text style={styles.handEmpty}>（没有手牌）</Text>
-        ) : null}
-      </ScrollView>
+      <UnoHand hand={hand} effects={game?.hand_effects} isMyTurn={isMyTurn}
+        playable={playableSet} jumpable={jumpableSet} finished={game?.finished} onPlay={onCardPress} />
 
       {/* ── 操作区（拇指可达） ──────────────────────────────── */}
       {iAmOut && !showGameOver ? (
@@ -1008,12 +951,6 @@ function ModalM({ visible, onClose, children }: {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg, alignItems: 'center' },
-  topBar: {
-    alignSelf: 'stretch',
-    alignItems: 'flex-end',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.xs,
-  },
 
   // ── 牌桌 ─────────────────────────────────────────────────
   table: {
@@ -1030,6 +967,7 @@ const styles = StyleSheet.create({
   },
 
   // 座位
+  seatGroup: { alignSelf: 'center', width: '100%' },
   seats: {
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -1039,7 +977,7 @@ const styles = StyleSheet.create({
   },
   seat: {
     flex: 1,
-    maxWidth: 112,
+    maxWidth: SEAT_MAX_WIDTH,
     alignItems: 'center',
     borderRadius: radius.md,
     borderWidth: 2,
@@ -1093,6 +1031,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     overflow: 'hidden',
   },
+  directionTrack: { height: 14, marginHorizontal: spacing.sm - spacing.xs / 2 },
+  directionArrow: { position: 'absolute', height: '100%', alignItems: 'center' },
+  directionLine: { flex: 1, height: 2, backgroundColor: unoOnTable },
+  directionHeadRight: { marginLeft: -4 },
+  directionHeadLeft: { marginRight: -4 },
 
   // 中央
   center: {
@@ -1128,6 +1071,7 @@ const styles = StyleSheet.create({
   },
   footItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   footText: { fontSize: fontSize.xs, color: unoOnTable, fontWeight: '600' },
+  nextSeat: { maxWidth: 132 },
   pending: {
     backgroundColor: colors.warning,
     borderRadius: radius.sm,
@@ -1153,35 +1097,6 @@ const styles = StyleSheet.create({
     color: unoOnTable,
     textAlign: 'center',
   },
-
-  // 手牌
-  // 高度 = 牌高 + 抬高余量（可出牌抬起 12 + 按下再抬 10 + 弧形下沉 6）
-  handScroll: { width: '100%', maxHeight: UNO_CARD_H + 40, marginTop: spacing.sm },
-  handContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    paddingHorizontal: spacing.md,
-    paddingTop: 30,
-    paddingBottom: 6,
-  },
-  handItem: { justifyContent: 'flex-end', position: 'relative' },
-  handOverlap: { marginLeft: -OVERLAP },
-  handEmpty: { fontSize: fontSize.sm, color: colors.textMuted, alignSelf: 'center' },
-  // 抢出的角标：**文字是主通道**，底色只是让它跳出来。可出牌靠「位移 + 双环」，
-  // 抢出靠这枚写着字的角标 —— 两条通道必须一眼分得开（WCAG 1.4.1）。
-  jumpBadge: {
-    position: 'absolute',
-    top: -6,
-    left: 2,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 6,
-    backgroundColor: unoOnTable,
-    borderWidth: 1,
-    borderColor: unoInk,
-  },
-  jumpBadgeText: { fontSize: 10, fontWeight: '800', color: unoInk },
 
   // 操作
   actions: {

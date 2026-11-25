@@ -29,6 +29,22 @@ def test_initial_deal_and_hidden_information():
     assert game == spider.create_game(12)
 
 
+def test_standard_deal_size_and_five_stock_rounds():
+    game = spider.create_game(5)
+    assert len(game["columns"]) == 10 and game["total_runs"] == 8
+    assert Counter(sum(game["columns"], []) + game["stock"]) == Counter({rank: 8 for rank in range(1, 14)})
+    assert len(game["stock"]) == 50
+    before = deepcopy(game)
+    assert spider.apply_action(game, "deal") is None
+    assert len(game["stock"]) == 40
+    assert spider.apply_action(game, "undo") is None
+    assert game["columns"] == before["columns"] and game["stock"] == before["stock"]
+    view = spider.game_to_sync(game)
+    assert view["total_runs"] == 8
+    assert sum(rank is None for c in view["columns"] for rank in c) == 44
+    assert not any(key in view for key in ("stock", "history", "face_up"))
+
+
 def replay_win(game, path):
     assert path is not None
     assert sum(move is None for move in path) == 5
@@ -59,9 +75,8 @@ def test_search_limit_and_rejected_deal_do_not_change_input():
     replay_win(replacement, spider._winning_path(replacement))
 
 
-@pytest.mark.parametrize("players,total_runs", [(1, 8), (2, 12), (3, 16), (4, 16)])
-def test_bounded_generation_falls_back_to_varied_winnable_deals(monkeypatch, players, total_runs):
-    base = spider._shuffled_game(random.Random(spider._FALLBACK_SEEDS[total_runs]), total_runs)
+def test_bounded_generation_falls_back_to_varied_winnable_deals(monkeypatch):
+    base = spider._shuffled_game(random.Random(1))
     solution = spider._winning_path(base)
     assert solution is not None
     checked = []
@@ -69,9 +84,9 @@ def test_bounded_generation_falls_back_to_varied_winnable_deals(monkeypatch, pla
     layouts = set()
     for seed in range(8):
         checked.clear()
-        game = spider.create_game(seed, num_players=players)
+        game = spider.create_game(seed)
         assert len(checked) == spider._DEAL_ATTEMPTS
-        count, tall = total_runs * 5 // 4, total_runs // 2
+        count, tall = 10, 4
         assert [len(c) for c in game["columns"]] == [6] * tall + [5] * (count - tall)
         order = [base["columns"].index(c) for c in game["columns"]]
         assert sorted(order) == list(range(count))
@@ -83,30 +98,6 @@ def test_bounded_generation_falls_back_to_varied_winnable_deals(monkeypatch, pla
                 "index": move["index"], "target": remap[move["target"]]} for move in solution]
         replay_win(game, path)
     assert len(layouts) == 8
-
-
-@pytest.mark.parametrize("players,total_runs,columns", [(1, 8, 10), (2, 12, 15), (3, 16, 20), (4, 16, 20)])
-def test_cooperative_deal_size_and_five_stock_rounds(players, total_runs, columns):
-    game = spider.create_game(5, num_players=players)
-    assert len(game["columns"]) == columns
-    assert game["total_runs"] == total_runs
-    assert len(game["stock"]) == columns * 5
-    assert Counter(sum(game["columns"], []) + game["stock"]) == Counter({rank: total_runs for rank in range(1, 14)})
-    before = deepcopy(game)
-    assert spider.apply_action(game, "deal") is None
-    assert len(game["stock"]) == columns * 4
-    assert spider.apply_action(game, "undo") is None
-    assert game["columns"] == before["columns"] and game["stock"] == before["stock"]
-    view = spider.game_to_sync(game)
-    assert view["total_runs"] == total_runs
-    assert sum(rank is None for c in view["columns"] for rank in c) == columns * 22 // 5
-    assert not any(key in view for key in ("stock", "history", "face_up"))
-
-
-@pytest.mark.parametrize("players", [0, 5, True, "2", None])
-def test_invalid_player_count_is_rejected(players):
-    with pytest.raises(ValueError):
-        spider.create_game(num_players=players)
 
 
 def test_legacy_game_without_goal_still_wins_and_syncs():
@@ -249,7 +240,6 @@ def test_save_survives_disconnect_sweep_and_restart(solo_room, monkeypatch):
     assert timers == []
     assert room["empty_since"] is not None
     assert room["code"] not in rm.sweep_idle_rooms()
-    room["max_players"] = 1  # 老存档转为普通房间，不重发牌。
     encoded = persistence.dumps_state(room)
     rm._rooms.clear()
     monkeypatch.setattr(persistence, "load_all_rooms", lambda: [persistence.loads_state(encoded)])
@@ -260,44 +250,102 @@ def test_save_survives_disconnect_sweep_and_restart(solo_room, monkeypatch):
     assert restored["players"][0]["connected"] is False
 
 
+def test_restore_shared_save_preserves_board_and_undo_per_player(solo_room, monkeypatch):
+    room = rm.create_room({"id": 51, "username": "host", "nickname": None}, None, None, "spider")
+    rm.join_room(room["code"], {"id": 52, "username": "peer", "nickname": None}, None)
+    rm.join_room(room["code"], {"id": 53, "username": "left", "nickname": None}, None)
+    legacy = spider._shuffled_game(random.Random(5), 16)
+    assert spider.apply_action(legacy, "deal") is None
+    room.update(status="playing", game_state={**legacy, "departed": [53]})
+    encoded = persistence.dumps_state(room)
+    rm._rooms.clear()
+    monkeypatch.setattr(persistence, "load_all_rooms", lambda: [persistence.loads_state(encoded)])
+    assert rm.restore_rooms() == 1
+
+    restored = rm.get_room(room["code"])
+    boards = restored["game_state"]["boards"]
+    assert boards[51] == boards[52] == legacy
+    assert rm.user_in_game(restored, 51) and rm.user_in_game(restored, 52)
+    assert not rm.user_in_game(restored, 53)
+    assert boards[53]["reason"] == "abandoned"
+    undone = rm.spider_action(room["code"], 51, {"action": "undo", "revision": 1})["game"]
+    assert undone["stock_count"] == 100 and undone["total_runs"] == 16
+    assert boards[52] == legacy
+
+
 def test_natural_end_and_new_game_record_results(solo_room, monkeypatch):
     room = solo_room
     ended = []
     monkeypatch.setattr(rm, "_game_end_callback", lambda r: ended.append(deepcopy(r)))
-    room["game_state"] = position([list(range(13, 1, -1)), [1]] + [[]] * 8, completed=7)
+    room["game_state"]["boards"][41] = position([list(range(13, 1, -1)), [1]] + [[]] * 8, completed=7)
     result = rm.spider_action(room["code"], 41, {"action": "move", "source": 1, "index": 0, "target": 0, "revision": 0})
     assert result["game"]["finished"] and room["status"] == "waiting"
     assert len(ended) == 1
     assert _build_results_record(room)[0]["result"] == "win"
-    assert _build_snapshot(room)["completed"] == 8
+    assert _build_snapshot(room)["boards"]["41"]["completed"] == 8
     assert rm.spider_action(room["code"], 41, {"action": "new", "revision": 1}).get("error")
     rm.start_game(room["code"], 41)
-    assert room["status"] == "playing" and room["game_state"]["revision"] == 2
+    assert room["status"] == "playing" and room["game_state"]["boards"][41]["revision"] == 2
     rm.spider_action(room["code"], 41, {"action": "end", "revision": 2})
     assert len(ended) == 2
     assert _build_results_record(ended[-1])[0]["result"] == "end"
 
 
-def test_cooperative_members_ready_move_leave_and_host_transfer(solo_room):
-    room = rm.create_room({"id": 51, "username": "host", "nickname": None}, None, None, "spider")
-    rm.join_room(room["code"], {"id": 52, "username": "partner", "nickname": None}, None)
-    assert rm.start_game(room["code"], 52) is None
-    assert rm.start_game(room["code"], 51) is None
+def _two_player_room(monkeypatch):
+    monkeypatch.setattr(rm, "_rooms", {})
+    monkeypatch.setattr(rm, "_dc_tasks", {})
+    monkeypatch.setattr(persistence, "_enabled", False)
+    ended = []
+    monkeypatch.setattr(rm, "_game_end_callback", lambda r: ended.append(deepcopy(r)))
+    room = rm.create_room({"id": 41, "username": "host", "nickname": None}, None, None, "spider")
+    rm.join_room(room["code"], {"id": 42, "username": "peer", "nickname": None}, None)
+    for player in room["players"]:
+        player["connected"] = True
     room["players"][1]["ready"] = True
-    assert rm.start_game(room["code"], 51)["total_runs"] == 12
-    revision = room["game_state"]["revision"]
-    assert not rm.spider_action(room["code"], 52, {"action": "deal", "revision": revision}).get("error")
+    assert rm.start_game(room["code"], 41) is not None
+    return room, ended
+
+
+def test_host_can_end_round_after_own_board_finished(monkeypatch):
+    room, ended = _two_player_room(monkeypatch)
+    assert rm.spider_action(room["code"], 41, {"action": "end", "revision": 0}).get("error") is None
+    assert room["status"] == "playing" and room["game_state"]["boards"][41]["finished"]
+    result = rm.spider_action(room["code"], 41, {"action": "end_round", "revision": 1})
+    assert result["game_over"] and result["all_boards"]
+    assert room["status"] == "waiting"
+    assert all(board["finished"] for board in room["game_state"]["boards"].values())
+    assert [entry["result"] for entry in _build_results_record(room)] == ["end", "end"]
+    assert len(ended) == 1
+
+
+def test_non_host_and_stale_revision_cannot_end_round(monkeypatch):
+    room, ended = _two_player_room(monkeypatch)
     before = deepcopy(room["game_state"])
-    assert rm.spider_action(room["code"], 51, {"action": "deal", "revision": revision}).get("error")
-    assert rm.spider_action(room["code"], 52, {"action": "end", "revision": revision + 1}).get("error")
-    assert room["game_state"] == before
-    assert rm.leave_room(room["code"], 51)[0] == "removed"
-    assert room["host_id"] == 52 and room["status"] == "playing"
-    assert not rm.user_in_game(room, 51) and rm.user_in_game(room, 52)
-    assert room["game_state"]["columns"] == before["columns"]
-    assert rm.spider_action(room["code"], 51, {"action": "undo", "revision": revision + 2}).get("error")
-    assert rm.leave_room(room["code"], 52)[0] == "game_over"
-    assert room["status"] == "waiting" and room["game_state"]["finished"]
+    assert "房主" in rm.spider_action(room["code"], 42, {"action": "end_round", "revision": 0})["error"]
+    assert "更新" in rm.spider_action(room["code"], 41, {"action": "end_round", "revision": 9})["error"]
+    assert room["status"] == "playing" and room["game_state"] == before and not ended
+
+
+def test_offline_finished_player_is_abandoned_when_all_online_players_finish(monkeypatch):
+    room, ended = _two_player_room(monkeypatch)
+    room["players"][1]["connected"] = False
+    result = rm.spider_action(room["code"], 41, {"action": "end", "revision": 0})
+    assert result["game_over"]
+    assert room["status"] == "waiting"
+    assert room["game_state"]["boards"][42]["finished"]
+    assert room["game_state"]["boards"][42]["reason"] == "abandoned"
+    assert len(ended) == 1
+
+
+def test_disconnect_settles_when_remaining_online_player_already_finished(monkeypatch):
+    room, ended = _two_player_room(monkeypatch)
+    assert rm.spider_action(room["code"], 41, {"action": "end", "revision": 0}).get("error") is None
+    assert room["status"] == "playing"  # 对方还在线，不能提前替他收尾
+    rm.handle_player_disconnect(room["code"], 42, None)
+    assert room["status"] == "waiting"
+    assert room["game_state"]["boards"][42]["finished"]
+    assert room["game_state"]["boards"][42]["reason"] == "abandoned"
+    assert len(ended) == 1
 
 
 def test_disconnect_timeout_and_normal_room_cleanup(solo_room):

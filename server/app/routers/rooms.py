@@ -95,12 +95,7 @@ async def leave_room(code: str, background_tasks: BackgroundTasks, user_id: int 
         await _handle_leave(code, user_id)
         return {"ok": True}
     action, updated = rm.leave_room(code, user_id)
-    if updated and updated["game"] == "spider":
-        from app.ws import _broadcast
-        if updated.get("game_state"):
-            background_tasks.add_task(_broadcast, code, {"type": "spider_state",
-                "game": rm.spider.game_to_sync(updated["game_state"])})
-        background_tasks.add_task(_broadcast, code, {"type": "lobby", "room": rm.room_to_dict(updated)})
-        if action == "game_over":
-            background_tasks.add_task(_broadcast, code, {"type": "game_over", "winner": "end", "reason": "abandoned"})
+    if room["game"] == "spider":
+        from app.ws import _broadcast_leave
+        background_tasks.add_task(_broadcast_leave, code, user_id, action, updated, room.get("game_state"))
     return {"ok": True}

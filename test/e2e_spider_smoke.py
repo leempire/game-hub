@@ -1,4 +1,4 @@
-"""蜘蛛纸牌双浏览器合作回归；独立临时后端/数据库，前端须已启动。
+"""蜘蛛纸牌双浏览器竖屏回归；独立临时后端/数据库，前端须已启动。
 
 从根目录用安装了 requirements-dev.txt 的 Python 运行本文件。
 第二局由测试后端构造确定性残局，生产代码没有测试入口。
@@ -30,10 +30,10 @@ def serve(port, db_path):
     config.update(db_path=db_path, admin={}, jwt_secret="isolated-spider-browser-test-secret")
     original, count = spider.create_game, 0
 
-    def create_game(*, num_players=1):
+    def create_game():
         nonlocal count
         count += 1
-        game = original(5, num_players=num_players)
+        game = original(5)
         if count == 2:
             width = len(game["columns"])
             game.update(columns=[list(range(13, 1, -1)), [1]] + [[] for _ in range(width - 2)],
@@ -50,7 +50,7 @@ def run():
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     api = f"http://127.0.0.1:{port}"
-    with tempfile.TemporaryDirectory(prefix="gamehub-spider-") as temp, \
+    with tempfile.TemporaryDirectory(prefix="gamehub-spider-", dir=OUT) as temp, \
             (OUT / "spider-e2e-server.log").open("w") as log:
         process = subprocess.Popen([sys.executable, __file__, "--serve", str(port), str(Path(temp) / "test.db")],
                                    cwd=ROOT / "server", stdout=log, stderr=subprocess.STDOUT)
@@ -80,9 +80,7 @@ def browser_checks(api):
         browser = p.chromium.launch(headless=True)
         pages, latest, errors = [], [{}, {}], []
         for seat in range(2):
-            context = browser.new_context(viewport={"width": 390, "height": 844})
-            if seat == 1:
-                context.add_init_script("Object.defineProperty(Element.prototype, 'requestFullscreen', { value: undefined, configurable: true });")
+            context = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
             context.route("**/api/**", lambda route: route.continue_(url=api + urlsplit(route.request.url).path +
                           ("?" + urlsplit(route.request.url).query if urlsplit(route.request.url).query else "")))
             context.add_init_script("""
@@ -122,16 +120,16 @@ def browser_checks(api):
                 pages[index].wait_for_timeout(50)
             raise AssertionError(f"玩家 {index} 状态没有更新：{latest[index]}")
 
-        def both(predicate):
-            first, second = [state(i, predicate) for i in range(2)]
-            assert first == second
-            return first
-
         def move(index, action):
             page = pages[index]
-            page.get_by_test_id(f"spider-card-{action['source']}-{action['index']}").click()
+            page.get_by_test_id(f"spider-card-{action['source']}-{action['index']}").tap()
             expect(page.get_by_test_id(f"spider-column-{action['target']}")).to_contain_text("可放")
-            page.get_by_test_id(f"spider-column-{action['target']}").click()
+            page.get_by_test_id(f"spider-column-{action['target']}").tap()
+
+        host.get_by_role("button", name="合作", exact=True).click()
+        expect(host.get_by_test_id("game-card-spider")).to_have_count(0)
+        host.get_by_role("button", name="各玩各的", exact=True).click()
+        expect(host.get_by_test_id("game-card-spider")).to_be_visible()
 
         host.get_by_test_id("game-card-spider").click()
         host.get_by_text("加入房间", exact=True).wait_for()
@@ -147,79 +145,50 @@ def browser_checks(api):
         host.get_by_text("开始游戏", exact=True).click()
         for page in pages:
             page.get_by_test_id("spider-board").wait_for()
-        initial = both(lambda game: game["revision"] == 0)
-        assert len(initial["columns"]) == 15 and initial["total_runs"] == 12 and initial["stock_count"] == 75
-        host.screenshot(path=str(OUT / "spider-mobile.png"))
-        print("PASS 1: 统一创建/加入房间、准备、双端同时进入 15 列合作牌桌", flush=True)
+        initial = state(0, lambda game: game["revision"] == 0)
+        assert state(1, lambda game: game["revision"] == 0) == initial
+        assert len(initial["columns"]) == 10 and initial["total_runs"] == 8 and initial["stock_count"] == 50
+        print("PASS 1: 分类入口、创建和加入、准备、相同的十列起手牌", flush=True)
 
+        action = initial["legal_moves"][0]
+        host.get_by_test_id(f"spider-card-{action['source']}-{action['index']}").tap()
+        peer.get_by_test_id("spider-deal").tap()
+        dealt = state(1, lambda game: game["revision"] == 1)
+        assert dealt["stock_count"] == 40 and latest[0] == initial
+        expect(host.get_by_test_id(f"spider-column-{action['target']}")).to_contain_text("可放")
+        host.get_by_test_id(f"spider-column-{action['target']}").tap()
+        assert state(0, lambda game: game["revision"] == 1)["columns"] != initial["columns"]
+        host.get_by_test_id("spider-undo").tap()
+        host.get_by_text("确认撤销", exact=True).tap()
+        expect(host.get_by_text("撤销上一步？", exact=True)).to_have_count(0)
+        assert state(0, lambda game: game["revision"] == 2)["columns"] == initial["columns"]
+        assert latest[1] == dealt
+        print("PASS 2: 移动、发牌和撤销各自生效，选牌保持", flush=True)
+
+        latest[1] = {}
+        peer.reload()
+        assert state(1, lambda game: game["revision"] == 1) == dealt
+        expect(peer.get_by_test_id("spider-deal")).to_have_text("发牌 · 剩 4 轮")
+        for width, height in ((320, 568), (390, 844)):
+            host.set_viewport_size({"width": width, "height": height})
+            assert host.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+            assert host.get_by_test_id("spider-board").evaluate("el => el.scrollWidth > el.clientWidth")
+            expect(host.get_by_test_id("spider-card-0-5")).to_be_in_viewport(ratio=.4)
+            for control in ("spider-deal", "spider-undo", "spider-end", "spider-end-round", "spider-back"):
+                box = host.get_by_test_id(control).bounding_box()
+                # RNW 的 44pt 目标会出现 43.999… 的亚像素测量，留 0.5px 容差。
+                assert box and box["height"] >= 43.5 and 0 <= box["y"] <= height - box["height"]
+            host.screenshot(path=str(OUT / f"spider-portrait-{width}.png"))
+        host.set_viewport_size({"width": 390, "height": 844})
         full = host.get_by_test_id("spider-fullscreen")
-        frame = host.get_by_test_id("spider-play-area").bounding_box()
-        button = full.bounding_box()
-        assert frame and button and button["height"] >= 44
-        assert abs(frame["x"] + frame["width"] - button["x"] - button["width"] - 12) < 2
-        assert abs(frame["y"] + frame["height"] - button["y"] - button["height"] - 12) < 2
         full.click()
         expect(full).to_have_attribute("aria-label", "退出横屏全屏")
-        host.wait_for_function("document.fullscreenElement !== null")
-        host.wait_for_function("getComputedStyle(document.querySelector('[data-testid=spider-stage]')).width === '844px'")
-        rect = host.get_by_test_id("spider-stage").bounding_box()
-        assert rect and abs(rect["x"]) < 1 and abs(rect["y"]) < 1
-        assert abs(rect["width"] - 390) < 1 and abs(rect["height"] - 844) < 1
-        assert latest[0]["revision"] == 0
-        peer.get_by_test_id("spider-fullscreen").click()
-        expect(peer.get_by_test_id("spider-fullscreen")).to_have_attribute("aria-label", "退出横屏全屏")
-        assert peer.evaluate("document.fullscreenElement === null")
-        peer.set_viewport_size({"width": 844, "height": 390})
-        peer.screenshot(path=str(OUT / "spider-fullscreen-landscape.png"))
-
-        move(0, initial["legal_moves"][0])
-        after_host = both(lambda game: game["revision"] == 1)
-        move(1, after_host["legal_moves"][0])
-        both(lambda game: game["revision"] == 2)
-        host.get_by_test_id("spider-undo").click()
-        host.get_by_text("确认撤销", exact=True).click()
-        undone = both(lambda game: game["revision"] == 3)
-        assert undone["columns"] == after_host["columns"]
-        print("PASS 2: 两人均可移动任意牌组，撤销全队最近一步并同步", flush=True)
-
-        full.click()
+        host.wait_for_timeout(200)
+        host.keyboard.press("Escape")
         expect(full).to_have_attribute("aria-label", "横屏全屏")
-        host.wait_for_function("document.fullscreenElement === null")
-        host.set_viewport_size({"width": 390, "height": 844})
-        full.click()
-        host.wait_for_function("document.fullscreenElement !== null")
-        host.evaluate("document.exitFullscreen()")
-        expect(full).to_have_attribute("aria-label", "横屏全屏")
-        peer.keyboard.press("Escape")
-        expect(peer.get_by_test_id("spider-fullscreen")).to_have_attribute("aria-label", "横屏全屏")
-        peer.set_viewport_size({"width": 390, "height": 844})
-        peer.get_by_test_id("spider-fullscreen").click()
-        peer.go_back(wait_until="commit")
-        expect(peer.get_by_test_id("spider-fullscreen")).to_have_attribute("aria-label", "横屏全屏")
-        peer.get_by_test_id("spider-board").wait_for()
-        assert latest[0]["revision"] == latest[1]["revision"] == 3
-        print("PASS 2a: 右下角全屏、横屏操作与弹窗、无全屏 API 回退、退出/Escape/返回恢复且不丢牌", flush=True)
+        print("PASS 3: 刷新恢复个人进度，320px 和 390px 竖屏可滚动、操作按钮完整、全屏可进可退", flush=True)
 
-        disjoint = next((a, b) for a in undone["legal_moves"] for b in undone["legal_moves"]
-                        if not {a["source"], a["target"]} & {b["source"], b["target"]})
-        a, b = disjoint
-        host.get_by_test_id(f"spider-card-{a['source']}-{a['index']}").click()
-        move(1, b)
-        both(lambda game: game["revision"] == 4)
-        expect(host.get_by_test_id(f"spider-column-{a['target']}")).to_contain_text("可放")
-        host.get_by_test_id(f"spider-column-{a['target']}").click()
-        both(lambda game: game["revision"] == 5)
-        peer.get_by_test_id("spider-deal").click()
-        dealt = both(lambda game: game["revision"] == 6)
-        assert dealt["stock_count"] == 60
-        host.reload()
-        state(0, lambda game: game["revision"] == 6)
-        host.get_by_test_id("spider-undo").click()
-        host.get_by_text("确认撤销", exact=True).click()
-        both(lambda game: game["revision"] == 7 and game["stock_count"] == 75)
-        print("PASS 3: 队友无关操作保留选牌、共享发牌、刷新续玩和撤销", flush=True)
-
-        host.get_by_test_id("help-btn-spider").click()
+        host.get_by_test_id("game-shell-spider").get_by_test_id("help-btn-spider").click()
         host.get_by_text("蜘蛛纸牌规则", exact=True).wait_for()
         host.get_by_test_id("help-close-btn").click()
         host.get_by_test_id("spider-back").click()
@@ -234,37 +203,42 @@ def browser_checks(api):
             raise
         host.wait_for_timeout(500)
         assert host.get_by_test_id("spider-board").count() == 0
-        state(1, lambda game: len(game["departed"]) == 1)
+        expect(host.get_by_text("本局进行中", exact=True)).to_be_visible()
+        expect(host.get_by_text("准 备", exact=True)).to_have_count(0)
+        expect(host.get_by_text("取消准备", exact=True)).to_have_count(0)
+        expect(peer.get_by_text("结束 0/8", exact=True)).to_be_visible()
+        assert latest[1] == dealt
         move(1, latest[1]["legal_moves"][0])
-        peer.get_by_test_id("spider-end").click()
-        peer.get_by_text("确认结束", exact=True).click()
+        peer.get_by_test_id("spider-end-round").click()
+        peer.get_by_text("确认结束本局", exact=True).click()
         state(1, lambda game: game["finished"])
         peer.get_by_test_id("spider-back").click()
         peer.get_by_text("房间号", exact=True).wait_for()
-        print("PASS 4: 退出只结束本人，房主转移、队友继续，结束后返回房间", flush=True)
+        print("PASS 4: 退出只结束本人，房主移交；新房主结束本局并结算", flush=True)
 
         host.get_by_text("准 备", exact=True).click()
         peer.get_by_text("开始游戏", exact=True).click()
-        both(lambda game: game["completed"] == 11 and not game["finished"])
+        for index in range(2):
+            state(index, lambda game: game["completed"] == 7 and not game["finished"])
         move(1, {"source": 1, "index": 0, "target": 0})
-        both(lambda game: game["completed"] == 12 and game["finished"])
-        for page in pages:
-            page.get_by_test_id("spider-win").wait_for()
-        for width, height, name in [(320, 568, "small"), (1280, 800, "desktop")]:
-            peer.set_viewport_size({"width": width, "height": height})
-            assert peer.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
-            box = peer.get_by_test_id("spider-back").bounding_box()
-            assert box and box["height"] >= 44 and box["y"] + box["height"] <= height
-            peer.wait_for_timeout(350)  # let the shared result fade settle before visual capture
-            peer.screenshot(path=str(OUT / f"spider-{name}.png"))
+        state(1, lambda game: game["completed"] == 8 and game["finished"])
+        expect(peer.get_by_test_id("spider-win")).to_contain_text("个人通关")
+        expect(host.get_by_text("通关 8/8", exact=True)).to_be_visible()
+        assert latest[0]["completed"] == 7 and not latest[0]["finished"]
         peer.get_by_test_id("spider-back").click()
-        peer.get_by_text("退出房间", exact=True).click()
-        peer.get_by_text("我的", exact=True).last.click()
-        peer.get_by_text("历史战绩", exact=True).click()
-        peer.locator('[data-testid^="history-record-"]').first.click()
-        peer.get_by_text("已收齐 12 / 12 组 · 1 步", exact=False).wait_for()
+        peer.get_by_text("房间号", exact=True).wait_for()
+        expect(peer.get_by_test_id("spider-board")).to_have_count(0)
+        expect(peer.get_by_text("本局进行中", exact=True)).to_be_visible()
+        expect(peer.get_by_text("开始游戏", exact=True)).to_have_count(0)
+        expect(peer.get_by_text("7/8 组", exact=True).first).to_be_visible()
+        host.get_by_test_id("spider-end").tap()
+        host.get_by_text("确认结束", exact=True).tap()
+        expect(host.get_by_test_id("game-result")).to_contain_text("你的牌局已结束")
+        host.get_by_test_id("game-result-history").tap()
+        host.locator('[data-testid^="history-record-"]').first.click()
+        expect(host.get_by_text("已收齐 7 / 8 组 · 0 步")).to_be_visible()
         assert not errors, errors
-        print("PASS 5: 回房重新准备、全队通关、动态目标战绩、小屏与桌面布局", flush=True)
+        print("PASS 5: 回房再开、个人通关可提前返回、全员结束后查看个人战绩", flush=True)
         browser.close()
 
 

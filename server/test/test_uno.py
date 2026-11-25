@@ -559,7 +559,47 @@ class TestSyncPrivacy:
         sync = u.game_to_sync(gs, 999)
         assert sync["your_seat"] is None
         assert sync["hand"] == []
+        assert sync["hand_effects"] == {}
         assert sync["playable"] == []
+
+    def test_hand_effects_cover_function_cards_and_house_rules(self):
+        expected = {
+            "R0": "所有人把手牌传给下家",
+            "R5": "按颜色或数字接牌",
+            "R7": "选一人交换手牌",
+            "RS": "跳过下家一轮",
+            "RR": "反转出牌顺序",
+            "R+2": "下家摸 2 张并停一轮",
+            "RSE": "跳过其他人，自己再出牌",
+            "RDA": "弃掉其余同色牌",
+            "W": "任选接下来的颜色",
+            "W+4": "选色，下家摸 4 张并停一轮",
+            "W+6": "选色，下家摸 6 张并停一轮",
+            "W+10": "选色，下家摸 10 张并停一轮",
+            "W+RD4": "选色并反转，下家摸 4 张并停一轮",
+            "W+RO": "下家选色，摸到该色后停一轮",
+            "WTP": "选色，队友出牌。接不住你摸 2 张",
+            "WTD4": "选色。下家停一轮，和队友各摸 2 张",
+        }
+        game = _setup({0: list(expected), 1: ["G1"], 2: ["B1"], 3: ["Y1"]},
+                      rules={"seven_zero": "both", "stack_mode": "off", "deck": "no_mercy", "teams": "2v2"})
+        hints = u.game_to_sync(game, 101)["hand_effects"]
+        assert hints == expected
+        assert all(len(text) <= 24 for text in hints.values())
+
+    def test_effects_reflect_two_player_reverse_and_classic_rules(self):
+        game = _setup({0: ["RR", "R7", "R0", "R+2"], 1: ["Y3"]})
+        assert u.game_to_sync(game, 101)["hand_effects"] == {
+            "RR": "跳过对手，自己再出牌",
+            "R7": "按颜色或数字接牌",
+            "R0": "按颜色或数字接牌",
+            "R+2": "下家加罚 2 张，可叠加",
+        }
+
+    def test_wild4_hint_notes_challenge_in_official_mode(self):
+        game = _setup({0: ["W+4", "R1"], 1: ["Y3"]},
+                      rules={"stack_mode": "off", "wild4_challenge": True})
+        assert u.game_to_sync(game, 101)["hand_effects"]["W+4"] == "选色，下家摸 4 张并停一轮（可质疑）"
 
     def test_sync_reports_action_flags(self):
         gs = _setup({0: ["R1"], 1: ["B2"]}, discard="R5", turn=0)

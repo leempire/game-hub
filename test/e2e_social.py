@@ -160,8 +160,10 @@ def browser_checks(api):
                 post(f'/api/rooms/{code}/quick-chat', 1, {'id': 'hello'})
                 expect(watcher.get_by_test_id('watch-phrase').filter(has_text=phrase)).to_be_visible()
                 if game == 'uno':
-                    assert not {'hand', 'hands', 'your_seat', 'playable', 'legal_actions'} & state['game'].keys()
+                    assert not {'hand', 'hands', 'hand_effects', 'your_seat', 'playable', 'legal_actions'} & state['game'].keys()
                     assert state['game']['hand_counts']
+                    assert state['game']['next_seat'] == 1
+                    expect(watcher.get_by_test_id('watch-uno-turn')).to_have_text('social_0 行动中 → 下家 social_1')
                 after = get('/api/rooms/' + code)
                 assert [p['id'] for p in before['players']] == [p['id'] for p in after['players']]
                 assert users[2]['user']['id'] not in [p['id'] for p in after['players']]
