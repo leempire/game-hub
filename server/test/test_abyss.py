@@ -787,7 +787,7 @@ def test_enraged_warden_pulse_survives_restore_and_cancels_on_death():
 def test_warden_pulse_respects_armor_invulnerability_and_range():
     gs, p, q, warden = _warden_trial()
     warden.update(x=720, y=450, next_attack_kind="pulse")
-    p["stats"]["armor"] = 3
+    p["stats"]["armor"] = .25
     q["x"] = warden["x"] + 161
     abyss.advance(gs)
     assert abyss.snapshot(gs)["warden_attack"]["zones"] == [[720, 450, 160]]
@@ -796,10 +796,42 @@ def test_warden_pulse_respects_armor_invulnerability_and_range():
         abyss.advance(gs)
     assert p["hp"] == p_hp
     abyss.advance(gs)
-    assert p["hp"] == p_hp - 17
+    assert p["hp"] == pytest.approx(p_hp - 15)
     assert q["hp"] == q_hp
     abyss._hurt_diver(gs, p, 50)
-    assert p["hp"] == p_hp - 17
+    assert p["hp"] == pytest.approx(p_hp - 15)
+
+
+def test_armor_reduces_by_percentage_and_never_nullifies_damage():
+    gs = abyss.create([{"id": 1, "username": "Diver"}], 42)
+    p = gs["players"][1]
+    p["passives"] = {"armor": 5}
+    p["talent"] = {"armor": .08}
+    abyss._refresh_stats(p)
+    assert p["stats"]["armor"] == pytest.approx(.48)
+
+    hp = p["hp"]
+    abyss._hurt_diver(gs, p, 5)
+    assert p["hp"] == pytest.approx(hp - 2.6)
+    # 单次伤害保底 1 点：护甲再高也不会把杂兵攻击完全挡掉。
+    gs["elapsed"] += 20
+    hp = p["hp"]
+    abyss._hurt_diver(gs, p, 1)
+    assert p["hp"] == pytest.approx(hp - 1)
+
+
+def test_armor_reduction_is_capped_across_passive_and_talent():
+    stats = data.player_stats({"armor": 5}, {"armor": 1.0})
+    assert stats["armor"] == pytest.approx(data.MAX_ARMOR_REDUCTION)
+
+
+def test_restore_abyss_migrates_legacy_flat_armor():
+    gs = abyss.create([{"id": 1, "username": "Diver"}], 42)
+    p = gs["players"][1]
+    p["passives"] = {"armor": 5}
+    p["stats"]["armor"] = 5  # 旧存档：固定减伤点数
+    rm._restore_abyss({"game": "abyss", "game_state": gs})
+    assert p["stats"]["armor"] == pytest.approx(.40)
 
 
 def test_upgrade_preview_uses_effective_stats_and_lists_evolution_requirements():
@@ -826,6 +858,16 @@ def test_upgrade_preview_uses_effective_stats_and_lists_evolution_requirements()
     }
     assert diver["weapons"] == {"rivet": 2, "ring": 4}
     assert diver["passives"] == {"empty_tome": 1, "attractorb": 1}
+
+
+def test_passive_preview_keeps_talent_bonuses():
+    gs = abyss.create([{"id": 1, "username": "Diver",
+                        "talent_bonus": {"might": .15, "armor": .08}}], 42)
+    diver = gs["players"][1]
+    diver["choices"] = ["spinach", "armor"]
+    player = abyss.snapshot(gs)["players"][0]
+    assert player["choice_changes"]["spinach"] == [["might", 1.15, 1.25]]
+    assert player["choice_changes"]["armor"] == [["armor", .08, .16]]
 
 
 @pytest.mark.parametrize(("health", "team_size"), [(100, 1), (92, 1), (100, 2)])

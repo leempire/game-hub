@@ -48,7 +48,7 @@ export const abyssPassives = {
   attractorb: { title: '信标磁锚', detail: '拾取范围大幅提升（乘算）', maxLevel: 5, stat: 'magnet' },
   clover: { title: '幸运锈币', detail: '幸运 +10%/级', maxLevel: 5, stat: 'luck' },
   crown: { title: '打捞执照', detail: '经验获取 +8%/级', maxLevel: 5, stat: 'growth' },
-  armor: { title: '抗压壳', detail: '受到伤害 -1/级', maxLevel: 5, stat: 'armor' },
+  armor: { title: '抗压壳', detail: '受到伤害 -8%/级（最多 -40%）', maxLevel: 5, stat: 'armor' },
   pummarola: { title: '自愈膜', detail: '每秒回复 +0.2/级', maxLevel: 5, stat: 'recovery' },
 };
 
@@ -84,7 +84,7 @@ const changeLabels = {
   area: '范围', pierce: '穿透', duration: '持续', duration_scale: '持续倍率', speed: '弹速', interval: '连发间隔',
   knockback: '击退', crit: '暴击率', preserve: '掉落保留率', might: '伤害',
   max_hp: '最大生命', move_speed: '移速', luck: '幸运', magnet: '吸取范围',
-  growth: '经验', armor: '护甲', recovery: '每秒回复',
+  growth: '经验', armor: '减伤', recovery: '每秒回复',
 };
 
 type AbyssChange = [keyof typeof changeLabels, number, number];
@@ -106,7 +106,8 @@ export function abyssChangeText(changes: AbyssChange[]) {
         case 'luck':
         case 'growth':
         case 'crit':
-        case 'preserve': return `${Math.round(value * 1000) / 10}%`;
+        case 'preserve':
+        case 'armor': return `${Math.round(value * 1000) / 10}%`;
         case 'pierce': return value >= 9999 ? '无限' : String(value);
         default: return String(value);
       }

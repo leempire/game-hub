@@ -31,6 +31,14 @@ MAX_WEAPONS = 6
 MAX_PASSIVES = 6
 INFINITE_PIERCE = 9999
 
+# 护甲是**百分比减伤**，不是 VS 的固定 −1：本作接触伤害只有 1–5，固定减伤
+# 点满后普通怪会直接归零（等于无敌），守卫技能也会被削掉一大截。百分比在
+# 任何伤害量级下都不会归零，对高伤害同样有效；上限防止后续叠加来源堆穿。
+# 单次伤害保底见 MIN_HIT_DAMAGE（VS 的护甲也不能把伤害减到 0）。
+ARMOR_REDUCTION_PER_LEVEL = .08
+MAX_ARMOR_REDUCTION = .50
+MIN_HIT_DAMAGE = 1.0
+
 # Attractorb 的拾取范围是**乘算**，数值取自官方 wiki。
 ATTRACTORB_MULTIPLIERS = (1.5, 1.995, 2.49375, 2.9925, 3.980025)
 
@@ -411,7 +419,8 @@ PASSIVES = {
     "crown": {"name": "打捞执照", "max_level": 5, "stat": "growth",
               "per_level": .08, "detail": "经验获取 +8%/级"},
     "armor": {"name": "抗压壳", "max_level": 5, "stat": "armor",
-              "per_level": 1, "detail": "受到伤害 -1/级"},
+              "per_level": ARMOR_REDUCTION_PER_LEVEL,
+              "detail": "受到伤害 -8%/级（最多 -40%）"},
     "pummarola": {"name": "自愈膜", "max_level": 5, "stat": "recovery",
                   "per_level": .2, "detail": "每秒回复 +0.2/级"},
 }
@@ -460,7 +469,8 @@ def player_stats(passives: dict, talent: dict | None = None) -> dict:
         "magnet": bonus["magnet"] * (1.0 + talent.get("magnet", 0.0)),
         "luck": 1.0 + bonus["luck"] + talent.get("luck", 0.0),
         "growth": 1.0 + bonus["growth"] + talent.get("growth", 0.0),
-        "armor": int(bonus["armor"] + talent.get("armor", 0)),
+        "armor": min(MAX_ARMOR_REDUCTION,
+                     bonus["armor"] + talent.get("armor", 0.0)),
         "recovery": bonus["recovery"] + talent.get("recovery", 0.0),
         "max_hp": (BASE_MAX_HP * (1.0 + talent.get("max_hp", 0.0))
                    + bonus["max_hp"]),

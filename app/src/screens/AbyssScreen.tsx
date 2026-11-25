@@ -725,7 +725,7 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
           <Text style={styles.label}>磁吸 x{me.stats.magnet.toFixed(2)}</Text>
           <Text style={styles.label}>幸运 +{Math.round((me.stats.luck - 1) * 100)}%</Text>
           <Text style={styles.label}>成长 +{Math.round((me.stats.growth - 1) * 100)}%</Text>
-          <Text style={styles.label}>护甲 {me.stats.armor}</Text>
+          <Text style={styles.label}>减伤 {Math.round(me.stats.armor * 1000) / 10}%</Text>
           <Text style={styles.label}>回复 {me.stats.recovery.toFixed(1)}/s</Text>
         </View>
       </>}
