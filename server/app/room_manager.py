@@ -1398,7 +1398,7 @@ def _start_uno(room: dict) -> dict | None:
 def _start_undercover(room: dict) -> dict:
     players = room["players"]
     if not undercover.MIN_PLAYERS <= len(players) <= undercover.MAX_PLAYERS:
-        raise ValueError("我是卧底需要 4–8 名玩家")
+        raise ValueError("「谁是卧底」需要 4–8 名玩家")
     if any(not p["connected"] or p.get("is_bot") for p in players):
         raise ValueError("请等待所有玩家上线后再开始")
     previous = (room.get("game_state") or {}).get("summary", {}).get("word_pair")

@@ -311,11 +311,11 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const supportsBots = room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi' || room.game === 'uttt';
   // 房间只有两种状态：非游戏中即大厅（对局结束的房间回到等待态，可续开）
   const isLobbyStatus = room.status !== 'playing';
-  // 我是卧底要求所有座位在线才能开局，等待时也需要显示离线成员。
+  // 谁是卧底要求所有座位在线才能开局，等待时也需要显示离线成员。
   const showOffline = room.status === 'playing' || isUndercover;
   const canAddBot = isHost && !isFull && isLobbyStatus && supportsBots;
   // 人数要求：扫雷 1 人即可开（单机）；2048 / 俄罗斯方块 / 蜘蛛纸牌 1-4 人各自独立盘
-  // （1 人即可开）；飞行棋 / UNO / 深空休眠至少 2 人，我是卧底至少 4 人；其余须满员
+  // （1 人即可开）；飞行棋 / UNO / 深空休眠至少 2 人，谁是卧底至少 4 人；其余须满员
   const minPlayers = isUndercover ? 4 : (isLudo || isUno || isStasis) ? 2 : room.max_players;
   const needMorePlayers = isMine || is2048 || isTetris || room.game === 'spider' || room.game === 'abyss'
     ? false

@@ -41,7 +41,7 @@ def choose_word_pair(rng, previous=None):
 def create_game(player_ids, word_pair, match_id, rng):
     players = list(player_ids)
     if not MIN_PLAYERS <= len(players) <= MAX_PLAYERS or len(set(players)) != len(players):
-        raise ValueError("我是卧底需要 4–8 名不同玩家")
+        raise ValueError("「谁是卧底」需要 4–8 名不同玩家")
     words = list(word_pair)
     rng.shuffle(words)
     shuffled_players = players.copy()

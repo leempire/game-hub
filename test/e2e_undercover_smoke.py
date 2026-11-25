@@ -1,4 +1,4 @@
-"""我是卧底四人浏览器冒烟；需先启动 Web，后端和数据库由本脚本隔离启动。"""
+"""谁是卧底四人浏览器冒烟；需先启动 Web，后端和数据库由本脚本隔离启动。"""
 from collections import Counter
 import json
 import os
@@ -79,7 +79,9 @@ def browser_checks(api):
             players.append(registration.value.json())
             page.get_by_role("button", name="多人桌游", exact=True).click()
             expect(page.get_by_test_id("game-card-uttt")).to_have_count(0)
-            page.get_by_test_id("game-card-undercover").click()
+            card = page.get_by_test_id("game-card-undercover")
+            expect(card).to_contain_text("谁是卧底")
+            card.click()
 
         host = pages[0]
         seats = {player["user"]["id"]: seat for seat, player in enumerate(players)}
@@ -283,7 +285,7 @@ def browser_checks(api):
             assert code in page.locator("body").inner_text()
         host.goto(BASE + "/history")
         history_record = host.get_by_test_id(f"history-record-{record_id}")
-        expect(history_record).to_contain_text("我是卧底")
+        expect(history_record).to_contain_text("谁是卧底")
         history_record.click()
         for word in set(words):
             expect(host.get_by_test_id("undercover-history")).to_contain_text(word)

@@ -416,7 +416,7 @@ export const GAME_HELP: Record<GameKey | 'lighthouse', HelpEntry> = {
     ],
   },
   undercover: {
-    title: '我是卧底规则',
+    title: '谁是卧底规则',
     sections: [
       { heading: '各自看词', body: '4–8 名真人开局。4–6 人有 1 名卧底，7–8 人有 2 名。卧底的词和平民的词相近。每人只看自己的词，靠线索推断阵营。' },
       { heading: '轮流给线索', body: '轮到你时，在 45 秒内发送一句 1–60 字的线索。线索里不能写出你的完整词语。超时会跳过。' },

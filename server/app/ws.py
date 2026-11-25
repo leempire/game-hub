@@ -242,7 +242,7 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
         return
     if msg_type in ("undercover_clue", "undercover_vote"):
         if room["game"] != "undercover":
-            await _send_error(code, user_id, "这不是我是卧底房间")
+            await _send_error(code, user_id, "当前房间未开启「谁是卧底」")
             return
         error, changed = rm.undercover_action(room, user_id, data)
         ws = _connections.get(code, {}).get(user_id)
