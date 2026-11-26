@@ -3893,6 +3893,11 @@ def _on_dc_timeout(code: str, user_id: int):
             return
         finish = finish_guandan if room["game"] == "guandan" else finish_doudizhu
         finish(room, user_id, "disconnect")
+        # 保座 120s 结束后把掉线者移出：否则他留在等待大厅名单里，
+        # 「所有真人必须在线」的开局条件永远不满足，剩下的人只能另开房。
+        room["players"] = [p for p in room["players"] if p["id"] != user_id]
+        _transfer_host(room)
+        _prune_swap_requests(room)
         _maybe_destroy_or_mark(room)
         if _dc_timeout_callback:
             try:

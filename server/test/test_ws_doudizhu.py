@@ -191,7 +191,10 @@ def test_disconnect_deadline_cancels_bidding_or_forfeits_play(client, after_bid)
         assert summary["scores"] is None
         assert summary["winner"] == ("farmers" if after_bid else None)
         assert summary["reason"] == ("disconnect" if after_bid else "canceled")
-        assert receive(survivor, "lobby")["room"]["status"] == "waiting"
+        lobby = receive(survivor, "lobby")["room"]
+        assert lobby["status"] == "waiting"
+        # 超时判负后必须把掉线者移出，否则「所有真人在线」的下一局永远开不了。
+        assert disconnected not in [p["id"] for p in lobby["players"]]
         assert database.get_user_history(disconnected)["total"] == int(after_bid)
 
 
