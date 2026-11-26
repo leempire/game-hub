@@ -90,6 +90,16 @@ export const reversiBoard = '#2E7D32';
 /** 蜘蛛纸牌桌面；白字对比度 12.18:1（牌面沿用 colors.card / text）。 */
 export const spiderTable = '#123C35';
 
+/** 斗地主毡面与纸牌。正文 9.70:1（桌面）/ 6.55:1（座位），状态另有文字和抬牌。 */
+export const doudizhuColors = {
+  felt: '#234540', panel: '#2C514B', light: '#F8F6EB', muted: '#D1E2DC',
+  line: '#70938B',     // 桌面边界 3.12:1
+  active: '#96D5C5', gold: '#F5D78D', // 桌面回合描边 6.32:1、座位告警 6.28:1
+  paper: '#FFF9EB', black: '#202C2D', red: '#A62E35', // 纸面角标 13.70:1 / 6.53:1
+  cardEdge: '#9A7C56', back: '#244F4F', motif: '#C8B397', // 纸面边界 3.71:1、牌背描边 5.47:1
+  selected: '#075E52', selectedPaper: '#DCF1E9', // 选中边界 6.52:1、红色角标 5.81:1
+};
+
 /**
  * UNO 四色牌面。**与飞行棋同款 hex**（跨游戏同色系不该再写第二组值，
  * 项目踩过「同一个棋盘绿写成两个值」）。实测 vs 页面底 #F9FAFB：

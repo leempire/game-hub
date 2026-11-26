@@ -432,6 +432,17 @@ export function TetrisIcon({ size = 40 }: { size?: number }) {
 // ── UNO ──────────────────────────────────────────────────────
 
 
+export function DoudizhuIcon({ size = 44 }: { size?: number }) {
+  return <Svg width={size} height={size} viewBox="0 0 48 48" aria-hidden>
+    <Rect x={6} y={9} width={23} height={32} rx={4} fill={colors.success} stroke={colors.text} strokeWidth={2}
+      transform="rotate(-15 17.5 25)" />
+    <Rect x={19} y={6} width={23} height={32} rx={4} fill={colors.card} stroke={colors.text} strokeWidth={2}
+      transform="rotate(11 30.5 22)" />
+    <Path d="M31 13 C28 17 23 19 23 23 C23 27 27 29 30 26 L28 31 L34 31 L32 26 C36 29 40 27 39 23 C38 19 34 17 31 13 Z"
+      fill={colors.text} transform="rotate(11 30.5 22)" />
+  </Svg>;
+}
+
 /** 游戏入口图标：三张扇形摊开的牌压在深色底上。 */
 export function UnoIcon({ size = 40 }: { size?: number }) {
   // [水平偏移, 牌面颜色]；中间的牌正对、两侧各偏一点并轻微旋转

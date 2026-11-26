@@ -206,6 +206,8 @@ def save_game_record(room: dict):
     gs = room.get("game_state")
     if not gs or not (gs.get("winner") or gs.get("finished")):
         return
+    if room["game"] == "doudizhu" and gs.get("winner") is None:
+        return  # A cancelled deal has no result to record.
     players = _build_players_record(room)
     results = _build_results_record(room)
     snapshot = _build_snapshot(room)
@@ -403,7 +405,7 @@ def _build_players_record(room: dict) -> list[dict]:
     gs = room.get("game_state") or {}
     colors = gs.get("player_colors", {})
     players = []
-    roster = room["_undercover_roster"] if room["game"] == "undercover" else room["players"]
+    roster = room.get(f"_{room['game']}_roster", room["players"])
     for idx, p in enumerate(roster):
         entry: dict = {
             "user_id": p["id"],
@@ -424,6 +426,14 @@ def _build_players_record(room: dict) -> list[dict]:
 def _build_results_record(room: dict) -> list[dict]:
     """Build the per-player result list."""
     gs = room.get("game_state") or {}
+    if room["game"] == "doudizhu":
+        from app.game.doudizhu import snapshot
+        result = snapshot(gs)
+        scores = result["scores"]
+        return [{"username": p["username"],
+                 "result": "win" if (p["id"] == result["landlord_id"]) == (result["winner"] == "landlord") else "lose",
+                 **({"score": scores[p["id"]]} if scores is not None else {})}
+                for p in room["_doudizhu_roster"]]
     if room["game"] == "undercover":
         summary = gs["summary"]
         roles = {entry["user_id"]: entry["role"] for entry in summary["roles"]}
@@ -542,6 +552,9 @@ def _build_snapshot(room: dict) -> dict:
     if room["game"] == "undercover":
         return gs["summary"]
     game = room["game"]
+    if game == "doudizhu":
+        from app.game.doudizhu import snapshot
+        return {**snapshot(gs), "game": game}
     if game == "abyss":
         from app.game.abyss import record_summary
         return record_summary(gs)

@@ -2,6 +2,7 @@ import { abyssResults } from '../abyss';
 import AbyssResult from '../AbyssResult';
 import UndercoverSummary from '../UndercoverSummary';
 import { undercoverWinnerLabels, type UndercoverSnapshot } from '../undercover';
+import { doudizhuRole, formatDoudizhuResult, type DoudizhuSnapshot } from '../doudizhu';
 // 历史战绩页面：列表 + 点击展开棋盘快照详情。
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -13,7 +14,7 @@ import RecordShareActions from '../RecordShareActions';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, AbyssSnapshot, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
-import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon } from '../icons';
+import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
@@ -101,6 +102,7 @@ export default function HistoryScreen() {
 
   const renderGameIcon = (game: string) => {
     if (game === 'undercover') return <UndercoverIcon size={36} />;
+    if (game === 'doudizhu') return <DoudizhuIcon size={36} />;
     if (game === 'abyss') return <AbyssIcon size={36} />;
     if (game === 'uttt') return <UltimateTicTacToeIcon size={36} />;
     if (game === 'spider') return <SpiderIcon size={36} />;
@@ -162,7 +164,7 @@ export default function HistoryScreen() {
                   {rec.players.map((p) => {
                     const difficulty = p.ai_difficulty && { easy: '简单', normal: '普通', hard: '困难' }[p.ai_difficulty];
                     return `${p.nickname || p.username}${difficulty ? ' · ' + difficulty : ''}`;
-                  }).join(rec.game === 'abyss' || rec.game === 'undercover' ? ' / ' : ' vs ')}
+                  }).join(['abyss', 'undercover', 'doudizhu'].includes(rec.game) ? ' / ' : ' vs ')}
                 </Text>
               </View>
               <Text style={styles.arrow}>{expanded ? '∨' : '›'}</Text>
@@ -290,6 +292,28 @@ export function BoardSnapshot({ rec, viewerId }: { rec: GameRecord; viewerId?: n
     return <View testID="undercover-history">
       <Text style={styles.gameLabel}>{undercoverWinnerLabels[summary.winner]}</Text>
       <UndercoverSummary summary={summary} name={id => names.get(id) ?? `玩家 ${id}`} />
+    </View>;
+  }
+  if (view.game === 'doudizhu') {
+    const summary: DoudizhuSnapshot = view;
+    const { headline, detail } = formatDoudizhuResult(summary);
+    const { rules } = summary;
+    return <View testID="doudizhu-history" style={{ gap: spacing.xs }}>
+      <Text style={styles.gameLabel}>{headline}</Text>
+      <Text style={{ color: colors.textSecondary }}>{detail}</Text>
+      {rec.players.map(player => {
+        const uid = player.user_id ?? summary.seat_uids[player.seat];
+        const score = summary.scores?.[uid];
+        return <Text key={player.seat} style={{ color: colors.text }}>
+          {player.nickname || player.username} · {doudizhuRole(uid, summary.landlord_id)}
+          {score != null ? ` · ${score > 0 ? '+' : ''}${score} 分` : ' · 未计分'}
+        </Text>;
+      })}
+      <Text style={{ color: colors.textSecondary }}>
+        全员不叫：{rules.all_pass === 'redeal' ? '重发' : '首叫者按 1 分当地主'}
+        {'\n'}飞机单翼：{rules.airplane_pair_as_singles ? '可拆对' : '点数各异'}
+        {'\n'}四带两单：{rules.four_pair_as_singles ? '可带一对' : '点数各异'}
+      </Text>
     </View>;
   }
   if (view.game === 'uttt') {

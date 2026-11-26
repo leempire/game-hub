@@ -40,7 +40,7 @@ from app.game.connect4 import (
     COLS as C4_COLS, ROWS as C4_ROWS,
     BLACK as C4_BLACK, WHITE as C4_WHITE,
 )
-from app.game import abyss, undercover
+from app.game import abyss, doudizhu, doudizhu_ai, undercover
 from app.game import stasis as stasis_engine
 from app.game import (battleship_ai, gomoku_ai, reversi_ai, dots_ai, ludo_ai, xiangqi_ai,
                  connect4_ai, uno_ai, luzhanqi_ai)
@@ -62,6 +62,10 @@ def _register_dc_timeout_callback():
             gs = room["game_state"]
             if timeout_event and gs is timeout_event["game_state"] and gs.get("revision") == timeout_event["revision"]:
                 _send_undercover_update(room, lobby=True)
+            return
+        if room and room["game"] == "doudizhu":
+            if timeout_event and room["game_state"] is timeout_event["game_state"]:
+                _send_doudizhu_update(room)
             return
         if room and room["game"] == "2048":
             if timeout_event is None:
@@ -125,7 +129,8 @@ async def ws_room(websocket: WebSocket, code: str):
         return
     await websocket.accept()
     is_undercover = room["game"] == "undercover"
-    if is_undercover and (rm.get_room(code) is not room
+    private_round = is_undercover or room["game"] == "doudizhu"
+    if private_round and (rm.get_room(code) is not room
                           or not any(p["id"] == user_id for p in room["players"])):
         await websocket.close(code=4003, reason="你不在房间中")
         return
@@ -146,6 +151,8 @@ async def ws_room(websocket: WebSocket, code: str):
                 _send_undercover_update(room, exclude={user_id})
         else:
             await websocket.send_json(_build_sync(room, user_id))
+            if room["game"] == "doudizhu" and room["status"] == "playing":
+                _maybe_schedule_bot_turn(code, room, room["game_state"])
         # Broadcast lobby so every client sees the fresh connected flag
         await _broadcast(code, {
             "type": "lobby", "room": rm.room_to_dict(room)
@@ -160,7 +167,7 @@ async def ws_room(websocket: WebSocket, code: str):
             # 僵尸连接自愈：本页连接被同用户新连接替换后又被弹出（如对局结束返回房间页），
             # 旧连接再发消息时若表位空缺则重新注册；表位有新连接时不抢占（防旧连接 ping 夺位）
             conns = _connections.setdefault(code, {})
-            if is_undercover and (rm.get_room(code) is not room or conns.get(user_id) is not websocket):
+            if private_round and (rm.get_room(code) is not room or conns.get(user_id) is not websocket):
                 break
             if room["game"] == "abyss" and conns.get(user_id) is not websocket:
                 break
@@ -191,7 +198,7 @@ async def ws_room(websocket: WebSocket, code: str):
         # 注册之后才到达，无条件标记会把刚置上的在线态覆盖回掉线。症状就是「对局
         # 结束点返回房间后概率性显示『断线』」（房间里还会误启 120s 判负计时）。
         current_room = rm.get_room(code)
-        should_disconnect = (owns_slot and current_room is room) if is_undercover else not superseded
+        should_disconnect = (owns_slot and current_room is room) if private_round else not superseded
         room = current_room if should_disconnect else None
         if room:
             status_before = room["status"]
@@ -239,6 +246,14 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
     msg_type = data.get("type")
     room = rm.get_room(code)
     if not room:
+        return
+    if msg_type == "doudizhu_action":
+        await _handle_doudizhu_action(code, room, user_id, data)
+        return
+    if room["game"] == "doudizhu" and msg_type not in (
+        "ping", "ready", "unready", "start", "add_bot", "remove_bot", "room_setting",
+        "swap_request", "swap_respond", "surrender", "leave",
+    ):
         return
     if msg_type in ("undercover_clue", "undercover_vote"):
         if room["game"] != "undercover":
@@ -453,6 +468,9 @@ async def _handle_start(code: str, user_id: int):
         return
     if room["game"] == "uno":
         await _broadcast_uno_start(code, room, gs)
+        return
+    if room["game"] == "doudizhu":
+        _send_doudizhu_update(room, kind="game_start")
         return
     if room["game"] == "undercover":
         _send_undercover_update(room, kind="game_start")
@@ -875,6 +893,11 @@ async def _handle_surrender(code: str, user_id: int):
     room = rm.get_room(code)
     if not room:
         return
+    if room["game"] == "doudizhu":
+        if rm.user_in_game(room, user_id):
+            rm.finish_doudizhu(room, user_id, "surrender")
+            _send_doudizhu_update(room)
+        return
     if room["game"] == "undercover":
         if room["status"] == "playing":
             await _handle_leave(code, user_id)
@@ -1010,7 +1033,7 @@ async def _handle_leave(code: str, user_id: int):
     if ws is not None and conns.get(user_id) is ws:
         conns.pop(user_id)
         try:
-            if room["game"] == "undercover" and (tail := _pending_send(ws)) is not None:
+            if room["game"] in ("undercover", "doudizhu") and (tail := _pending_send(ws)) is not None:
                 await tail
             await ws.close()
         except Exception:
@@ -1019,6 +1042,9 @@ async def _handle_leave(code: str, user_id: int):
 
 async def _broadcast_leave(code: str, user_id: int, action: str,
                            updated_room: dict | None, game_state: dict | None):
+    if action == "game_over" and updated_room and updated_room["game"] == "doudizhu":
+        _send_doudizhu_update(updated_room)
+        return
     if updated_room and updated_room["game"] == "undercover":
         if action == "game_over" or updated_room["status"] == "playing":
             _send_undercover_update(updated_room, lobby=True)
@@ -1177,6 +1203,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = tetris_game_to_sync(room["game_state"], user_id)
         elif room["game"] == "uno":
             game_info = uno_game_to_sync(room["game_state"], user_id)
+        elif room["game"] == "doudizhu":
+            game_info = doudizhu.view_for(room["game_state"], user_id)
         elif room["game"] == "undercover":
             game_info = _undercover_view(room, user_id)
         elif room["game"] == "abyss":
@@ -1204,7 +1232,50 @@ def _build_sync(room: dict, user_id: int) -> dict:
            and (room.get("game_state") or {}).get("finished") else {}),
         **({"undercover_result": result} if room["game"] == "undercover"
            and (result := _undercover_result(room, user_id)) is not None else {}),
+        **({"doudizhu_result": result} if room["game"] == "doudizhu"
+           and (result := _doudizhu_result(room.get("game_state"), user_id)) is not None else {}),
     }
+
+
+def _doudizhu_result(gs: dict | None, user_id: int) -> dict | None:
+    if not gs or not gs["finished"] or user_id not in gs["seat_uids"]:
+        return None
+    return {"type": "game_over", "game": "doudizhu", "match_id": gs["match_id"],
+            "summary": doudizhu.snapshot(gs)}
+
+
+def _send_doudizhu_update(room: dict, kind: str = "doudizhu_state"):
+    gs = room["game_state"]
+    lobby = rm.room_to_dict(room) if gs["finished"] or kind == "game_start" else None
+    # Take all private projections before yielding so updates stay ordered by revision.
+    for uid, ws in list(_connections.get(room["code"], {}).items()):
+        if gs["finished"]:
+            if result := _doudizhu_result(gs, uid):
+                _stasis_enqueue(ws, result)
+            _stasis_enqueue(ws, {"type": "lobby", "room": lobby})
+        elif uid in gs["seat_uids"]:
+            payload = {"type": kind, "game": doudizhu.view_for(gs, uid)}
+            if lobby is not None:
+                payload["room"] = lobby
+            _stasis_enqueue(ws, payload)
+    if room["status"] == "playing":
+        _maybe_schedule_bot_turn(room["code"], room, gs)
+
+
+async def _handle_doudizhu_action(code: str, room: dict, user_id: int, data: dict):
+    if room["game"] != "doudizhu":
+        await _send_error(code, user_id, "当前房间不是斗地主")
+        return
+    try:
+        hint = rm.doudizhu_action(room, user_id, data)
+    except ValueError as error:
+        await _send_error(code, user_id, str(error))
+        return
+    if hint is not None:
+        await _send_to(code, user_id, {"type": "doudizhu_hint", "cards": hint,
+                                      "match_id": data["match_id"], "revision": data["revision"]})
+    else:
+        _send_doudizhu_update(room)
 
 
 def _undercover_view(room: dict, user_id: int) -> dict:
@@ -2329,6 +2400,10 @@ def _maybe_schedule_bot_turn(code: str, room: dict, gs: dict):
         players = room["players"]
         if seat is not None and 0 <= seat < len(players) and players[seat].get("is_bot"):
             rm.schedule_bot_turn(code, players[seat]["id"])
+    elif room["game"] == "doudizhu":
+        uid = gs["current_id"]
+        if uid is not None and _is_bot(room, uid) and rm._has_human_online(room):
+            rm.schedule_bot_turn(code, uid)
 
 
 # ── Bot AI callbacks ─────────────────────────────────────────
@@ -2362,6 +2437,12 @@ async def _bot_do_turn(code: str, bot_id: int):
         await _bot_luzhanqi_move(code, bot_id, room, gs)
     elif room["game"] == "uno":
         await _bot_uno_turn(code, bot_id, room, gs)
+    elif room["game"] == "doudizhu" and gs["current_id"] == bot_id and rm._has_human_online(room):
+        view = doudizhu.view_for(gs, bot_id)
+        action = doudizhu_ai.decide(view, bot_id, _bot_difficulty(room, bot_id))
+        await _handle_doudizhu_action(code, room, bot_id, {
+            **action, "match_id": view["match_id"], "revision": view["revision"],
+        })
 
 
 def _bot_search_current(code: str, room: dict, gs: dict, next_player, ply: int) -> bool:
@@ -2985,6 +3066,8 @@ async def reschedule_after_restore():
                 for p in room["players"]:
                     if not p["connected"] and rm.user_in_game(room, p["id"]):
                         rm._start_dc_timer(room["code"], p["id"], asyncio.get_running_loop())
+            elif room["game"] == "doudizhu":
+                continue  # The first reconnect resumes disconnect grace for the other seats.
             elif room["game"] == "battleship" and gs.get("phase") == "placing":
                 for pid in gs["player_colors"]:
                     if _is_bot(room, pid) and not gs["placement_ready"].get(pid):
@@ -3025,7 +3108,7 @@ def _broadcast_lobby_after_game_end(room: dict):
     callback preserves the old lobby-only notification while reading the final
     membership, rather than capturing stale room_to_dict data during the save.
     """
-    if room["game"] == "undercover":
+    if room["game"] in ("undercover", "doudizhu"):
         return  # The result and lobby are enqueued together for each recipient.
     room["_lobby_after_game_over"] = True
     try:

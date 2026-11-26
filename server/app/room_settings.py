@@ -33,7 +33,7 @@
 from dataclasses import dataclass
 from typing import Callable
 
-from app.game import abyss, battleship, minesweeper, stasis as stasis_engine, stasis_map, uno_rules
+from app.game import abyss, battleship, doudizhu, minesweeper, stasis as stasis_engine, stasis_map, uno_rules
 
 KIND_CHOICE = "choice"
 KIND_TOGGLE = "toggle"
@@ -46,7 +46,7 @@ DEFAULT_TOGGLE_LABELS = ("开", "关")
 class Setting:
     """一条房间级设置。
 
-    `store` 是它在房间字典里真正存值的键（`None` = 派生值，只有 UNO 的 `preset` 是）；
+    `store` 是它在房间字典里真正存值的键（`None` = 由 `read` / `apply` 处理）；
     `read` / `apply` 缺省就是「读 / 写 `room[store]`」，只有派生值才需要自己给。
     """
 
@@ -244,6 +244,42 @@ def _uno_rule_settings() -> list[Setting]:
     return out
 
 
+def _doudizhu_settings() -> list[Setting]:
+    def rules(room):
+        return doudizhu.normalize_rules(room.get("doudizhu_rules"))
+
+    def set_preset(room, value):
+        room["doudizhu_rules"] = doudizhu.PRESETS[value]["rules"].copy()
+
+    def rule(key, label, kind, **details):
+        def apply_rule(room, value):
+            room["doudizhu_rules"] = {**rules(room), key: value}
+
+        return Setting(key=key, label=label, kind=kind, read=lambda room: rules(room)[key],
+                       apply=apply_rule, **details)
+
+    return [
+        Setting(
+            key="preset", label="玩法档位", kind=KIND_CHOICE, in_summary=True,
+            fallback_label="自定义", blurb="逐条调整房规后，档位随完整配置变化。",
+            choices=tuple({"value": key, "label": preset["name"], "blurb": preset["blurb"]}
+                          for key, preset in doudizhu.PRESETS.items()),
+            read=lambda room: doudizhu.preset_of(rules(room)), apply=set_preset,
+        ),
+        rule("all_pass", "三人都不叫", KIND_CHOICE,
+             blurb="决定三人都不叫分时怎么继续。", choices=(
+                 {"value": "redeal", "label": "重发", "blurb": "重新洗牌发牌，下一座位先叫。"},
+                 {"value": "first_bidder", "label": "首叫者当地主", "blurb": "首叫者按 1 分当地主。"},
+             )),
+        rule("airplane_pair_as_singles", "飞机单翼可拆对", KIND_TOGGLE,
+             toggle_labels=("允许拆对", "点数各异"),
+             blurb="开启后，同点的两张牌可作两个单翼，例如 333444 带 77。"),
+        rule("four_pair_as_singles", "四带两单可带一对", KIND_TOGGLE,
+             toggle_labels=("允许带一对", "点数各异"),
+             blurb="开启后，两张同点牌可作两张单牌，例如 6666 带 77。"),
+    ]
+
+
 def _board_sizes(key, store, default, sizes, name="棋盘"):
     return Setting(key=key, label=name, kind=KIND_CHOICE, store=store, default=default,
                    in_summary=True, choices=tuple(
@@ -375,6 +411,7 @@ _GAMES: dict[str, list[Setting]] = {
     "battleship": _battleship_settings(),
     "tetris": _tetris_settings(),
     "uno": [_uno_preset_setting(), *_uno_rule_settings(), _spectator_setting()],
+    "doudizhu": _doudizhu_settings(),
     "gomoku": [*_gomoku_settings(), _clock_setting()],
     "reversi": [_board_sizes("board_size", "reversi_size", 8, (6, 8, 10)), _clock_setting()],
     "dots": [_board_sizes("dots", "dots_count", 5, (4, 5, 6), "点阵")],
