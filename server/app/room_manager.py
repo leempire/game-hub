@@ -339,6 +339,7 @@ def _restore_abyss(room: dict) -> None:
         return
     for p in (gs.get("players") or {}).values():
         if isinstance(p, dict) and "passives" in p:
+            abyss.clamp_loadout(p)
             abyss._refresh_stats(p)
 
 

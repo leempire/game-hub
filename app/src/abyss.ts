@@ -7,18 +7,18 @@ export function abyssLowPressure(hp: number, maxHp: number) {
 
 // 基础 12 把武器 + 12 个进化。数值由服务端权威结算，这里只提供名字与说明。
 export const abyssWeapons = {
-  whip: { title: '裂潮鞭', detail: '身前身后横向挥击，穿透所有敌人', maxLevel: 8 },
-  rivet: { title: '铆钉发射器', detail: '自动射击最近的敌人', maxLevel: 8 },
-  harpoon: { title: '贯流鱼叉', detail: '朝移动方向连发，穿透多个敌人', maxLevel: 8 },
-  axe: { title: '锚刃', detail: '向上抛出，重击并穿透', maxLevel: 8 },
-  cross: { title: '回声十字镖', detail: '追踪最近敌人并回旋', maxLevel: 8 },
-  bible: { title: '环流浮标', detail: '环绕自身持续撞击', maxLevel: 8 },
-  charge: { title: '深压火球', detail: '追踪随机敌人，高伤火球', maxLevel: 8 },
-  ring: { title: '荧孢光环', detail: '灼烧并减速身边敌人，叠加强击退', maxLevel: 8 },
-  spore: { title: '腐潮水池', detail: '在附近留下持续伤害与减速水域', maxLevel: 8 },
-  rune: { title: '弹跳声呐', detail: '撞墙反弹的声呐浮标', maxLevel: 8 },
-  arc: { title: '裂潮电弧', detail: '随机落雷，范围伤害', maxLevel: 8 },
-  pentagram: { title: '深渊脉冲', detail: '清空视野内敌人，冷却极长', maxLevel: 8 },
+  whip: { title: '裂潮鞭', detail: '身前身后横向挥击，穿透所有敌人', maxLevel: 5 },
+  rivet: { title: '铆钉发射器', detail: '自动射击最近的敌人', maxLevel: 5 },
+  harpoon: { title: '贯流鱼叉', detail: '朝移动方向连发，穿透多个敌人', maxLevel: 5 },
+  axe: { title: '锚刃', detail: '向上抛出，重击并穿透', maxLevel: 5 },
+  cross: { title: '回声十字镖', detail: '追踪最近敌人并回旋', maxLevel: 5 },
+  bible: { title: '环流浮标', detail: '环绕自身持续撞击', maxLevel: 5 },
+  charge: { title: '深压火球', detail: '追踪随机敌人，高伤火球', maxLevel: 5 },
+  ring: { title: '荧孢光环', detail: '灼烧并减速身边敌人，叠加强击退', maxLevel: 5 },
+  spore: { title: '腐潮水池', detail: '在附近留下持续伤害与减速水域', maxLevel: 5 },
+  rune: { title: '弹跳声呐', detail: '撞墙反弹的声呐浮标', maxLevel: 5 },
+  arc: { title: '裂潮电弧', detail: '随机落雷，范围伤害', maxLevel: 5 },
+  pentagram: { title: '深渊脉冲', detail: '清空视野内敌人，冷却极长', maxLevel: 5 },
   bloody_tear: { title: '血潮鞭', detail: '裂潮鞭进化：暴击时汲取生命', maxLevel: 1, evolved: true, base: 'whip' },
   holy_wand: { title: '圣铆炮', detail: '铆钉发射器进化：高频连射', maxLevel: 1, evolved: true, base: 'rivet' },
   thousand_edge: { title: '千刃鱼群', detail: '贯流鱼叉进化：无间断刃流', maxLevel: 1, evolved: true, base: 'harpoon' },
@@ -48,8 +48,8 @@ export const abyssPassives = {
   attractorb: { title: '信标磁锚', detail: '拾取范围大幅提升（乘算）', maxLevel: 5, stat: 'magnet' },
   clover: { title: '幸运锈币', detail: '幸运 +10%/级', maxLevel: 5, stat: 'luck' },
   crown: { title: '打捞执照', detail: '经验获取 +8%/级', maxLevel: 5, stat: 'growth' },
-  armor: { title: '抗压壳', detail: '受到伤害 -8%/级（最多 -40%）', maxLevel: 5, stat: 'armor' },
-  pummarola: { title: '自愈膜', detail: '每秒回复 +0.2/级', maxLevel: 5, stat: 'recovery' },
+  armor: { title: '抗压壳', detail: '受到伤害 -6%/级（最多 -30%）', maxLevel: 5, stat: 'armor' },
+  pummarola: { title: '自愈膜', detail: '每秒回复 +0.1/级', maxLevel: 5, stat: 'recovery' },
 };
 
 export type AbyssPassive = keyof typeof abyssPassives;
@@ -145,6 +145,7 @@ export interface AbyssPlayer {
   evolution_requirements?: Partial<Record<AbyssWeapon, { target: AbyssWeapon; passive: AbyssPassive; rank: number }>>;
   kills: number;
   damage_dealt?: number;
+  damage_taken?: number;
   xp_collected?: number;
   rescues?: number;
   /** 终局结算的局外天赋点（只有真正参与了本局的真人才有）。 */
@@ -224,7 +225,7 @@ export function abyssVibrationDuration(
 
 export type AbyssSummary = Pick<AbyssState, 'result'> &
   Partial<Pick<AbyssState, 'seconds' | 'level' | 'kills' | 'salvage' | 'boss' | 'boss_dead' | 'map_size'>> & {
-    players: Pick<AbyssPlayer, 'id' | 'name' | 'kills' | 'hp' | 'out' | 'weapons' | 'passives' | 'xp_collected' | 'rescues' | 'damage_dealt' | 'talent_award'>[];
+    players: Pick<AbyssPlayer, 'id' | 'name' | 'kills' | 'hp' | 'out' | 'weapons' | 'passives' | 'xp_collected' | 'rescues' | 'damage_dealt' | 'damage_taken' | 'talent_award'>[];
   };
 
 export const abyssResults = {
@@ -255,6 +256,12 @@ export function abyssEvolutionPreview(player: AbyssPlayer, choice: AbyssChoice) 
     const gainsPassive = evolution.passive === choice && !hasPassive && rank >= evolution.rank;
     return gainsLastRank || gainsPassive ? [abyssWeapons[evolution.target].title] : [];
   });
+}
+
+/** 进化候选自带 `base`；普通武器 / 被动 / 补给返回 null。 */
+export function abyssEvolutionBase(choice: AbyssChoice) {
+  const info = abyssWeapons[choice as AbyssWeapon];
+  return info && 'base' in info ? info.base as AbyssWeapon : null;
 }
 
 export function abyssClock(seconds: number) {

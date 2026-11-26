@@ -89,14 +89,14 @@ export const CreatureDefinitions = memo(function CreatureDefinitions({ prefix }:
 export const wardenImage = require('../assets/abyss/cable-warden.webp');
 
 const fieldGuide: Record<AbyssEnemy, [string, string, number, number, number]> = {
-  drifter: ['漂囊', '尖头带拖尾，开场常成群出现。', 10, 56, 2],
-  needlefish: ['针鳍鱼', '尖吻和叉尾，体型小但速度最快。', 8, 125, 1],
-  eel: ['裂鳍鳗', '弯曲长身，走位转向时留意追上来的鳗鱼。', 15, 105, 2],
-  crab: ['锈甲蟹', '宽壳和双钳，移动慢，别被它们堵在墙边。', 22, 43, 2],
-  jelly: ['脉光水母', '伞盖宽、触须长，绕行时多留一点距离。', 26, 58, 3],
-  angler: ['灯颌鱼', '头顶悬灯，耐久和接触伤害都较高。', 38, 87, 5],
-  elite: ['精英锈甲蟹', '宽叉巨钳和分层背甲，击倒后掉落宝箱。', 450, 83, 2],
-  warden: ['断缆守卫', '耐久降到 45% 后进入狂暴。看到落点或脉冲圈就先撤出范围。', 1350, 84, 12],
+  drifter: ['漂囊', '尖头带拖尾，开场常成群出现。', 10, 56, 6],
+  needlefish: ['针鳍鱼', '尖吻和叉尾，体型小但速度最快。', 8, 125, 4],
+  eel: ['裂鳍鳗', '弯曲长身，走位转向时留意追上来的鳗鱼。', 15, 105, 7],
+  crab: ['锈甲蟹', '宽壳和双钳，移动慢，别被它们堵在墙边。', 22, 43, 8],
+  jelly: ['脉光水母', '伞盖宽、触须长，绕行时多留一点距离。', 26, 58, 10],
+  angler: ['灯颌鱼', '头顶悬灯，耐久和接触伤害都较高。', 38, 87, 14],
+  elite: ['精英锈甲蟹', '宽叉巨钳和分层背甲，击倒后掉落宝箱。', 800, 83, 18],
+  warden: ['断缆守卫', '耐久降到 45% 后进入狂暴。看到落点或脉冲圈就先撤出范围。', 4500, 84, 25],
 };
 
 const guideKinds: AbyssEnemy[] = [...creatureKinds, 'warden'];
@@ -104,7 +104,7 @@ const guideKinds: AbyssEnemy[] = [...creatureKinds, 'warden'];
 export function AbyssFieldGuide() {
   return <View testID="abyss-field-guide" style={styles.guide}>
     <Text accessibilityRole="header" style={styles.heading}>辨认怪物</Text>
-    <Text style={styles.baseStats}>以下为基础数值。耐久随波次、人数或局长变化，移速单位为像素/秒。</Text>
+    <Text style={styles.baseStats}>以下为基础数值。普通怪耐久随进度涨到 4–6 倍、移速最多 +35%；精英与守卫主要随人数和局长放大。接触伤害随时间最高 1.5 倍，移速单位为像素/秒。</Text>
     {guideKinds.map(kind => {
       const [name, detail, hp, speed, damage] = fieldGuide[kind];
       return <View key={kind} style={styles.row}>

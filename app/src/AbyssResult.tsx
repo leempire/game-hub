@@ -38,11 +38,12 @@ export default function AbyssResult({ game, uid }: { game: AbyssSummary; uid?: n
         现有 {me.talent_award.balance} 点 · 回房间打开天赋树加点
       </Text>
     </View>}
-    {(isTeam || game.players.some(player => player.damage_dealt !== undefined || player.xp_collected !== undefined || player.rescues !== undefined)) && <>
+    {(isTeam || game.players.some(player => player.damage_dealt !== undefined || player.damage_taken !== undefined || player.xp_collected !== undefined || player.rescues !== undefined)) && <>
       <Text style={styles.section}>{isTeam ? '潜水小队' : '本局贡献'}</Text>
       {game.players.map(player => {
         const contributions = [
           player.damage_dealt === undefined ? null : `输出伤害 ${player.damage_dealt}`,
+          player.damage_taken === undefined ? null : `承受伤害 ${player.damage_taken}`,
           player.xp_collected === undefined ? null : `拾取经验 ${player.xp_collected}`,
           player.rescues === undefined ? null : `救起 ${player.rescues} 次`,
         ].filter(Boolean).join(' · ');

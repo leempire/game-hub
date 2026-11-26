@@ -10,7 +10,7 @@ import AbyssAudio from '../AbyssAudio';
 import AbyssResult from '../AbyssResult';
 import { abyssItemArt } from '../abyssItemArt';
 import {
-  abyssChangeText, abyssClock, abyssEvolutionPreview, abyssItemInfo, abyssLevelOf, abyssLowPressure, abyssNewWeaponText, abyssPassives, abyssRescue, abyssResults, abyssVibrationDuration, abyssWeapons,
+  abyssChangeText, abyssClock, abyssEvolutionBase, abyssEvolutionPreview, abyssItemInfo, abyssLevelOf, abyssLowPressure, abyssNewWeaponText, abyssPassives, abyssRescue, abyssResults, abyssVibrationDuration, abyssWeapons,
   type AbyssChoice, type AbyssPassive, type AbyssState, type AbyssWeapon, type XY,
 } from '../abyss';
 import { leaveRoom, type RoomPlayer } from '../api';
@@ -606,11 +606,16 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
                 const rank = abyssLevelOf(me, choice);
                 const changes = me.choice_changes?.[choice];
                 const repair = choice === 'repair' || choice === 'rest' ? me.repair_health?.[choice] : undefined;
-                const detail = changes?.length ? abyssChangeText(changes) : info.detail;
+                const evolvedFrom = abyssEvolutionBase(choice);
+                const detail = evolvedFrom
+                  ? `由 ${abyssWeapons[evolvedFrom].title} 进化，被动保留`
+                  : changes?.length ? abyssChangeText(changes) : info.detail;
                 const evolutions = abyssEvolutionPreview(me, choice);
-                const newWeaponStats = choice in abyssWeapons && !rank
+                const newWeaponStats = choice in abyssWeapons && !rank && !evolvedFrom
                   ? me.new_weapon_stats?.[choice as keyof typeof abyssWeapons] : undefined;
-                const suffix = info.kind === 'utility' ? '' : rank ? ` Lv.${rank} → ${rank + 1}` : ' 新';
+                const suffix = info.kind === 'utility' ? ''
+                  : evolvedFrom ? ' 进化'
+                  : rank ? ` Lv.${rank} → ${rank + 1}` : ' 新';
                 return <Pressable key={choice} testID={`abyss-choice-${choice}`} style={[styles.choice, pendingChoice === choice && styles.selectedChoice]}
                   accessibilityRole="button" onPress={() => choose(choice)} disabled={!inPlay || pendingChoice !== null}>
                   <Image testID="abyss-item-art" accessible={false} source={abyssItemArt[choice]} resizeMode="contain" style={styles.choiceArt} />
@@ -627,7 +632,7 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
                       : detail}</Text>
                     {!!newWeaponStats?.length && <Text style={styles.label}>{abyssNewWeaponText(newWeaponStats)}</Text>}
                     {!!evolutions.length && <Text style={styles.evolutionReady}>
-                      可用宝箱进化为{evolutions.join('、')}
+                      进化条件达成：{evolutions.join('、')}
                     </Text>}
                   </View>
                 </Pressable>;
@@ -666,7 +671,7 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
           vibration={vibration} onToggleVibration={toggleVibration} />
         <Pressable testID="abyss-inventory" style={[styles.plain, !!game?.choice_seconds && styles.disabled]}
           accessibilityRole="button" accessibilityLabel={readyEvolutions.length
-            ? `装备，可用宝箱进化为${readyEvolutions.join('、')}` : '装备'}
+            ? `装备，可进化为${readyEvolutions.join('、')}` : '装备'}
           disabled={!!game?.choice_seconds} onPress={showInventory}>
           <Text style={styles.text}>装备{!!readyEvolutions.length && <Text testID="abyss-evolution-ready"
             style={styles.evolutionReady}> ↑</Text>}</Text>
@@ -696,7 +701,7 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
             </View>
             <Text style={[styles.itemDetail, styles.label]}>{info.detail}</Text>
             {evolution && <Text style={[styles.itemDetail, missing ? styles.label : styles.evolutionReady]}>
-              {abyssWeapons[evolution.target].title} · {missing ? `还需 ${missing}` : '开启宝箱即可进化'}
+              {abyssWeapons[evolution.target].title} · {missing ? `还需 ${missing}` : '升级可选进化 · 宝箱直接进化'}
             </Text>}
           </View>;
         }) : <Text style={styles.label}>暂无武器</Text>}

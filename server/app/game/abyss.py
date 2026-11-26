@@ -57,6 +57,7 @@ WARDEN_IMPACT_TICKS = 8
 WARDEN_RECOVERY_TICKS = 74
 WARDEN_ENRAGED_RECOVERY_TICKS = 54
 WARDEN_HP_BY_DURATION = {1200: 1.35, 1800: 2.0}
+WARDEN_DAMAGE_AT_FULL_DURATION = 1.3
 
 # 刷怪密度：《吸血鬼幸存者》按「最低同屏数 + 补刷」维持怪潮，而不是固定每秒
 # 吐固定数量。这里用「基础预算 + 低于同屏下限时补刷 + 同屏上限」近似：玩家清得
@@ -67,6 +68,10 @@ BOSS_SPAWN = (6.0, 70, 120)
 SPAWN_TOPUP_RATE = 24.0
 SPAWN_DENSITY_PER_PLAYER = .2
 SPAWN_HARD_CAP = 320
+# 多人时玩家总输出接近线性增长，怪量与血量必须同步跟上；普通怪只小幅
+# 抬血（避免变成海绵），精英 / 守卫承担主要的人数血量补偿。
+NORMAL_HP_PER_PLAYER = .18
+BOSS_HP_PER_PLAYER = .85
 
 # 击退按 VS 的「反推一小段」实现：距离取敌人自身移速 × 武器击退 × 受击者的
 # 击退承伤倍率；精英与守卫只吃 20%。荧孢光环每次命中叠加击退承伤（VS 的大蒜）。
@@ -91,13 +96,35 @@ ENEMIES = {
     # 1.2 秒魔杖后必须同步下调，否则开场 30 秒就会被怪潮淹没。
     "drifter": (10, 56, 11), "eel": (15, 105, 10), "crab": (22, 43, 16),
     "needlefish": (8, 125, 8), "jelly": (26, 58, 19), "angler": (38, 87, 19),
-    "elite": (450, 83, 24), "warden": (1350, 84, 28),
+    "elite": (800, 83, 24), "warden": (4500, 84, 28),
 }
 
 XP_UNITS = {"warden": 30, "elite": 18, "crab": 2, "jelly": 2, "angler": 3}
-# 怪潮密度大幅提高后，接触伤害同步下调：否则「同屏 100+」等价于每秒掉 2~5 点，
-# 玩家没有发挥空间。基数 2，高威胁怪仍保留更高值。
-CONTACT_DAMAGE = {"needlefish": 1, "jelly": 3, "angler": 5, "warden": 12}
+# 深渊脉冲 / 华月对精英与守卫的固定伤害（普通怪仍是清屏级伤害）。
+PENTAGRAM_BOSS_DAMAGE = 500
+GORGEOUS_MOON_BOSS_DAMAGE = 900
+# 接触伤害按 VS 的「10–20 点/次」量级重定：旧值 1–5 配 1 秒无敌，
+# 单次最多掉 5 点，自愈膜点满就能完全抵消（真人实测「基本不掉血」）。
+# 现在单次伤害 4–25，并随时间线性上调到 1.5 倍；护甲只减伤，
+# 单次仍有 1 点保底。精英与守卫的接触伤害显著高于杂兵。
+CONTACT_DAMAGE = {
+    "drifter": 6, "eel": 7, "crab": 8, "needlefish": 4,
+    "jelly": 10, "angler": 14, "elite": 18, "warden": 25,
+}
+CONTACT_DAMAGE_END_SCALE = .5   # 对局结束时的接触伤害倍率 = 1.5 倍
+# 本作同屏怪量远高于 VS 前期（下限 12–90），受击无敌保持 1.0 秒；
+# 单次伤害已提高到 4–25，靠「单次疼」而不是「每秒挨两下」制造压力。
+HURT_INVINCIBLE_TICKS = 20
+# 普通怪血量按局长比例做三次方成长：前 1/3 几乎不抬血，后 1/3 快速变厚。
+# 旧版线性 +4/100 秒最多 +24，成型 build 始终一枪一片，怪根本摸不到人。
+# 12 分钟终点 4 倍、30 分钟终点 6 倍；多人再乘 NORMAL_HP_PER_PLAYER。
+NORMAL_HP_END_SCALE = 3.0
+NORMAL_HP_LONG_SCALE = 2.0
+# 普通怪移速也随进度上调，避免玩家靠基础移速永远放风筝。
+NORMAL_SPEED_END_SCALE = .35
+# 5 级上限后每个槽位需要的选卡次数变少，经验获取按局长重新标定，
+# 避免 12 分钟局过早把 6+6 个槽位全部点满（数值见设计文档的经验一节）。
+XP_GAIN_SCALE = .85
 WAVE_KINDS = ("drifter", "eel", "crab", "needlefish", "jelly", "angler")
 WAVE_WEIGHTS = (
     (17, 0, 0, 3, 0, 0),
@@ -144,7 +171,8 @@ def create(players, seed, duration=DEFAULT_DURATION, xp_pace=1.0, map_size="medi
             )}, "passives": {}, "cycles": {},
             "orbits": {}, "orbit_hits": {}, "choices": [],
             "talent": dict(talent),
-            "stats": dict(data.BASE_STATS), "kills": 0, "damage_dealt": 0.0, "xp_collected": 0, "rescues": 0, "last_crit_heal": -20,
+            "stats": dict(data.BASE_STATS), "kills": 0, "damage_dealt": 0.0, "damage_taken": 0.0,
+            "xp_collected": 0, "rescues": 0, "last_crit_heal": -20,
         }
         _refresh_stats(p)
         # 应急储备是「全队各自的开局打捞分」，直接加到共享打捞池。
@@ -239,6 +267,22 @@ def snapshot_interval(gs):
     return DENSE_SNAPSHOT_INTERVAL if len(gs["enemies"]) >= DENSE_SNAPSHOT_THRESHOLD else SNAPSHOT_INTERVAL
 
 
+def clamp_loadout(p):
+    """把旧存档里 6–8 级的武器、超出上限的被动压回当前上限。
+
+    8 级时代的存档直接恢复后，等级显示与 `_available_choices` 会对不上
+    （界面写 Lv.8、候选却按满级处理），所以在 `_restore_abyss` 里先夹紧。
+    """
+    for weapon, level in list((p.get("weapons") or {}).items()):
+        spec = data.WEAPONS.get(weapon)
+        if spec:
+            p["weapons"][weapon] = min(level, spec["max_level"])
+    for passive, level in list((p.get("passives") or {}).items()):
+        spec = data.PASSIVES.get(passive)
+        if spec:
+            p["passives"][passive] = min(level, spec["max_level"])
+
+
 def _refresh_stats(p):
     old_max = p.get("max_hp", data.BASE_MAX_HP)
     stats = data.player_stats(p["passives"], p.get("talent"))
@@ -275,13 +319,17 @@ def _spawn(gs, kind, player):
             break
     hp, speed, radius = ENEMIES[kind]
     if kind in ("elite", "warden"):
-        team_scale = 1 + .60 * (gs["count"] - 1)
+        team_scale = 1 + BOSS_HP_PER_PLAYER * (gs["count"] - 1)
         duration_scale = gs.get("warden_hp_scale", 1.0) if kind == "warden" else 1.0
         hp = round(hp * team_scale * duration_scale)
     else:
-        interval = 100 * gs["duration"] / DEFAULT_DURATION
-        growth = int(gs["elapsed"] * STEP // interval) if interval > 0 else 0
-        hp += 4 * min(6, growth)
+        progress = min(1.0, gs["elapsed"] * STEP / max(1.0, gs["duration"]))
+        long_span = max(0.0, (gs["duration"] - DEFAULT_DURATION)
+                        / (FULL_MILESTONE_DURATION - DEFAULT_DURATION))
+        end_scale = NORMAL_HP_END_SCALE + NORMAL_HP_LONG_SCALE * min(1.0, long_span)
+        hp = round(hp * (1 + end_scale * progress ** 3)
+                   * (1 + NORMAL_HP_PER_PLAYER * (gs["count"] - 1)))
+        speed = round(speed * (1 + NORMAL_SPEED_END_SCALE * progress))
     gs["enemies"].append({
         "id": _id(gs), "kind": kind, **best, "hp": hp, "max_hp": hp,
         "angle": 0, "speed": speed, "radius": radius,
@@ -610,7 +658,7 @@ def _fire(gs, p, weapon, level):
                            slow_ticks=stats["slow_ticks"]):
                     hits += 1
         if weapon == "soul_eater" and hits:
-            p["hp"] = min(p["max_hp"], p["hp"] + min(3.0, hits * .5))
+            p["hp"] = min(p["max_hp"], p["hp"] + min(2.0, hits * .35))
         _effect(gs, weapon, "aura", life=4, x=p["x"], y=p["y"], r=radius)
 
     elif behavior == "water":
@@ -663,7 +711,12 @@ def _fire(gs, p, weapon, level):
     elif behavior in ("pentagram", "gorgeous_moon"):
         gorgeous = behavior == "gorgeous_moon"
         for enemy in list(gs["enemies"]):
-            _damage(gs, p, enemy, stats["damage"],
+            # 清屏不应该顺手秒掉精英 / 守卫：基础伤害是 999999，直接结算
+            # 会让 11 分钟的守卫战变成一次升级选项。Boss 只吃固定伤害。
+            damage = stats["damage"]
+            if enemy["kind"] in ("elite", "warden"):
+                damage = GORGEOUS_MOON_BOSS_DAMAGE if gorgeous else PENTAGRAM_BOSS_DAMAGE
+            _damage(gs, p, enemy, damage,
                     drop_chance=1.0 if gorgeous else stats["preserve"],
                     xp_mult=2 if gorgeous else 1)
         if gorgeous:
@@ -702,7 +755,8 @@ def _fire(gs, p, weapon, level):
 
 
 def _grant_xp(gs, p, units):
-    gain = max(1, round(units * p["stats"]["growth"] * gs["growth_boost"]))
+    gain = max(1, round(units * p["stats"]["growth"] * gs["growth_boost"]
+                        * XP_GAIN_SCALE))
     gs["xp"] += gain
     p["xp_collected"] = p.get("xp_collected", 0) + gain
 
@@ -1056,7 +1110,10 @@ def _collect_caches(gs, collectors):
 
 def _upgrade_weapon(p, weapon, gs=None):
     spec = data.WEAPONS.get(weapon)
-    if not spec:
+    if not spec or spec.get("base"):
+        return False
+    # 已经进化过的武器不允许重新拿回基础版。
+    if spec["evolution"] and spec["evolution"] in p["weapons"]:
         return False
     level = p["weapons"].get(weapon)
     if level is None:
@@ -1088,24 +1145,46 @@ def _upgrade_passive(p, passive):
     return True
 
 
+def _evolution_ready(p, weapon):
+    """基础武器满 5 级、背包里有对应被动、且尚未进化。"""
+    spec = data.WEAPONS.get(weapon)
+    if not spec or not spec["evolution"]:
+        return False
+    if p["weapons"].get(weapon, 0) < spec["max_level"]:
+        return False
+    if spec["passive"] not in p["passives"]:
+        return False
+    return spec["evolution"] not in p["weapons"]
+
+
+def _available_evolutions(p):
+    return [data.WEAPONS[weapon]["evolution"]
+            for weapon in p["weapons"] if _evolution_ready(p, weapon)]
+
+
+def _evolve_weapon(p, weapon):
+    """移除满级基础武器并换成进化武器；被动保留。返回进化后的 id。"""
+    spec = data.WEAPONS[weapon]
+    evolved = spec["evolution"]
+    del p["weapons"][weapon]
+    p["orbits"].pop(weapon, None)
+    p["orbit_hits"].pop(weapon, None)
+    p["cycles"].pop(weapon, None)
+    p["weapons"][evolved] = 1
+    p["cycles"][evolved] = 0
+    return evolved
+
+
 def _try_evolve(p):
-    for weapon, level in list(p["weapons"].items()):
-        spec = data.WEAPONS.get(weapon)
-        if not spec or level < spec["max_level"]:
-            continue
-        if not spec["evolution"] or spec["passive"] not in p["passives"]:
-            continue
-        evolved = spec["evolution"]
-        if evolved in p["weapons"]:
-            continue
-        del p["weapons"][weapon]
-        p["orbits"].pop(weapon, None)
-        p["orbit_hits"].pop(weapon, None)
-        p["cycles"].pop(weapon, None)
-        p["weapons"][evolved] = 1
-        p["cycles"][evolved] = 0
-        return weapon, evolved
+    for weapon in list(p["weapons"]):
+        if _evolution_ready(p, weapon):
+            return weapon, _evolve_weapon(p, weapon)
     return None
+
+
+def _evolved_base(evolved):
+    spec = data.WEAPONS.get(evolved)
+    return spec.get("base") if spec else None
 
 
 def _chest_reward(gs, p, *, allow_evolution=True):
@@ -1164,7 +1243,8 @@ def _available_choices(p):
     news = []
     if len(p["weapons"]) < data.MAX_WEAPONS:
         news.extend(weapon for weapon in data.BASE_WEAPON_ORDER
-                    if weapon not in p["weapons"])
+                    if weapon not in p["weapons"]
+                    and data.WEAPONS[weapon]["evolution"] not in p["weapons"])
     if len(p["passives"]) < data.MAX_PASSIVES:
         news.extend(passive for passive in data.PASSIVE_ORDER
                     if passive not in p["passives"])
@@ -1173,17 +1253,24 @@ def _available_choices(p):
 
 def _choices_for(gs, p):
     upgrades, news = _available_choices(p)
+    evolutions = _available_evolutions(p)
     choices = []
+    # 进化条件一旦达成，就保证这次升级至少能看到一个进化候选；
+    # 宝箱仍然能免费进化，升级进化则要占用一次选卡机会。
+    if evolutions:
+        choices.append(gs["rng"].choice(evolutions))
     if upgrades:
         choices.append(gs["rng"].choice(upgrades))
     if news:
         choices.append(gs["rng"].choice(news))
-    pool = [item for item in (*upgrades, *news) if item not in choices]
+    pool = [item for item in (*evolutions, *upgrades, *news)
+            if item not in choices]
     gs["rng"].shuffle(pool)
     choices.extend(pool[:max(0, 3 - len(choices))])
     luck = p["stats"]["luck"]
     if len(choices) >= 3 and luck > 1 and gs["rng"].random() < 1 - 1 / luck:
-        extra = [item for item in (*upgrades, *news) if item not in choices]
+        extra = [item for item in (*evolutions, *upgrades, *news)
+                 if item not in choices]
         if extra:
             choices.append(gs["rng"].choice(extra))
     fillers = ("repair", "salvage") if 0 < p["hp"] < p["max_hp"] else ("salvage",)
@@ -1225,7 +1312,12 @@ def pick(gs, uid, level, choice):
     if not p or type(level) is not int or level != gs["level"] or choice not in p["choices"]:
         return False
     applied = False
-    if choice in data.WEAPONS:
+    if choice in data.EVOLVED_WEAPONS:
+        base = _evolved_base(choice)
+        if base and _evolution_ready(p, base):
+            _evolve_weapon(p, base)
+            applied = True
+    elif choice in data.WEAPONS:
         applied = _upgrade_weapon(p, choice, gs)
     elif choice in data.PASSIVES:
         applied = _upgrade_passive(p, choice)
@@ -1246,9 +1338,11 @@ def _hurt_diver(gs, p, damage):
     if not p["hp"] or p["invincible"] > gs["elapsed"]:
         return
     reduction = min(data.MAX_ARMOR_REDUCTION, p["stats"]["armor"])
-    p["hp"] = max(0, p["hp"] - max(data.MIN_HIT_DAMAGE,
-                                   damage * (1.0 - reduction)))
-    p["invincible"] = gs["elapsed"] + 20
+    taken = max(data.MIN_HIT_DAMAGE, damage * (1.0 - reduction))
+    hp_before = p["hp"]
+    p["hp"] = max(0, hp_before - taken)
+    p["damage_taken"] = p.get("damage_taken", 0.0) + min(taken, hp_before)
+    p["invincible"] = gs["elapsed"] + HURT_INVINCIBLE_TICKS
     if not p["hp"]:
         stop(gs, p["id"])
         p.update(down=gs["elapsed"] + 300, rescue=0)
@@ -1262,6 +1356,8 @@ def _hurt_diver(gs, p, damage):
 def _contact_damage(gs, alive):
     enemies = gs["enemies"]
     elapsed = gs["elapsed"]
+    progress = min(1.0, elapsed / max(1.0, gs["duration"]))
+    scale = 1.0 + CONTACT_DAMAGE_END_SCALE * progress
     for p in alive:
         if not p["hp"] or p["invincible"] > elapsed:
             continue
@@ -1273,12 +1369,20 @@ def _contact_damage(gs, alive):
                 continue
             dy = enemy["y"] - y
             if dx * dx + dy * dy < reach * reach:
-                _hurt_diver(gs, p, CONTACT_DAMAGE.get(enemy["kind"], 2))
+                base = CONTACT_DAMAGE.get(enemy["kind"], 6)
+                _hurt_diver(gs, p, base * scale)
                 break
 
 
 def _warden_enraged(warden):
     return 0 < warden["hp"] <= .45 * warden["max_hp"]
+
+
+def _warden_damage_scale(gs):
+    """长局玩家会点满更多槽位，守卫伤害也按局长线性上调到 1.3 倍。"""
+    span = max(1.0, FULL_MILESTONE_DURATION - DEFAULT_DURATION)
+    return 1.0 + (WARDEN_DAMAGE_AT_FULL_DURATION - 1.0) * max(
+        0.0, min(1.0, (gs["duration"] - DEFAULT_DURATION) / span))
 
 
 def _step_warden(gs, warden, alive):
@@ -1302,14 +1406,15 @@ def _step_warden(gs, warden, alive):
     if kind == "pulse":
         warning = 28
         zones = [[warden["x"], warden["y"], 180 if enraged else 160]]
-        damage = 24 if enraged else 20
+        damage = 40 if enraged else 32
     else:
         warning = 22
         zones = []
         for p in alive:
             if not any(_gap_xy(p, x, y) <= 28 for x, y, _ in zones):
                 zones.append([p["x"], p["y"], 105 if enraged else 90])
-        damage = 20 if enraged else 16
+        damage = 32 if enraged else 26
+    damage *= _warden_damage_scale(gs)
 
     resolve_at = elapsed + warning
     warden["attack"] = {
@@ -1496,7 +1601,14 @@ def advance(gs, *, online_ids=None):
 def _choice_changes(player):
     changes = {}
     for choice in player["choices"]:
-        if choice in player["weapons"]:
+        if choice in data.EVOLVED_WEAPONS:
+            base = data.WEAPONS[choice]["base"]
+            rank = player["weapons"].get(base, 0)
+            before = data.weapon_stats(base, rank, player["stats"])
+            after = data.weapon_stats(choice, 1, player["stats"])
+            keys = ("damage", "amount", "cooldown", "area", "pierce", "duration",
+                    "speed", "interval", "knockback", "crit", "preserve")
+        elif choice in player["weapons"]:
             rank = player["weapons"][choice]
             before = data.weapon_stats(choice, rank, player["stats"])
             after = data.weapon_stats(choice, rank + 1, player["stats"])
@@ -1522,7 +1634,8 @@ def _choice_changes(player):
 def _new_weapon_stats(player):
     previews = {}
     for choice in player["choices"]:
-        if choice not in data.WEAPONS or choice in player["weapons"]:
+        if (choice not in data.WEAPONS or choice in data.EVOLVED_WEAPONS
+                or choice in player["weapons"]):
             continue
         stats = data.weapon_stats(choice, 1, player["stats"])
         keys = ("cooldown",) if choice == "pentagram" else ("damage", "cooldown")
@@ -1546,6 +1659,7 @@ def record_summary(gs):
             {**{key: p[key] for key in ("id", "name", "kills", "hp", "out")},
              **{key: p[key] for key in ("xp_collected", "rescues") if key in p},
              **({"damage_dealt": round(p["damage_dealt"], 1)} if "damage_dealt" in p else {}),
+             **({"damage_taken": round(p["damage_taken"], 1)} if "damage_taken" in p else {}),
              "weapons": dict(p["weapons"]), "passives": dict(p["passives"])}
             for p in gs["players"].values()
         ],
@@ -1609,6 +1723,7 @@ def snapshot(gs):
             }} if p["hp"] and any(choice in REPAIR_AMOUNTS for choice in p["choices"]) else {}),
             "evolution_requirements": _evolution_requirements(p),
             **({"damage_dealt": round(p["damage_dealt"], 1)} if "damage_dealt" in p else {}),
+            **({"damage_taken": round(p["damage_taken"], 1)} if "damage_taken" in p else {}),
             **({"talent_award": p["talent_award"]} if p.get("talent_award") else {}),
             "kills": p["kills"], "xp_collected": p.get("xp_collected", 0), "rescues": p.get("rescues", 0),
             "move_speed": round(data.PLAYER_SPEED * p["stats"]["move_speed"]),
