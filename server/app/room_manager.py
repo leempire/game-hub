@@ -18,7 +18,7 @@ from app import room_timing
 from app.competition_rules import challenge_seed, challenge_info
 from app.game import spider, uttt, uttt_ai, xiangqi as xiangqi_engine
 from app.game import stasis as stasis_engine
-from app.game import abyss, doudizhu, stasis_ai, undercover
+from app.game import abyss, doudizhu, guandan, stasis_ai, undercover
 
 # Room idle TTL in seconds. Sweeper deletes rooms exceeding this.
 # Monkeypatch this constant in tests to avoid real 30-minute waits.
@@ -387,6 +387,8 @@ def restore_rooms() -> int:
             _notify_game_end(room)
         if room["game"] == "doudizhu" and (room.get("game_state") or {}).get("finished"):
             _notify_game_end(room)
+        if room["game"] == "guandan" and (room.get("game_state") or {}).get("phase") == "finished":
+            _notify_game_end(room)
         restored += 1
     return restored
 
@@ -486,6 +488,10 @@ def _next_bot_id() -> int:
     return _bot_id_counter
 
 
+def _bot_nickname(seq: int) -> str:
+    return "人机·棋手" if seq == 1 else f"人机·棋手{seq}"
+
+
 def _make_bot_player(code: str, seq: int = 1) -> dict:
     """Create a synthetic bot player dict.
 
@@ -495,7 +501,7 @@ def _make_bot_player(code: str, seq: int = 1) -> dict:
     return {
         "id": bot_id,
         "username": f"bot_{code}",
-        "nickname": "人机·棋手" if seq <= 1 else f"人机·棋手{seq}",
+        "nickname": _bot_nickname(seq),
         "ready": True,
         "is_host": False,
         "connected": True,
@@ -519,13 +525,14 @@ def create_room(
 ) -> dict:
     """Create a new room."""
     if game not in ("gomoku", "reversi", "minesweeper", "battleship", "dots", "ludo",
-                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider", "uttt", "abyss", "undercover", "doudizhu"):
+                    "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider", "uttt",
+                    "abyss", "undercover", "doudizhu", "guandan"):
         raise ValueError("不支持的游戏类型")
     code = _generate_code()
     room_name = name or f"{user['username']}的房间"
     # 深空休眠 6 人（12 间舱室 / 12 个座位），其余多人游戏 4 人上限
     max_players = {"undercover": undercover.MAX_PLAYERS, "stasis": 6, "doudizhu": 3}.get(
-        game, 4 if game in ("minesweeper", "ludo", "2048", "tetris", "uno", "spider", "abyss") else 2)
+        game, 4 if game in ("minesweeper", "ludo", "2048", "tetris", "uno", "spider", "abyss", "guandan") else 2)
     room = {
         "code": code,
         "name": room_name,
@@ -625,13 +632,14 @@ def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
     if room["status"] == "playing":
         raise ValueError("只能在等待大厅添加人机")
     if room["game"] not in ("gomoku", "reversi", "battleship", "dots", "ludo", "xiangqi",
-                            "connect4", "uno", "stasis", "luzhanqi", "uttt", "doudizhu"):
+                            "connect4", "uno", "stasis", "luzhanqi", "uttt", "doudizhu", "guandan"):
         raise ValueError("该游戏不支持人机")
     # 满员即止：双人游戏 max_players=2，加一个 bot 后自然无法再加；
     # 飞行棋/UNO max_players=4，可连加 3 个凑满 4 人局
     if len(room["players"]) >= room["max_players"]:
         raise ValueError("房间已满")
-    seq = sum(1 for p in room["players"] if p.get("is_bot")) + 1
+    bot_names = {p.get("nickname") for p in room["players"] if p.get("is_bot")}
+    seq = next(i for i in range(1, room["max_players"] + 1) if _bot_nickname(i) not in bot_names)
     bot = _make_bot_player(code, seq)
     bot["ai_difficulty"] = normalize_difficulty(difficulty)
     room["players"].append(bot)
@@ -803,6 +811,12 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
             return _leave_undercover(room, user_id, "leave")
         if room["game"] == "doudizhu":
             finish_doudizhu(room, user_id, "leave")
+            room["players"] = [p for p in room["players"] if p["id"] != user_id]
+            _transfer_host(room)
+            _maybe_destroy_or_mark(room)
+            return ("game_over", room)
+        if room["game"] == "guandan":
+            finish_guandan(room, user_id, "leave")
             room["players"] = [p for p in room["players"] if p["id"] != user_id]
             _transfer_host(room)
             _maybe_destroy_or_mark(room)
@@ -979,6 +993,8 @@ def _start_game_engine(code: str, user_id: int, *, prepared_spider: dict | None 
         return _start_uno(room)
     if room["game"] == "doudizhu":
         return _start_doudizhu(room)
+    if room["game"] == "guandan":
+        return _start_guandan(room)
     if room["game"] == "undercover":
         return _start_undercover(room)
     if room["game"] == "abyss":
@@ -1454,6 +1470,61 @@ def doudizhu_action(room: dict, user_id: int, data: dict) -> list[str] | None:
 def finish_doudizhu(room: dict, user_id: int, reason: str):
     doudizhu.depart(room["game_state"], user_id, reason)
     _commit_doudizhu(room)
+
+
+def _start_guandan(room: dict) -> dict:
+    players = room["players"]
+    if len(players) != 4:
+        raise ValueError("掼蛋需要 4 名玩家")
+    if any(not p["connected"] for p in players if not p.get("is_bot")):
+        raise ValueError("请等所有真人玩家上线后再开始")
+    gs = guandan.create_game([p["id"] for p in players], uuid4().hex, random.Random())
+    room["_guandan_roster"] = [p.copy() for p in players]
+    room.update(status="playing", game_state=gs, game_started_at=_now_iso(), empty_since=None)
+    return gs
+
+
+def _commit_guandan(room: dict):
+    finished = room["game_state"]["phase"] == "finished"
+    if finished:
+        _back_to_lobby(room)
+        _cancel_all_dc_tasks(room["code"])
+    _touch_activity(room)
+    if finished:
+        _notify_game_end(room)
+
+
+def guandan_action(room: dict, user_id: int, data: dict) -> dict | None:
+    if not user_in_game(room, user_id):
+        raise ValueError("当前没有进行中的掼蛋对局")
+    gs = room["game_state"]
+    action = data.get("action")
+    revision = data.get("revision")
+    deal = data.get("deal")
+    if (gs["match_id"] != data.get("match_id") or type(deal) is not int or deal != gs["deal"]
+            or type(revision) is not int or not 0 <= revision <= gs["revision"]):
+        raise ValueError("牌局已更新，请重新操作")
+    # 双贡可同时提交，另一席的待公开选择不会改变本席的合法还牌。
+    if revision != gs["revision"] and not (action == "return" and gs["phase"] == "returning"):
+        raise ValueError("牌局已更新，请重新操作")
+    if action == "hint":
+        return guandan.hint(gs, user_id)
+    if action == "preview":
+        return guandan.preview(gs, user_id, data.get("cards"))
+    if action == "next":
+        if user_id != room["host_id"]:
+            raise ValueError("请等房主开始下一副")
+        if any(not p["connected"] for p in room["players"] if not p.get("is_bot")):
+            raise ValueError("请等所有真人玩家上线后再开始下一副")
+        data = {"rng": random.Random()}
+    guandan.apply(gs, user_id, action, data)
+    _commit_guandan(room)
+    return None
+
+
+def finish_guandan(room: dict, user_id: int, reason: str):
+    guandan.depart(room["game_state"], user_id, reason)
+    _commit_guandan(room)
 
 
 def _start_undercover(room: dict) -> dict:
@@ -3667,7 +3738,7 @@ def handle_player_reconnect(code: str, user_id: int):
                     _commit_undercover(room, phase_id)
                     return True
                 room_timing.reset_deadline(room)
-            if room["game"] == "doudizhu" and room["status"] == "playing":
+            if room["game"] in ("doudizhu", "guandan") and room["status"] == "playing":
                 for other in room["players"]:
                     if not other.get("is_bot") and not other["connected"] and (code, other["id"]) not in _dc_tasks:
                         _start_dc_timer(code, other["id"], asyncio.get_running_loop())
@@ -3688,7 +3759,7 @@ def _start_dc_timer(code: str, user_id: int, loop: asyncio.AbstractEventLoop):
     async def _timeout():
         try:
             await asyncio.sleep(_disconnect_timeout)
-            if room and room["game"] in ("undercover", "doudizhu") and (
+            if room and room["game"] in ("undercover", "doudizhu", "guandan") and (
                 _rooms.get(code) is not room or room.get("game_state") is not state
                 or _dc_tasks.get(key) is not asyncio.current_task()
             ):
@@ -3719,10 +3790,11 @@ def _on_dc_timeout(code: str, user_id: int):
     room = _rooms.get(code)
     if not room or room["status"] != "playing" or room["game"] == "spider":
         return
-    if room["game"] == "doudizhu":
+    if room["game"] in ("doudizhu", "guandan"):
         if not any(p["id"] == user_id and not p["connected"] for p in room["players"]):
             return
-        finish_doudizhu(room, user_id, "disconnect")
+        finish = finish_guandan if room["game"] == "guandan" else finish_doudizhu
+        finish(room, user_id, "disconnect")
         _maybe_destroy_or_mark(room)
         if _dc_timeout_callback:
             try:
@@ -3908,7 +3980,7 @@ def schedule_bot_turn(code: str, bot_id: int):
         import random as _rng
         try:
             await asyncio.sleep(_rng.uniform(0.8, 1.2))
-            if room and room["game"] == "doudizhu" and (
+            if room and room["game"] in ("doudizhu", "guandan") and (
                 _rooms.get(code) is not room or room.get("game_state") is not state
             ):
                 return

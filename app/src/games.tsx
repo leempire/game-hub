@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon,
   Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon,
-  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon,
+  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon,
 } from './icons';
 
 /**
@@ -23,7 +23,8 @@ import {
 /** 服务端的 `game` 值。帮助系统 `GAME_HELP` 也拿它当键（少一个游戏会编译不过）。 */
 export type GameKey =
   | 'gomoku' | 'minesweeper' | 'reversi' | 'battleship' | 'dots' | 'ludo'
-  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt' | 'abyss' | 'undercover' | 'doudizhu';
+  | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt' | 'abyss'
+  | 'undercover' | 'doudizhu' | 'guandan';
 
 export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop' | 'single';
 
@@ -78,6 +79,8 @@ export const GAMES: GameEntry[] = [
     badge: '2–4 人 · 轮流行动', category: 'table', ionicon: 'albums', Icon: UnoIcon },
   { key: 'doudizhu', title: '斗地主', short: '斗地主', desc: '叫分定地主，两名农民联手争先出完手牌',
     badge: '3 人 · 轮流出牌', category: 'table', ionicon: 'layers-outline', Icon: DoudizhuIcon },
+  { key: 'guandan', title: '掼蛋', short: '掼蛋', desc: '四人两副牌，和对家配合升级过 A',
+    badge: '4 人 · 组队出牌', category: 'table', ionicon: 'copy-outline', Icon: GuandanIcon },
   { key: 'ludo', title: '飞行棋', short: '飞行棋', desc: '掷骰起飞，撞敌回基地抢先终点',
     badge: '2–4 人 · 对战', category: 'table', ionicon: 'airplane', Icon: LudoIcon },
   { key: 'undercover', title: '谁是卧底', short: '谁是卧底', desc: '偷偷看词，轮流给线索，投票找卧底',

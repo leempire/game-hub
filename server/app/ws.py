@@ -40,7 +40,7 @@ from app.game.connect4 import (
     COLS as C4_COLS, ROWS as C4_ROWS,
     BLACK as C4_BLACK, WHITE as C4_WHITE,
 )
-from app.game import abyss, doudizhu, doudizhu_ai, undercover
+from app.game import abyss, doudizhu, doudizhu_ai, guandan, guandan_ai, undercover
 from app.game import stasis as stasis_engine
 from app.game import (battleship_ai, gomoku_ai, reversi_ai, dots_ai, ludo_ai, xiangqi_ai,
                  connect4_ai, uno_ai, luzhanqi_ai)
@@ -66,6 +66,10 @@ def _register_dc_timeout_callback():
         if room and room["game"] == "doudizhu":
             if timeout_event and room["game_state"] is timeout_event["game_state"]:
                 _send_doudizhu_update(room)
+            return
+        if room and room["game"] == "guandan":
+            if timeout_event and room["game_state"] is timeout_event["game_state"]:
+                _send_guandan_update(room)
             return
         if room and room["game"] == "2048":
             if timeout_event is None:
@@ -129,7 +133,7 @@ async def ws_room(websocket: WebSocket, code: str):
         return
     await websocket.accept()
     is_undercover = room["game"] == "undercover"
-    private_round = is_undercover or room["game"] == "doudizhu"
+    private_round = is_undercover or room["game"] in ("doudizhu", "guandan")
     if private_round and (rm.get_room(code) is not room
                           or not any(p["id"] == user_id for p in room["players"])):
         await websocket.close(code=4003, reason="你不在房间中")
@@ -149,6 +153,13 @@ async def ws_room(websocket: WebSocket, code: str):
             _stasis_enqueue(websocket, _build_sync(room, user_id))
             if was_paused and (rm.room_timing.undercover_online(room) or room["status"] == "waiting"):
                 _send_undercover_update(room, exclude={user_id})
+        elif room["game"] == "guandan":
+            if not reconnected:
+                await websocket.close(code=4003, reason="你不在房间中")
+                return
+            _stasis_enqueue(websocket, _build_sync(room, user_id))
+            if room["status"] == "playing":
+                _maybe_schedule_bot_turn(code, room, room["game_state"])
         else:
             await websocket.send_json(_build_sync(room, user_id))
             if room["game"] == "doudizhu" and room["status"] == "playing":
@@ -249,6 +260,13 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
         return
     if msg_type == "doudizhu_action":
         await _handle_doudizhu_action(code, room, user_id, data)
+        return
+    if msg_type == "guandan_action":
+        await _handle_guandan_action(code, room, user_id, data)
+        return
+    if room["game"] == "guandan" and msg_type not in (
+        "ping", "ready", "unready", "start", "add_bot", "remove_bot", "swap_request", "swap_respond", "surrender", "leave",
+    ):
         return
     if room["game"] == "doudizhu" and msg_type not in (
         "ping", "ready", "unready", "start", "add_bot", "remove_bot", "room_setting",
@@ -471,6 +489,9 @@ async def _handle_start(code: str, user_id: int):
         return
     if room["game"] == "doudizhu":
         _send_doudizhu_update(room, kind="game_start")
+        return
+    if room["game"] == "guandan":
+        _send_guandan_update(room, kind="game_start")
         return
     if room["game"] == "undercover":
         _send_undercover_update(room, kind="game_start")
@@ -898,6 +919,11 @@ async def _handle_surrender(code: str, user_id: int):
             rm.finish_doudizhu(room, user_id, "surrender")
             _send_doudizhu_update(room)
         return
+    if room["game"] == "guandan":
+        if rm.user_in_game(room, user_id):
+            rm.finish_guandan(room, user_id, "surrender")
+            _send_guandan_update(room)
+        return
     if room["game"] == "undercover":
         if room["status"] == "playing":
             await _handle_leave(code, user_id)
@@ -1033,7 +1059,7 @@ async def _handle_leave(code: str, user_id: int):
     if ws is not None and conns.get(user_id) is ws:
         conns.pop(user_id)
         try:
-            if room["game"] in ("undercover", "doudizhu") and (tail := _pending_send(ws)) is not None:
+            if room["game"] in ("undercover", "doudizhu", "guandan") and (tail := _pending_send(ws)) is not None:
                 await tail
             await ws.close()
         except Exception:
@@ -1044,6 +1070,9 @@ async def _broadcast_leave(code: str, user_id: int, action: str,
                            updated_room: dict | None, game_state: dict | None):
     if action == "game_over" and updated_room and updated_room["game"] == "doudizhu":
         _send_doudizhu_update(updated_room)
+        return
+    if action == "game_over" and updated_room and updated_room["game"] == "guandan":
+        _send_guandan_update(updated_room)
         return
     if updated_room and updated_room["game"] == "undercover":
         if action == "game_over" or updated_room["status"] == "playing":
@@ -1140,7 +1169,7 @@ async def _broadcast(code: str, message: dict, exclude: set[int] | None = None):
     conns = _connections.get(code, {})
     room = rm.get_room(code)
     exclude = exclude or set()
-    if room and room["game"] == "undercover":
+    if room and room["game"] in ("undercover", "guandan"):
         for p in room["players"]:
             uid = p["id"]
             if uid not in exclude and uid in conns:
@@ -1205,6 +1234,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = uno_game_to_sync(room["game_state"], user_id)
         elif room["game"] == "doudizhu":
             game_info = doudizhu.view_for(room["game_state"], user_id)
+        elif room["game"] == "guandan":
+            game_info = guandan.view_for(room["game_state"], user_id)
         elif room["game"] == "undercover":
             game_info = _undercover_view(room, user_id)
         elif room["game"] == "abyss":
@@ -1217,7 +1248,7 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = lzq.game_to_sync(room["game_state"], user_id)
         else:
             game_info = _game_state_for_sync(room["game_state"], user_id)
-    if game_info is not None and room["game"] != "undercover":
+    if game_info is not None and room["game"] not in ("undercover", "guandan"):
         game_info = _timed_view(room, user_id, game_info)
     if game_info is not None and room.get("challenge_date"):
         game_info["challenge"] = rm.challenge_info(room)
@@ -1234,6 +1265,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
            and (result := _undercover_result(room, user_id)) is not None else {}),
         **({"doudizhu_result": result} if room["game"] == "doudizhu"
            and (result := _doudizhu_result(room.get("game_state"), user_id)) is not None else {}),
+        **({"guandan_result": result} if room["game"] == "guandan"
+           and (result := _guandan_result(room.get("game_state"), user_id)) is not None else {}),
     }
 
 
@@ -1276,6 +1309,54 @@ async def _handle_doudizhu_action(code: str, room: dict, user_id: int, data: dic
                                       "match_id": data["match_id"], "revision": data["revision"]})
     else:
         _send_doudizhu_update(room)
+
+
+def _guandan_result(gs: dict | None, user_id: int) -> dict | None:
+    if not gs or gs["phase"] != "finished" or user_id not in gs["players"]:
+        return None
+    return {"type": "game_over", "game": "guandan", "match_id": gs["match_id"],
+            "summary": guandan.snapshot(gs)}
+
+
+def _send_guandan_update(room: dict, kind: str = "guandan_state"):
+    gs = room["game_state"]
+    finished = gs["phase"] == "finished"
+    lobby = rm.room_to_dict(room) if finished or kind == "game_start" else None
+    for uid, connection in list(_connections.get(room["code"], {}).items()):
+        if finished:
+            if result := _guandan_result(gs, uid):
+                _stasis_enqueue(connection, result)
+            _stasis_enqueue(connection, {"type": "lobby", "room": lobby})
+        elif uid in gs["players"]:
+            message = {"type": kind, "game": guandan.view_for(gs, uid)}
+            if lobby is not None:
+                message["room"] = lobby
+            _stasis_enqueue(connection, message)
+    if room["status"] == "playing":
+        _maybe_schedule_bot_turn(room["code"], room, gs)
+
+
+async def _handle_guandan_action(code: str, room: dict, user_id: int, data: dict):
+    if room["game"] != "guandan":
+        await _send_error(code, user_id, "当前房间不是掼蛋")
+        return
+    action = data.get("action")
+    version = {key: data.get(key) for key in ("match_id", "revision", "deal")}
+    reading = action in ("hint", "preview")
+    try:
+        combo = rm.guandan_action(room, user_id, data)
+    except ValueError as error:
+        if not reading:
+            await _send_to(code, user_id, {"type": "error", "game": "guandan", **version, "message": str(error)})
+            return
+        message = {"combo": None, "message": str(error)}
+    else:
+        if not reading:
+            _send_guandan_update(room)
+            return
+        message = {"combo": combo}
+    await _send_to(code, user_id, {"type": f"guandan_{action}", **version,
+                                  "request_id": data.get("request_id"), **message})
 
 
 def _undercover_view(room: dict, user_id: int) -> dict:
@@ -2367,6 +2448,17 @@ def _schedule_battleship_bots(code: str, room: dict, gs: dict):
             rm.schedule_bot_placement(code, pid)
 
 
+def _guandan_bot_actor(room: dict, gs: dict) -> int | None:
+    if not rm._has_human_online(room):
+        return None
+    if gs["phase"] == "playing" and _is_bot(room, gs["current_id"]):
+        return gs["current_id"]
+    if gs["phase"] == "returning":
+        return next((pair["to_id"] for pair in gs["exchange"]["pairs"]
+                     if not pair["submitted"] and _is_bot(room, pair["to_id"])), None)
+    return None
+
+
 def _maybe_schedule_bot_turn(code: str, room: dict, gs: dict):
     """If it's a bot's turn, schedule the AI move."""
     if room["game"] == "battleship":
@@ -2404,6 +2496,8 @@ def _maybe_schedule_bot_turn(code: str, room: dict, gs: dict):
         uid = gs["current_id"]
         if uid is not None and _is_bot(room, uid) and rm._has_human_online(room):
             rm.schedule_bot_turn(code, uid)
+    elif room["game"] == "guandan" and (uid := _guandan_bot_actor(room, gs)) is not None:
+        rm.schedule_bot_turn(code, uid)
 
 
 # ── Bot AI callbacks ─────────────────────────────────────────
@@ -2443,6 +2537,13 @@ async def _bot_do_turn(code: str, bot_id: int):
         await _handle_doudizhu_action(code, room, bot_id, {
             **action, "match_id": view["match_id"], "revision": view["revision"],
         })
+    elif room["game"] == "guandan" and bot_id == _guandan_bot_actor(room, gs):
+        view = guandan.view_for(gs, bot_id)
+        action = guandan_ai.decide(view, bot_id, _bot_difficulty(room, bot_id))
+        if action is not None:
+            await _handle_guandan_action(code, room, bot_id, {
+                **action, "match_id": view["match_id"], "revision": view["revision"], "deal": view["deal"],
+            })
 
 
 def _bot_search_current(code: str, room: dict, gs: dict, next_player, ply: int) -> bool:
@@ -3066,7 +3167,7 @@ async def reschedule_after_restore():
                 for p in room["players"]:
                     if not p["connected"] and rm.user_in_game(room, p["id"]):
                         rm._start_dc_timer(room["code"], p["id"], asyncio.get_running_loop())
-            elif room["game"] == "doudizhu":
+            elif room["game"] in ("doudizhu", "guandan"):
                 continue  # The first reconnect resumes disconnect grace for the other seats.
             elif room["game"] == "battleship" and gs.get("phase") == "placing":
                 for pid in gs["player_colors"]:
@@ -3108,7 +3209,7 @@ def _broadcast_lobby_after_game_end(room: dict):
     callback preserves the old lobby-only notification while reading the final
     membership, rather than capturing stale room_to_dict data during the save.
     """
-    if room["game"] in ("undercover", "doudizhu"):
+    if room["game"] in ("undercover", "doudizhu", "guandan"):
         return  # The result and lobby are enqueued together for each recipient.
     room["_lobby_after_game_over"] = True
     try:

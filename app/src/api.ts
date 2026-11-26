@@ -437,11 +437,11 @@ export interface UtttSnapshot {
 
 export type AbyssSnapshot = { game: 'abyss' } & import('./abyss').AbyssSummary;
 
-export type GameSnapshot = AbyssSnapshot | GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot | import('./undercover').UndercoverSnapshot | (import('./doudizhu').DoudizhuSnapshot & { game: 'doudizhu' });
+export type GameSnapshot = AbyssSnapshot | GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot | import('./undercover').UndercoverSnapshot | (import('./doudizhu').DoudizhuSnapshot & { game: 'doudizhu' }) | (import('./guandan').GuandanSnapshot & { game: 'guandan' });
 
 export interface GameRecord {
   id: number;
-  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis' | 'uttt' | 'abyss' | 'undercover' | 'doudizhu';
+  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis' | 'uttt' | 'abyss' | 'undercover' | 'doudizhu' | 'guandan';
   room_code: string;
   players: HistoryPlayer[];
   results: HistoryResult[];

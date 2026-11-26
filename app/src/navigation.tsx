@@ -27,6 +27,7 @@ import UltimateTicTacToeScreen from './screens/UltimateTicTacToeScreen';
 import TetrisScreen from './screens/TetrisScreen';
 import UnoScreen from './screens/UnoScreen';
 import DoudizhuScreen from './screens/DoudizhuScreen';
+import GuandanScreen from './screens/GuandanScreen';
 import UndercoverScreen from './screens/UndercoverScreen';
 import StasisScreen from './screens/StasisScreen';
 import AbyssScreen from './screens/AbyssScreen';
@@ -66,6 +67,7 @@ export type RootStackParamList = {
   Tetris: { code: string };
   Uno: { code: string };
   Doudizhu: { code: string };
+  Guandan: { code: string };
   Undercover: { code: string };
   Stasis: { code: string };
   Abyss: { code: string };
@@ -308,6 +310,8 @@ function RoomScreenWrapper({ route, navigation }: { route: any; navigation: any 
           navigation.navigate('Uno', { code: c });
         } else if (game === 'doudizhu') {
           navigation.navigate('Doudizhu', { code: c });
+        } else if (game === 'guandan') {
+          navigation.navigate('Guandan', { code: c });
         } else if (game === 'undercover') {
           navigation.navigate('Undercover', { code: c });
         } else if (game === 'abyss') {
@@ -401,6 +405,10 @@ function UnoScreenWrapper({ route, navigation }: { route: any; navigation: any }
 
 function DoudizhuScreenWrapper({ route }: { route: { params: RootStackParamList['Doudizhu'] } }) {
   return <DoudizhuScreen key={route.params.code} code={route.params.code} />;
+}
+
+function GuandanScreenWrapper({ route }: { route: { params: RootStackParamList['Guandan'] } }) {
+  return <GuandanScreen key={route.params.code} code={route.params.code} />;
 }
 
 function UndercoverScreenWrapper({ route }: { route: { params: RootStackParamList['Undercover'] } }) {
@@ -600,6 +608,11 @@ export default function AppNavigation() {
             name="Doudizhu"
             component={DoudizhuScreenWrapper}
             options={{ orientation: 'default', title: gameTitle('doudizhu') }}
+          />
+          <Stack.Screen
+            name="Guandan"
+            component={GuandanScreenWrapper}
+            options={{ orientation: 'default', title: gameTitle('guandan') }}
           />
           <Stack.Screen
             name="Undercover"

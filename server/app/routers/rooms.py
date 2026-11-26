@@ -81,7 +81,7 @@ async def join_room(
             raise HTTPException(409, msg)
         raise HTTPException(409, msg)
     # Mark player connected if reconnecting
-    if room["game"] != "undercover":
+    if room["game"] not in ("undercover", "guandan"):
         rm.handle_player_reconnect(code, user["id"])
     return rm.room_to_dict(room)
 
@@ -93,7 +93,7 @@ async def leave_room(code: str, background_tasks: BackgroundTasks, user_id: int 
         return {"ok": True}
     if not any(p["id"] == user_id for p in room["players"]):
         raise HTTPException(403, "你不在房间中")
-    if room["game"] in ("uttt", "abyss", "undercover", "doudizhu"):
+    if room["game"] in ("uttt", "abyss", "undercover", "doudizhu", "guandan"):
         from app.ws import _handle_leave
         await _handle_leave(code, user_id)
         return {"ok": True}

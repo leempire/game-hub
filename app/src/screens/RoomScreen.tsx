@@ -303,13 +303,13 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const isUno = room.game === 'uno';
   const isStasis = room.game === 'stasis';
   const isUndercover = room.game === 'undercover';
-  const needsEveryoneOnline = isUndercover || room.game === 'doudizhu';
+  const needsEveryoneOnline = isUndercover || room.game === 'doudizhu' || room.game === 'guandan';
   // **房间级设置**（v1.15）：扫雷难度 / 军棋玩法 / 深空休眠地图 / 海战棋棋盘 /
   // UNO 档位与房规全部收进这一份结构，界面只按 `kind` 通用渲染 —— 客户端不认识
   // 任何 `key` 的语义，一行规则都不写。没有可调项的游戏（五子棋等）服务端不下发它。
   const settings = room.settings ?? [];
   // 深空休眠支持人机（stasis_ai.py 做人机队友，由 tick 循环按 1 秒间隔驱动，不是回合制调度）
-  const supportsBots = room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi' || room.game === 'uttt' || room.game === 'doudizhu';
+  const supportsBots = room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi' || room.game === 'uttt' || room.game === 'doudizhu' || room.game === 'guandan';
   // 房间只有两种状态：非游戏中即大厅（对局结束的房间回到等待态，可续开）
   const isLobbyStatus = room.status !== 'playing';
   // 谁是卧底要求所有座位在线才能开局，等待时也需要显示离线成员。

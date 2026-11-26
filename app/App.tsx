@@ -36,6 +36,7 @@ const LINKING = {
       Uno: 'uno/:code',
       Undercover: 'undercover/:code',
       Doudizhu: 'doudizhu/:code',
+      Guandan: 'guandan/:code',
       Stasis: 'stasis/:code',
       Abyss: 'abyss/:code',
       History: 'history',

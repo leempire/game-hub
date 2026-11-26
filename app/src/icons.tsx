@@ -443,6 +443,19 @@ export function DoudizhuIcon({ size = 44 }: { size?: number }) {
   </Svg>;
 }
 
+export function GuandanIcon({ size = 44 }: { size?: number }) {
+  return <Svg width={size} height={size} viewBox="0 0 48 48" aria-hidden>
+    <Rect x={5} y={8} width={23} height={32} rx={4} fill={colors.card} stroke={colors.text} strokeWidth={2}
+      transform="rotate(-13 16.5 24)" />
+    <Path d="M14 15 L19 21 L14 27 L9 21 Z" fill={colors.text} transform="rotate(-13 16.5 24)" />
+    <G transform="rotate(11 30.5 24)">
+      <Rect x={19} y={8} width={23} height={32} rx={4} fill={colors.card} stroke={colors.text} strokeWidth={2} />
+      <Path d="M31 31 C26 27 23 24 23 21 C23 16 29 15 31 19 C34 15 39 16 39 21 C39 24 36 27 31 31 Z"
+        fill={colors.danger} />
+    </G>
+  </Svg>;
+}
+
 /** 游戏入口图标：三张扇形摊开的牌压在深色底上。 */
 export function UnoIcon({ size = 40 }: { size?: number }) {
   // [水平偏移, 牌面颜色]；中间的牌正对、两侧各偏一点并轻微旋转

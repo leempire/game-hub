@@ -204,7 +204,7 @@ def save_game_record(room: dict):
     # 房间状态判断「是否打完了一局」——改看对局态本身：五子棋/翻转棋/点格棋/
     # 海战棋/2048 落 winner，扫雷/飞行棋落 finished。两者都没有说明还在进行中。
     gs = room.get("game_state")
-    if not gs or not (gs.get("winner") or gs.get("finished")):
+    if not gs or not (gs.get("winner") or gs.get("finished") or gs.get("phase") == "finished" and room["game"] == "guandan"):
         return
     if room["game"] == "doudizhu" and gs.get("winner") is None:
         return  # A cancelled deal has no result to record.
@@ -426,6 +426,9 @@ def _build_players_record(room: dict) -> list[dict]:
 def _build_results_record(room: dict) -> list[dict]:
     """Build the per-player result list."""
     gs = room.get("game_state") or {}
+    if room["game"] == "guandan":
+        return [{"username": p["username"], "result": "win" if seat % 2 == gs["winner"] else "lose"}
+                for seat, p in enumerate(room["_guandan_roster"])]
     if room["game"] == "doudizhu":
         from app.game.doudizhu import snapshot
         result = snapshot(gs)
@@ -552,6 +555,9 @@ def _build_snapshot(room: dict) -> dict:
     if room["game"] == "undercover":
         return gs["summary"]
     game = room["game"]
+    if game == "guandan":
+        from app.game.guandan import snapshot
+        return {**snapshot(gs), "game": game}
     if game == "doudizhu":
         from app.game.doudizhu import snapshot
         return {**snapshot(gs), "game": game}

@@ -37,6 +37,7 @@ const ROUTE_BY_PATH: Record<string, string> = {
   uno: 'Uno',
   undercover: 'Undercover',
   doudizhu: 'Doudizhu',
+  guandan: 'Guandan',
   stasis: 'Stasis',
   abyss: 'Abyss',
   spider: 'Spider',

@@ -3,6 +3,7 @@ import AbyssResult from '../AbyssResult';
 import UndercoverSummary from '../UndercoverSummary';
 import { undercoverWinnerLabels, type UndercoverSnapshot } from '../undercover';
 import { doudizhuRole, formatDoudizhuResult, type DoudizhuSnapshot } from '../doudizhu';
+import { formatGuandanResult } from '../guandan';
 // 历史战绩页面：列表 + 点击展开棋盘快照详情。
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -14,7 +15,7 @@ import RecordShareActions from '../RecordShareActions';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, AbyssSnapshot, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
-import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon } from '../icons';
+import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
@@ -103,6 +104,7 @@ export default function HistoryScreen() {
   const renderGameIcon = (game: string) => {
     if (game === 'undercover') return <UndercoverIcon size={36} />;
     if (game === 'doudizhu') return <DoudizhuIcon size={36} />;
+    if (game === 'guandan') return <GuandanIcon size={36} />;
     if (game === 'abyss') return <AbyssIcon size={36} />;
     if (game === 'uttt') return <UltimateTicTacToeIcon size={36} />;
     if (game === 'spider') return <SpiderIcon size={36} />;
@@ -161,7 +163,9 @@ export default function HistoryScreen() {
                 </View>
                 <Text style={styles.timeText}>{formatDate(rec.ended_at)}</Text>
                 <Text style={styles.playersText}>
-                  {rec.players.map((p) => {
+                  {rec.game === 'guandan' ? [0, 1].map(team => rec.players
+                    .filter(player => player.seat % 2 === team)
+                    .map(player => player.nickname || player.username).join('、')).join(' vs ') : rec.players.map((p) => {
                     const difficulty = p.ai_difficulty && { easy: '简单', normal: '普通', hard: '困难' }[p.ai_difficulty];
                     return `${p.nickname || p.username}${difficulty ? ' · ' + difficulty : ''}`;
                   }).join(['abyss', 'undercover', 'doudizhu'].includes(rec.game) ? ' / ' : ' vs ')}
@@ -171,16 +175,18 @@ export default function HistoryScreen() {
             </View>
             {expanded && (
               <View style={styles.detail}>
-                <View style={styles.resultRow}>
-                  {rec.results.map((r) => (
-                    <View key={r.username} style={styles.resultItem}>
-                      <Text style={styles.resultName}>{r.username}</Text>
-                      <Text style={[styles.resultValue, { color: RESULT_COLORS[r.result] }]}>
-                        {RESULT_LABELS[r.result]}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
+                {rec.game !== 'guandan' && (
+                  <View style={styles.resultRow}>
+                    {rec.results.map((r) => (
+                      <View key={r.username} style={styles.resultItem}>
+                        <Text style={styles.resultName}>{r.username}</Text>
+                        <Text style={[styles.resultValue, { color: RESULT_COLORS[r.result] }]}>
+                          {RESULT_LABELS[r.result]}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
                 <BoardSnapshot rec={rec} viewerId={user?.id} />
                 <RecordShareActions token={token} recordId={rec.id} resultOnly={rec.game === 'undercover'} />
               </View>
@@ -314,6 +320,20 @@ export function BoardSnapshot({ rec, viewerId }: { rec: GameRecord; viewerId?: n
         {'\n'}飞机单翼：{rules.airplane_pair_as_singles ? '可拆对' : '点数各异'}
         {'\n'}四带两单：{rules.four_pair_as_singles ? '可带一对' : '点数各异'}
       </Text>
+    </View>;
+  }
+  if (view.game === 'guandan') {
+    const { headline, detail } = formatGuandanResult(view);
+    return <View testID="guandan-history" style={{ gap: spacing.xs }}>
+      <Text style={styles.gameLabel}>{headline}</Text>
+      <Text style={{ color: colors.textSecondary }}>{detail}</Text>
+      {[0, 1].map(team => {
+        const members = rec.players.filter(player => player.seat % 2 === team);
+        return <Text key={team} style={{ color: colors.text }}>
+          {members.map(player => player.nickname || player.username).join('、')} · {view.levels[team]} 级
+          {view.winner === team ? ' · 获胜' : ''}
+        </Text>;
+      })}
     </View>;
   }
   if (view.game === 'uttt') {
