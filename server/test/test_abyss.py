@@ -238,9 +238,9 @@ def test_opening_health_and_upgrade_curve():
     gs["elapsed"] = 30 * 20
     abyss._spawn(gs, "drifter", p)
     assert gs["enemies"][-1]["hp"] == 10
-    gs["elapsed"] = 100 * 20
+    gs["elapsed"] = 600 * 20
     abyss._spawn(gs, "drifter", p)
-    assert gs["enemies"][-1]["hp"] == 14
+    assert gs["enemies"][-1]["hp"] == 27
     gs["level"] = 9
     assert abyss.threshold(gs) == 64
     gs["level"] = 19
@@ -357,7 +357,7 @@ def test_thirteen_passives_and_bonuses():
 def test_chest_evolves_maxed_weapon_with_passive():
     gs = abyss.create([{"id": 1, "username": "test"}], 1)
     p = gs["players"][1]
-    p["weapons"] = {"rivet": 8}
+    p["weapons"] = {"rivet": data.WEAPONS["rivet"]["max_level"]}
     p["passives"] = {"empty_tome": 1}
     gs["chests"] = [{"id": abyss._id(gs), "x": p["x"], "y": p["y"]}]
     abyss._collect(gs, [p])
@@ -365,6 +365,33 @@ def test_chest_evolves_maxed_weapon_with_passive():
     assert p["weapons"]["holy_wand"] == 1
     assert p["passives"]["empty_tome"] == 1
     assert gs["chest_events"] and "圣铆炮" in gs["chest_events"][-1]["text"]
+
+
+def test_evolved_weapon_cannot_be_reacquired_as_base():
+    gs = abyss.create([{"id": 1, "username": "test"}], 1)
+    p = gs["players"][1]
+    p["weapons"] = {"holy_wand": 1}
+    _, news = abyss._available_choices(p)
+    assert "rivet" not in news
+    assert not abyss._upgrade_weapon(p, "rivet")
+    assert p["weapons"] == {"holy_wand": 1}
+
+
+def test_level_up_offers_and_applies_evolution_at_max_level():
+    gs = abyss.create([{"id": 1, "username": "test"}], 1)
+    p = gs["players"][1]
+    p["weapons"] = {"rivet": data.WEAPONS["rivet"]["max_level"]}
+    p["passives"] = {"empty_tome": 1}
+    gs["xp"] = abyss.threshold(gs)
+    abyss.advance(gs)
+    assert "holy_wand" in p["choices"]
+    player = abyss.snapshot(gs)["players"][0]
+    assert "holy_wand" in player["choice_changes"]
+    assert player["evolution_requirements"]["rivet"]["rank"] == 5
+    assert abyss.pick(gs, 1, gs["level"], "holy_wand")
+    assert p["weapons"] == {"holy_wand": 1}
+    assert p["passives"] == {"empty_tome": 1}
+    assert "holy_wand" not in abyss._available_evolutions(p)
 
 
 def test_chest_opens_for_nearest_online_diver_in_range():
@@ -492,9 +519,9 @@ def test_wave_roster_by_phase(fraction, roster):
 @pytest.mark.parametrize(
     "kind, hp, speed, radius, damage, xp",
     [
-        ("needlefish", 8, 125, 8, 1, 1),
-        ("jelly", 26, 58, 19, 3, 2),
-        ("angler", 38, 87, 19, 5, 3),
+        ("needlefish", 8, 125, 8, 4, 1),
+        ("jelly", 26, 58, 19, 10, 2),
+        ("angler", 38, 87, 19, 14, 3),
     ],
 )
 def test_new_enemy_combat_and_rewards(kind, hp, speed, radius, damage, xp):
@@ -578,7 +605,7 @@ def test_exploration_rewards_are_collected_once_by_eligible_online_diver():
         assert cache not in gs["caches"]
     abyss._collect(gs, [lead, mate], online_ids={2})
     assert lead["weapons"]["rivet"] == 1 and mate["weapons"]["rivet"] == 2
-    assert lead["xp_collected"] == 0 and mate["xp_collected"] == abyss.CACHE_XP
+    assert lead["xp_collected"] == 0 and mate["xp_collected"] == round(abyss.CACHE_XP * abyss.XP_GAIN_SCALE)
     assert mate["hp"] == mate["max_hp"] - 10
     assert gs["salvage"] == abyss.CACHE_SALVAGE
     assert len(gs["chest_events"]) == 4
@@ -734,17 +761,17 @@ def test_warden_warning_freezes_during_choice_and_checks_positions_on_impact():
     abyss.advance(gs)
     assert abyss.snapshot(gs)["warden_attack"]["impact"]
     assert abyss.snapshot(gs)["warden_attack"]["duration_ms"] == 400
-    assert p["hp"] == original_hp - 16
+    assert p["hp"] == original_hp - 26
     assert q["hp"] == q_hp
     for _ in range(8):
         abyss.advance(gs)
     assert abyss.snapshot(gs)["warden_attack"] is None
-    assert p["hp"] == original_hp - 16
+    assert p["hp"] == original_hp - 26
 
 
 @pytest.mark.parametrize("kind, enraged, radius, damage", [
-    ("strike", False, 90, 16), ("strike", True, 105, 20),
-    ("pulse", False, 160, 20), ("pulse", True, 180, 24),
+    ("strike", False, 90, 26), ("strike", True, 105, 32),
+    ("pulse", False, 160, 32), ("pulse", True, 180, 40),
 ])
 @pytest.mark.parametrize("inside", [False, True])
 def test_warden_snapshot_matches_fractional_hit_boundary(kind, enraged, radius, damage, inside):
@@ -814,10 +841,10 @@ def test_warden_pulse_respects_armor_invulnerability_and_range():
         abyss.advance(gs)
     assert p["hp"] == p_hp
     abyss.advance(gs)
-    assert p["hp"] == pytest.approx(p_hp - 15)
+    assert p["hp"] == pytest.approx(p_hp - 24)
     assert q["hp"] == q_hp
     abyss._hurt_diver(gs, p, 50)
-    assert p["hp"] == pytest.approx(p_hp - 15)
+    assert p["hp"] == pytest.approx(p_hp - 24)
 
 
 def test_armor_reduces_by_percentage_and_never_nullifies_damage():
@@ -826,11 +853,11 @@ def test_armor_reduces_by_percentage_and_never_nullifies_damage():
     p["passives"] = {"armor": 5}
     p["talent"] = {"armor": .08}
     abyss._refresh_stats(p)
-    assert p["stats"]["armor"] == pytest.approx(.48)
+    assert p["stats"]["armor"] == pytest.approx(.38)
 
     hp = p["hp"]
     abyss._hurt_diver(gs, p, 5)
-    assert p["hp"] == pytest.approx(hp - 2.6)
+    assert p["hp"] == pytest.approx(hp - 3.1)
     # 单次伤害保底 1 点：护甲再高也不会把杂兵攻击完全挡掉。
     gs["elapsed"] += 20
     hp = p["hp"]
@@ -849,7 +876,17 @@ def test_restore_abyss_migrates_legacy_flat_armor():
     p["passives"] = {"armor": 5}
     p["stats"]["armor"] = 5  # 旧存档：固定减伤点数
     rm._restore_abyss({"game": "abyss", "game_state": gs})
-    assert p["stats"]["armor"] == pytest.approx(.40)
+    assert p["stats"]["armor"] == pytest.approx(.30)
+
+
+def test_restore_abyss_clamps_legacy_eight_level_loadout():
+    gs = abyss.create([{"id": 1, "username": "Diver"}], 42)
+    p = gs["players"][1]
+    p["weapons"] = {"rivet": 8, "holy_wand": 1}
+    p["passives"] = {"empty_tome": 7}
+    rm._restore_abyss({"game": "abyss", "game_state": gs})
+    assert p["weapons"] == {"rivet": 5, "holy_wand": 1}
+    assert p["passives"] == {"empty_tome": 5}
 
 
 def test_upgrade_preview_uses_effective_stats_and_lists_evolution_requirements():
@@ -862,7 +899,7 @@ def test_upgrade_preview_uses_effective_stats_and_lists_evolution_requirements()
     player = abyss.snapshot(gs)["players"][0]
 
     assert player["choice_changes"] == {
-        "rivet": [["cooldown", 1.104, .92]],
+        "rivet": [["amount", 2, 3], ["cooldown", 1.104, 1.012]],
         "attractorb": [["magnet", 1.5, 1.995]],
         "spellbinder": [["duration_scale", 1.0, 1.1]],
     }
@@ -872,7 +909,7 @@ def test_upgrade_preview_uses_effective_stats_and_lists_evolution_requirements()
         "pentagram": [["cooldown", 82.8]],
     }
     assert player["evolution_requirements"]["rivet"] == {
-        "target": "holy_wand", "passive": "empty_tome", "rank": 8,
+        "target": "holy_wand", "passive": "empty_tome", "rank": 5,
     }
     assert diver["weapons"] == {"rivet": 2, "ring": 4}
     assert diver["passives"] == {"empty_tome": 1, "attractorb": 1}
@@ -885,7 +922,7 @@ def test_passive_preview_keeps_talent_bonuses():
     diver["choices"] = ["spinach", "armor"]
     player = abyss.snapshot(gs)["players"][0]
     assert player["choice_changes"]["spinach"] == [["might", 1.15, 1.25]]
-    assert player["choice_changes"]["armor"] == [["armor", .08, .16]]
+    assert player["choice_changes"]["armor"] == [["armor", .08, .14]]
 
 
 @pytest.mark.parametrize(("health", "team_size"), [(100, 1), (92, 1), (100, 2)])
@@ -895,7 +932,9 @@ def test_maxed_loadout_automatically_collects_only_salvage(health, team_size):
     diver.update(
         hp=health,
         weapons={weapon: data.WEAPONS[weapon]["max_level"] for weapon in data.BASE_WEAPON_ORDER[:data.MAX_WEAPONS]},
-        passives={passive: data.PASSIVES[passive]["max_level"] for passive in data.PASSIVE_ORDER[:data.MAX_PASSIVES]},
+        # 刻意避开前 6 把武器的进化被动，确认「没有可进化项」时才只给补给。
+        passives={"spinach": 5, "duplicator": 2, "wings": 5,
+                  "attractorb": 5, "crown": 5, "pummarola": 5},
     )
     gs["xp"] = abyss.threshold(gs)
     abyss.advance(gs)
@@ -1206,9 +1245,9 @@ def test_full_beacon_pool_keeps_distant_drop_local_and_conserves_experience():
     assert sum(item['xp'] for item in gs['loot']) == abyss.MAX_LOOT + 7
 
     abyss._collect(gs, [second])
-    assert second['xp_collected'] == 5
+    assert second['xp_collected'] == 4
     assert first['xp_collected'] == 0
-    assert gs['xp'] == 5
+    assert gs['xp'] == 4
     assert sum(item['xp'] for item in gs['loot']) == abyss.MAX_LOOT + 2
 
 
@@ -1237,15 +1276,15 @@ def test_xp_collection_credits_only_the_diver_who_picks_up_the_beacon():
     gs['growth_boost'] = 2
     abyss._drop_loot(gs, first, 3)
     abyss._collect(gs, [first, second])
-    assert gs['xp'] == 6
-    assert [p['xp_collected'] for p in abyss.snapshot(gs)['players']] == [6, 0]
+    assert gs['xp'] == 5
+    assert [p['xp_collected'] for p in abyss.snapshot(gs)['players']] == [5, 0]
     abyss._drop_loot(gs, second, 2)
     abyss._fire(gs, second, 'gorgeous_moon', 1)
-    assert gs['xp'] == 10
-    assert [p['xp_collected'] for p in abyss.snapshot(gs)['players']] == [6, 4]
+    assert gs['xp'] == 8
+    assert [p['xp_collected'] for p in abyss.snapshot(gs)['players']] == [5, 3]
 
 
-@pytest.mark.parametrize("duration,expected", [(720, 3780), (1200, 5103), (1800, 7560)])
+@pytest.mark.parametrize("duration,expected", [(720, 15975), (1200, 21566), (1800, 31950)])
 def test_warden_health_scales_with_longer_new_matches(duration, expected):
     players = [{'id': i, 'username': str(i)} for i in range(4)]
     gs = abyss.create(players, seed=42, duration=duration)
@@ -1255,14 +1294,14 @@ def test_warden_health_scales_with_longer_new_matches(duration, expected):
     abyss._spawn(restored, 'elite', diver)
     warden, elite = restored['enemies']
     assert (warden['hp'], warden['max_hp']) == (expected, expected)
-    assert elite['max_hp'] == 1260
+    assert elite['max_hp'] == 2840
 
 
 def test_legacy_long_match_uses_original_warden_health():
     gs = abyss.create([{'id': 1, 'username': 'a'}], seed=42, duration=1800)
     del gs['warden_hp_scale']
     abyss._spawn(gs, 'warden', gs['players'][1])
-    assert gs['enemies'][0]['max_hp'] == 1350
+    assert gs['enemies'][0]['max_hp'] == 4500
 
 
 def test_rescue_credit_goes_to_nearest_diver_at_completion_and_enters_record():
@@ -1285,7 +1324,7 @@ def test_rescue_credit_goes_to_nearest_diver_at_completion_and_enters_record():
     abyss._drop_loot(gs, nearer, 5)
     abyss._collect(gs, [further, nearer, downed])
     summary = abyss.record_summary(gs)
-    assert [(p['rescues'], p['xp_collected']) for p in summary['players']] == [(0, 0), (1, 5), (0, 0)]
+    assert [(p['rescues'], p['xp_collected']) for p in summary['players']] == [(0, 0), (1, 4), (0, 0)]
 
 
 def test_rescue_excludes_offline_helpers_but_allows_rescuing_offline_teammates():

@@ -31,11 +31,11 @@ MAX_WEAPONS = 6
 MAX_PASSIVES = 6
 INFINITE_PIERCE = 9999
 
-# 护甲是**百分比减伤**，不是 VS 的固定 −1：本作接触伤害只有 1–5，固定减伤
-# 点满后普通怪会直接归零（等于无敌），守卫技能也会被削掉一大截。百分比在
-# 任何伤害量级下都不会归零，对高伤害同样有效；上限防止后续叠加来源堆穿。
+# 护甲是**百分比减伤**，不是 VS 的固定 −1：固定减伤会把低伤杂兵直接归零
+# （等于无敌）。百分比在任何伤害量级下都不会归零，对高伤害同样有效；上限
+# 防止后续叠加来源堆穿。5 级局内被动合计 −30%，叠加局外天赋仍留出成长空间。
 # 单次伤害保底见 MIN_HIT_DAMAGE（VS 的护甲也不能把伤害减到 0）。
-ARMOR_REDUCTION_PER_LEVEL = .08
+ARMOR_REDUCTION_PER_LEVEL = .06
 MAX_ARMOR_REDUCTION = .50
 MIN_HIT_DAMAGE = 1.0
 
@@ -114,12 +114,9 @@ WEAPONS = {
          "crit": .20, "crit_mult": 2.0},
         (
             {"amount": 1},
-            {"damage": 5},
-            {"damage": 5, "area": .1},
-            {"damage": 5},
-            {"damage": 5, "area": .1},
-            {"damage": 5},
-            {"damage": 5},
+            {"damage": 10, "area": .1},
+            {"damage": 10},
+            {"damage": 10, "area": .1},
         ),
         evolution="bloody_tear", passive="hollow_heart",
     ),
@@ -128,12 +125,9 @@ WEAPONS = {
         {"damage": 10, "cooldown": 1.2, "interval": .1, "speed": 1, "pierce": 1},
         (
             {"amount": 1},
-            {"cooldown": -.2},
-            {"amount": 1},
-            {"damage": 10},
-            {"amount": 1},
-            {"pierce": 1},
-            {"damage": 10},
+            {"amount": 1, "cooldown": -.1},
+            {"amount": 1, "damage": 10},
+            {"damage": 10, "pierce": 1, "cooldown": -.1},
         ),
         evolution="holy_wand", passive="empty_tome",
     ),
@@ -143,12 +137,9 @@ WEAPONS = {
          "pierce": 1, "knockback": .5, "crit": .30, "crit_mult": 3.0},
         (
             {"amount": 1},
-            {"damage": 5, "amount": 1},
-            {"amount": 1, "interval": -.02},
-            {"pierce": 1},
-            {"amount": 1, "interval": -.02},
-            {"damage": 5, "amount": 1},
-            {"pierce": 1, "interval": -.02},
+            {"amount": 1, "damage": 5},
+            {"amount": 1, "interval": -.02, "pierce": 1},
+            {"amount": 2, "damage": 5, "interval": -.04, "pierce": 1},
         ),
         evolution="thousand_edge", passive="bracer",
     ),
@@ -158,12 +149,9 @@ WEAPONS = {
          "pierce": 3, "crit": .30, "crit_mult": 2.0, "area": 1.3},
         (
             {"amount": 1},
-            {"damage": 20},
-            {"pierce": 2},
-            {"amount": 1},
-            {"damage": 20},
-            {"pierce": 2},
-            {"damage": 20},
+            {"damage": 20, "pierce": 2},
+            {"amount": 1, "damage": 20},
+            {"damage": 20, "pierce": 2},
         ),
         evolution="death_spiral", passive="candelabrador",
     ),
@@ -173,12 +161,9 @@ WEAPONS = {
          "pierce": INFINITE_PIERCE},
         (
             {"damage": 10},
-            {"area": .1, "speed": .25},
+            {"damage": 10, "area": .1, "speed": .25},
             {"amount": 1},
-            {"damage": 10},
-            {"area": .1, "speed": .25},
-            {"amount": 1},
-            {"damage": 10},
+            {"damage": 10, "amount": 1, "area": .1, "speed": .25},
         ),
         evolution="heaven_sword", passive="clover",
     ),
@@ -188,12 +173,9 @@ WEAPONS = {
          "pierce": INFINITE_PIERCE},
         (
             {"amount": 1},
-            {"area": .25, "speed": .30},
-            {"damage": 10, "duration": .5},
-            {"amount": 1},
-            {"area": .25, "speed": .30},
-            {"damage": 10, "duration": .5},
-            {"amount": 1},
+            {"amount": 1, "area": .25, "speed": .30},
+            {"amount": 1, "damage": 10, "area": .25, "speed": .30},
+            {"damage": 10, "duration": 1.0},
         ),
         evolution="unholy_vespers", passive="spellbinder",
     ),
@@ -203,12 +185,9 @@ WEAPONS = {
          "amount": 3, "pierce": 1},
         (
             {"damage": 10},
-            {"damage": 10, "speed": .20},
-            {"damage": 10},
-            {"damage": 10, "speed": .20},
-            {"damage": 10},
-            {"damage": 10, "speed": .20},
-            {"damage": 10},
+            {"damage": 20, "speed": .20},
+            {"damage": 20, "speed": .20},
+            {"damage": 20, "speed": .20},
         ),
         evolution="hellfire", passive="spinach",
     ),
@@ -218,12 +197,9 @@ WEAPONS = {
          "slow": .30, "slow_ticks": 30, "pierce": INFINITE_PIERCE},
         (
             {"area": .4, "damage": 2},
-            {"cooldown": -.1, "damage": 1},
-            {"area": .2, "damage": 1},
-            {"cooldown": -.1, "damage": 2},
-            {"area": .2, "damage": 1},
-            {"cooldown": -.1, "damage": 1},
-            {"area": .2, "damage": 2},
+            {"cooldown": -.1, "area": .2, "damage": 3},
+            {"cooldown": -.1, "area": .2, "damage": 3},
+            {"cooldown": -.1, "area": .2, "damage": 2},
         ),
         evolution="soul_eater", passive="pummarola",
     ),
@@ -234,12 +210,9 @@ WEAPONS = {
          "pierce": INFINITE_PIERCE},
         (
             {"amount": 1, "area": .2},
-            {"damage": 10, "duration": .5},
-            {"amount": 1, "area": .2},
-            {"damage": 10, "duration": .25},
-            {"amount": 1, "area": .2},
-            {"damage": 5, "duration": .25},
-            {"damage": 5, "area": .2},
+            {"amount": 1, "area": .2, "damage": 10, "duration": .5},
+            {"amount": 1, "area": .2, "damage": 10, "duration": .25},
+            {"area": .2, "damage": 10, "duration": .25},
         ),
         evolution="la_borra", passive="attractorb",
     ),
@@ -249,12 +222,9 @@ WEAPONS = {
          "speed": 1, "pierce": INFINITE_PIERCE},
         (
             {"damage": 5, "speed": .2},
-            {"damage": 5, "duration": .25},
-            {"amount": 1},
             {"damage": 5, "speed": .2},
-            {"damage": 5, "duration": .25},
-            {"amount": 1},
-            {"duration": .5},
+            {"amount": 1, "damage": 5, "duration": .25},
+            {"amount": 1, "damage": 5, "duration": .75},
         ),
         evolution="no_future", passive="armor",
     ),
@@ -264,12 +234,9 @@ WEAPONS = {
          "pierce": INFINITE_PIERCE},
         (
             {"amount": 1},
-            {"damage": 10, "area": 1.0},
-            {"amount": 1},
-            {"damage": 20, "area": 1.0},
-            {"amount": 1},
-            {"damage": 20, "area": 1.0},
-            {"amount": 1},
+            {"amount": 1, "damage": 15, "area": 1.0},
+            {"amount": 1, "damage": 20, "area": 1.0},
+            {"amount": 1, "damage": 15, "area": 1.0},
         ),
         evolution="thunder_loop", passive="duplicator",
     ),
@@ -279,12 +246,9 @@ WEAPONS = {
          "knockback": -2, "preserve": .10, "pierce": INFINITE_PIERCE},
         (
             {"cooldown": -10},
-            {"preserve": .15},
-            {"cooldown": -10},
-            {"preserve": .20},
-            {"cooldown": -5},
-            {"preserve": .20},
-            {"cooldown": -5},
+            {"cooldown": -10, "preserve": .15},
+            {"cooldown": -5, "preserve": .20},
+            {"cooldown": -5, "preserve": .20},
         ),
         evolution="gorgeous_moon", passive="crown", min_cooldown=15.0,
     ),
@@ -297,7 +261,7 @@ WEAPONS.update({
         "bloody_tear", "血潮鞭", "whip",
         {"damage": 40, "area": 1.3, "amount": 2, "cooldown": 1.35,
          "interval": .1, "knockback": 1, "crit": .10, "crit_mult": 2.0,
-         "heal_on_crit": 8},
+         "heal_on_crit": 6},
         base="whip",
     ),
     "holy_wand": _evolved(
@@ -420,9 +384,9 @@ PASSIVES = {
               "per_level": .08, "detail": "经验获取 +8%/级"},
     "armor": {"name": "抗压壳", "max_level": 5, "stat": "armor",
               "per_level": ARMOR_REDUCTION_PER_LEVEL,
-              "detail": "受到伤害 -8%/级（最多 -40%）"},
+              "detail": "受到伤害 -6%/级（最多 -30%）"},
     "pummarola": {"name": "自愈膜", "max_level": 5, "stat": "recovery",
-                  "per_level": .2, "detail": "每秒回复 +0.2/级"},
+                  "per_level": .1, "detail": "每秒回复 +0.1/级"},
 }
 
 PASSIVE_ORDER = tuple(PASSIVES)

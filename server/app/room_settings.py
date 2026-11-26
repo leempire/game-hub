@@ -420,6 +420,16 @@ _GAMES: dict[str, list[Setting]] = {
                          blurb="可选择落子或弹出自己最底下一枚；全盘重判四连，双方同时四连时行动方胜，相同局面及行动方第三次出现和棋。")],
     "ludo": _ludo_settings(),
     "abyss": _abyss_settings(),
+    "fish": [
+        Setting(key="map_size", label="海域大小", kind=KIND_CHOICE, store="fish_map_size",
+                default="medium", in_summary=True,
+                choices=tuple({"value": key, "label": label} for key, label in
+                              (("small", "小海域"), ("medium", "中海域"), ("large", "大海域")))),
+        Setting(key="items", label="游戏道具", kind=KIND_TOGGLE, store="fish_items",
+                default=True, in_summary=True, blurb="海流珠加速，护盾珠抵挡一次吞食。"),
+        Setting(key="events", label="海域事件", kind=KIND_TOGGLE, store="fish_events",
+                default=True, in_summary=True, blurb="鱼群迁徙带来小鱼，急流加快野生鱼游速。"),
+    ],
     "xiangqi": [_clock_setting(), Setting(
         key="byoyomi_seconds", label="读秒", kind=KIND_CHOICE,
         store="xiangqi_byoyomi_seconds", default=0, apply=_apply_byoyomi,
