@@ -14,15 +14,20 @@ TICKS = 5
 
 def choose_upgrade(p, choices):
     def score(item):
+        if item in data.EVOLVED_WEAPONS:
+            return 40
         if item in p['weapons']:
             return 12 + (8 if item == 'rivet' else GOOD.get(item, 3)) + p['weapons'][item]
         if item in p['passives']:
             return 11 if any(item == passive for _, passive in data.EVOLUTIONS.values()) else 7
         if item in data.WEAPONS:
-            return 20 + GOOD.get(item, 3) if len(p['weapons']) < 5 else 5 + GOOD.get(item, 3)
+            return 20 + GOOD.get(item, 3) if len(p['weapons']) < 4 else 2 + GOOD.get(item, 3)
         if item in data.PASSIVES:
-            return 27 if any(data.WEAPONS[weapon].get('passive') == item for weapon in p['weapons']) else 10
-        return 26 if item == 'repair' and p['hp'] < 36 else 0
+            score = 27 if any(data.WEAPONS[weapon].get('passive') == item for weapon in p['weapons']) else 12
+            if item in ('armor', 'pummarola', 'hollow_heart') and p['hp'] < p['max_hp'] * .65:
+                score = max(score, 31)
+            return score
+        return 30 if item == 'repair' and p['hp'] < p['max_hp'] * .5 else 0
     return max(choices, key=score)
 
 def squared(p, x, y):
@@ -114,6 +119,7 @@ def run_match(args):
         'warden_fight_seconds': warden_defeated_at, 'warden_attacks_resolved': len(resolved_attacks),
         'team_chests': len({event['frame'] for event in gs['chest_events']}),
         'hp': [round(p['hp']) for p in gs['players'].values()],
+        'damage_taken': [round(p.get('damage_taken', 0)) for p in gs['players'].values()],
     }
 
 if __name__ == '__main__':
