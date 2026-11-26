@@ -23,6 +23,8 @@ _ABYSS_SUMMARY_FIELDS = {'game', 'seconds', 'map_size', 'level', 'kills', 'salva
 _ABYSS_DIVER_FIELDS = {'id', 'name', 'kills', 'hp', 'out', 'weapons', 'passives', 'xp_collected', 'rescues', 'damage_dealt'}
 _UNDERCOVER_SUMMARY_FIELDS = {'game', 'round', 'winner', 'reason'}
 _GUANDAN_SUMMARY_FIELDS = {'game', 'players', 'levels', 'deal', 'winner', 'reason', 'deal_result'}
+_CONCENTRATION_SUMMARY_FIELDS = {'game', 'scores', 'card_count'}
+_CONCENTRATION_SCORE_FIELDS = {'id', 'pairs', 'rank', 'forfeited'}
 _PLAYER_FIELDS = {'user_id', 'username', 'nickname', 'seat', 'color', 'is_bot', 'ai_difficulty'}
 _RESULT_FIELDS = {'username', 'result', 'rank', 'score', 'elapsed_ms', 'difficulty'}
 
@@ -109,12 +111,18 @@ def public_share(token: str) -> dict | None:
             return None
         snapshot = record_snapshot(row['snapshot_json'], row['share_owner_id'])
         fields = {'abyss': _ABYSS_SUMMARY_FIELDS, 'undercover': _UNDERCOVER_SUMMARY_FIELDS,
-                  'guandan': _GUANDAN_SUMMARY_FIELDS}.get(row['game'], _SNAPSHOT_FIELDS)
+                  'guandan': _GUANDAN_SUMMARY_FIELDS,
+                  'concentration': _CONCENTRATION_SUMMARY_FIELDS}.get(row['game'], _SNAPSHOT_FIELDS)
         snapshot = _public_values({key: value for key, value in snapshot.items() if key in fields})
         if row['game'] == 'abyss':
             snapshot['players'] = [
                 {key: value for key, value in player.items() if key in _ABYSS_DIVER_FIELDS}
                 for player in snapshot.get('players', [])
+            ]
+        if row['game'] == 'concentration':
+            snapshot['scores'] = [
+                {key: value for key, value in score.items() if key in _CONCENTRATION_SCORE_FIELDS}
+                for score in snapshot.get('scores', [])
             ]
         return {
             'id': row['id'], 'game': row['game'], 'room_code': '',

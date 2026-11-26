@@ -4,6 +4,7 @@ import UndercoverSummary from '../UndercoverSummary';
 import { undercoverWinnerLabels, type UndercoverSnapshot } from '../undercover';
 import { doudizhuRole, formatDoudizhuResult, type DoudizhuSnapshot } from '../doudizhu';
 import { formatGuandanResult } from '../guandan';
+import type { ConcentrationSnapshot } from '../concentration';
 // 历史战绩页面：列表 + 点击展开棋盘快照详情。
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -15,7 +16,7 @@ import RecordShareActions from '../RecordShareActions';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, AbyssSnapshot, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
-import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon } from '../icons';
+import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon, ConcentrationIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
@@ -105,6 +106,7 @@ export default function HistoryScreen() {
     if (game === 'undercover') return <UndercoverIcon size={36} />;
     if (game === 'doudizhu') return <DoudizhuIcon size={36} />;
     if (game === 'guandan') return <GuandanIcon size={36} />;
+    if (game === 'concentration') return <ConcentrationIcon size={36} />;
     if (game === 'abyss') return <AbyssIcon size={36} />;
     if (game === 'uttt') return <UltimateTicTacToeIcon size={36} />;
     if (game === 'spider') return <SpiderIcon size={36} />;
@@ -168,7 +170,7 @@ export default function HistoryScreen() {
                     .map(player => player.nickname || player.username).join('、')).join(' vs ') : rec.players.map((p) => {
                     const difficulty = p.ai_difficulty && { easy: '简单', normal: '普通', hard: '困难' }[p.ai_difficulty];
                     return `${p.nickname || p.username}${difficulty ? ' · ' + difficulty : ''}`;
-                  }).join(['abyss', 'undercover', 'doudizhu'].includes(rec.game) ? ' / ' : ' vs ')}
+                  }).join(['abyss', 'undercover', 'doudizhu', 'concentration'].includes(rec.game) ? ' / ' : ' vs ')}
                 </Text>
               </View>
               <Text style={styles.arrow}>{expanded ? '∨' : '›'}</Text>
@@ -188,7 +190,8 @@ export default function HistoryScreen() {
                   </View>
                 )}
                 <BoardSnapshot rec={rec} viewerId={user?.id} />
-                <RecordShareActions token={token} recordId={rec.id} resultOnly={rec.game === 'undercover'} />
+                <RecordShareActions token={token} recordId={rec.id}
+                  resultOnly={rec.game === 'undercover' || rec.game === 'concentration' ? rec.game : undefined} />
               </View>
             )}
           </TouchableOpacity>
@@ -339,6 +342,20 @@ export function BoardSnapshot({ rec, viewerId }: { rec: GameRecord; viewerId?: n
         return <Text key={team} style={{ color: colors.text }}>
           {members.map(player => player.nickname || player.username).join('、')} · {view.levels[team]} 级
           {view.winner === team ? ' · 获胜' : ''}
+        </Text>;
+      })}
+    </View>;
+  }
+  if (view.game === 'concentration') {
+    const summary: ConcentrationSnapshot = view;
+    const ranks = [...summary.scores].sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity));
+    return <View testID="concentration-history" style={{ gap: spacing.xs }}>
+      <Text style={styles.gameLabel}>{summary.card_count === 16 ? '16 张快局' : '24 张标准局'}</Text>
+      {ranks.map(({ id, pairs, rank, forfeited }) => {
+        const player = rec.players.find(p => p.user_id === id);
+        return <Text key={id} style={{ color: colors.text }}>
+          {player?.nickname || player?.username || `玩家 ${id}`} · {pairs} 对
+          {forfeited ? ' · 退出' : rank != null ? ` · 第 ${rank} 名` : ''}
         </Text>;
       })}
     </View>;

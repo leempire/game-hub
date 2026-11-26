@@ -37,6 +37,7 @@ const LINKING = {
       Undercover: 'undercover/:code',
       Doudizhu: 'doudizhu/:code',
       Guandan: 'guandan/:code',
+      Concentration: 'concentration/:code',
       Stasis: 'stasis/:code',
       Abyss: 'abyss/:code',
       Fish: 'fish/:code',

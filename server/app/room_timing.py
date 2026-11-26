@@ -73,6 +73,9 @@ def settle(room: dict, *, now: float | None = None) -> str | None:
     if room["game"] == "undercover":
         gs["remaining_ms"] = max(0, gs["remaining_ms"] - elapsed)
         return "undercover" if not gs["remaining_ms"] else None
+    if room["game"] == "concentration" and gs["reveal_ms"] is not None:
+        gs["reveal_ms"] = max(0, gs["reveal_ms"] - elapsed)
+        return "concentration" if gs["reveal_ms"] == 0 else None
     if room["game"] == "luzhanqi" and luzhanqi.advance_setup(gs, elapsed):
         return "setup"
     if chess_clock.advance(gs.get("clock"), elapsed):
@@ -115,6 +118,8 @@ def _delay_ms(room: dict) -> int | None:
     gs = room.get("game_state") or {}
     if room["game"] == "undercover":
         return gs.get("remaining_ms") if undercover_online(room) else None
+    if room["game"] == "concentration":
+        return gs.get("reveal_ms")
     if room["game"] == "luzhanqi" and gs.get("phase") == "setup":
         return gs.get("setup_remaining_ms")
     clock = gs.get("clock")

@@ -303,7 +303,8 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const isUno = room.game === 'uno';
   const isStasis = room.game === 'stasis';
   const isUndercover = room.game === 'undercover';
-  const needsEveryoneOnline = isUndercover || room.game === 'doudizhu' || room.game === 'guandan';
+  const isConcentration = room.game === 'concentration';
+  const needsEveryoneOnline = isUndercover || isConcentration || room.game === 'doudizhu' || room.game === 'guandan';
   // **房间级设置**（v1.15）：扫雷难度 / 军棋玩法 / 深空休眠地图 / 海战棋棋盘 /
   // UNO 档位与房规全部收进这一份结构，界面只按 `kind` 通用渲染 —— 客户端不认识
   // 任何 `key` 的语义，一行规则都不写。没有可调项的游戏（五子棋等）服务端不下发它。
@@ -316,8 +317,8 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const showOffline = room.status === 'playing' || needsEveryoneOnline;
   const canAddBot = isHost && !isFull && isLobbyStatus && supportsBots;
   // 人数要求：扫雷 1 人即可开（单机）；2048 / 俄罗斯方块 / 蜘蛛纸牌 1-4 人各自独立盘
-  // （1 人即可开）；飞行棋 / UNO / 深空休眠至少 2 人，谁是卧底至少 4 人；其余须满员
-  const minPlayers = isUndercover ? 4 : (isLudo || isUno || isStasis) ? 2 : room.max_players;
+  // （1 人即可开）；飞行棋 / UNO / 深空休眠 / 精神衰弱至少 2 人，谁是卧底至少 4 人。
+  const minPlayers = isUndercover ? 4 : (isLudo || isUno || isStasis || isConcentration) ? 2 : room.max_players;
   const needMorePlayers = isMine || is2048 || isTetris || room.game === 'spider' || room.game === 'abyss' || room.game === 'fish'
     ? false
     : room.players.length < minPlayers;
@@ -499,7 +500,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
               disabled={!canStart}
             >
               <Text style={styles.startBtnText}>
-                {needMorePlayers ? `等待玩家 (${room.players.length}/${isUndercover ? minPlayers : room.max_players})`
+                {needMorePlayers ? `等待玩家 (${room.players.length}/${isUndercover || isConcentration ? minPlayers : room.max_players})`
                   : waitingForOnlinePlayers ? '等待玩家上线' : !allReady ? '等待准备' : '开始游戏'}
               </Text>
             </TouchableOpacity>

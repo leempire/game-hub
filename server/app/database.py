@@ -426,6 +426,17 @@ def _build_players_record(room: dict) -> list[dict]:
 def _build_results_record(room: dict) -> list[dict]:
     """Build the per-player result list."""
     gs = room.get("game_state") or {}
+    if room["game"] == "concentration":
+        from app.game.concentration import score_rows
+        scores = {row["id"]: row for row in score_rows(gs)}
+        tied = sum(row["rank"] == 1 for row in scores.values()) > 1
+        results = []
+        for p in room["_concentration_roster"]:
+            row = scores[p["id"]]
+            result = "lose" if row["rank"] != 1 else ("draw" if tied else "win")
+            results.append({"username": p["username"], "result": result,
+                            "rank": row["rank"], "score": row["pairs"]})
+        return results
     if room["game"] == "guandan":
         return [{"username": p["username"], "result": "win" if seat % 2 == gs["winner"] else "lose"}
                 for seat, p in enumerate(room["_guandan_roster"])]
@@ -562,6 +573,9 @@ def _build_snapshot(room: dict) -> dict:
     if room["game"] == "undercover":
         return gs["summary"]
     game = room["game"]
+    if game == "concentration":
+        from app.game.concentration import snapshot
+        return snapshot(gs)
     if game == "guandan":
         from app.game.guandan import snapshot
         return {**snapshot(gs), "game": game}

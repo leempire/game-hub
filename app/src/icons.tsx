@@ -456,6 +456,15 @@ export function GuandanIcon({ size = 44 }: { size?: number }) {
   </Svg>;
 }
 
+export function ConcentrationIcon({ size = 44 }: { size?: number }) {
+  return <Svg width={size} height={size} viewBox="0 0 48 48" aria-hidden>
+    <Rect x={3} y={11} width={19} height={26} rx={4} fill={colors.primary} />
+    <Rect x={7} y={15} width={11} height={18} rx={2} fill="none" stroke={colors.white} strokeWidth={1.5} />
+    <Rect x={26} y={11} width={19} height={26} rx={4} fill={colors.card} stroke={colors.text} strokeWidth={2} />
+    <Path d="M32 19 H39 L34 29" fill="none" stroke={colors.text} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>;
+}
+
 /** 游戏入口图标：三张扇形摊开的牌压在深色底上。 */
 export function UnoIcon({ size = 40 }: { size?: number }) {
   // [水平偏移, 牌面颜色]；中间的牌正对、两侧各偏一点并轻微旋转
