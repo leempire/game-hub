@@ -343,6 +343,15 @@ def test_existing_kick_path_disconnects_watching_sessions_immediately(client, mo
     observer = user(client, 'watcher')
     ticket = grant(client, code, observer).json()['grant']
     monkeypatch.setattr(spectating, 'AUTH_CHECK_SECONDS', 3600)
+    monkeypatch.setattr(spectating, 'SAMPLE_SECONDS', 3600)
+    close = spectating._close
+
+    async def broadcast_before_kick_close(socket, close_code, reason):
+        if close_code == 4001:
+            await spectating.broadcast_public(code, {'type': 'watch_state'})
+        await close(socket, close_code, reason)
+
+    monkeypatch.setattr(spectating, '_close', broadcast_before_kick_close)
     with client.websocket_connect(watch_url(code, observer, ticket)) as watcher:
         recv(watcher, 'watch_sync')
         # The production ban route uses this same kick function.
@@ -350,6 +359,7 @@ def test_existing_kick_path_disconnects_watching_sessions_immediately(client, mo
         with pytest.raises(WebSocketDisconnect) as error:
             watcher.receive_json()
         assert error.value.code == 4001
+        assert error.value.reason == '账号已被封禁'
     assert ticket not in spectating._grants and not spectating._watchers.get(code)
 
 
@@ -368,4 +378,5 @@ def test_password_change_immediately_disconnects_watcher_without_polling(client,
         with pytest.raises(WebSocketDisconnect) as error:
             watcher.receive_json()
         assert error.value.code == 4001
+        assert error.value.reason == '密码已修改，请重新登录'
     assert ticket not in spectating._grants and not spectating._watchers.get(code)

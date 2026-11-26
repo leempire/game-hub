@@ -101,6 +101,9 @@ async def _send(socket, lock, payload, authorize=None) -> bool:
 
 
 async def _close(socket, code, reason):
+    revoked_reason = getattr(socket.state, 'watch_auth_revoked', None)
+    if revoked_reason is not None:
+        code, reason = 4001, revoked_reason
     try:
         await asyncio.wait_for(socket.close(code=code, reason=reason), timeout=1.0)
     except (asyncio.TimeoutError, WebSocketDisconnect, RuntimeError, OSError):
@@ -121,13 +124,20 @@ async def broadcast_public(code: str, message: dict):
 
 async def kick_user(user_id: int, reason: str):
     """Revoke grants and disconnect all watching sessions immediately."""
+    connections = [(code, socket) for code, group in list(_watchers.items())
+                   for socket, _, _, watcher_id in list(group.values()) if watcher_id == user_id]
+    # Polling and broadcasts can notice the revoked grant before the kick sends its close frame.
+    for _, socket in connections:
+        socket.state.watch_auth_revoked = reason
     for grant, saved in list(_grants.items()):
         if saved['user_id'] == user_id:
             _grants.pop(grant, None)
-    connections = [connection for group in list(_watchers.values())
-                   for connection in list(group.values()) if connection[3] == user_id]
     if connections:
-        await asyncio.gather(*(_close(connection[0], 4001, reason) for connection in connections))
+        try:
+            await asyncio.gather(*(_close(socket, 4001, reason) for _, socket in connections))
+        finally:
+            for code, socket in connections:
+                _unregister(code, socket)
 
 
 def _unregister(code, socket):
