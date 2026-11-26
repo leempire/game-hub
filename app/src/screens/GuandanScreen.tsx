@@ -8,7 +8,8 @@ import type { Room } from '../api';
 import { useAuth } from '../auth';
 import { onConfirmLeave } from '../backGuard';
 import GameShell, { GameResult } from '../GameShell';
-import { describeGuandanCombo, formatGuandanResult, guandanRanks, isGuandanWild } from '../guandan';
+import PokerPlayHistory from '../PokerPlayHistory';
+import { describeGuandanCombo, describeGuandanPlay, formatGuandanResult, guandanRanks, isGuandanWild } from '../guandan';
 import type {
   GuandanCard, GuandanCombo, GuandanCommand, GuandanQuery, GuandanResultMessage, GuandanVersion, GuandanView,
 } from '../guandan';
@@ -346,10 +347,13 @@ export default function GuandanScreen({ code }: { code: string }) {
         onViewHistory={() => { backToRoom(); navigation.navigate('History'); }}>
         <View testID="guandan-result" style={styles.results}>
           {summary.players.map((id, index) => <View key={id} style={styles.resultRow}>
-            <Text style={styles.note}>{name(id)}{id === uid ? '（我）' : ''}</Text>
+            <Text style={styles.note}>{name(id)}{id === uid ? '（我）' : ''}
+              {summary.remaining?.[index] !== undefined ? ` · 剩 ${summary.remaining[index]} 张` : ''}</Text>
             <Text style={styles.note}>{finalRanks.find(entry => entry.id === id)?.place ?? `第 ${index % 2 + 1} 队`}</Text>
           </View>)}
         </View>
+        {!!summary.play_history?.length && <PokerPlayHistory game="guandan" records={summary.play_history}
+          name={name} describe={describeGuandanPlay} result />}
       </GameResult>}
     </GameShell>
   </View>;

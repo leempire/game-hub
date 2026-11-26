@@ -3,6 +3,7 @@ from random import Random
 
 import pytest
 
+from app import persistence
 from app.game import guandan as engine
 
 
@@ -44,12 +45,12 @@ def test_deal_has_distinct_entities_and_private_seat_views():
     cards = [card for view in views for card in view["hand"]]
     assert len({card["id"] for card in cards}) == 108
     assert len({(card["rank"], card["suit"]) for card in cards}) == 54
-    for seat, view in enumerate(views):
+    for view in views:
         assert view["players"] == SEATS
         assert view["levels"] == ["2", "2"]
         assert (view["deal"], view["revision"], view["phase"]) == (1, 0, "playing")
         assert view["current_id"] in SEATS
-        assert view["remaining"] == [27 if i == seat else None for i in range(4)]
+        assert view["remaining"] == [27, 27, 27, 27]
         assert view["lead_reason"] == "first"
     views[0]["hand"][0]["rank"] = "changed"
     assert engine.view_for(gs, SEATS[0])["hand"][0]["rank"] != "changed"
@@ -174,15 +175,24 @@ def test_partner_leads_when_every_active_opponent_passes_after_a_finish():
     assert view["revision"] == 4
 
 
-def test_three_passes_restore_the_last_players_lead_and_the_tenth_card_is_reported():
+def test_three_passes_restore_the_lead_and_keep_public_counts_and_history():
     first, second, partner, fourth = SEATS
     gs = _game("3C 4D 5H 6S 7C 8D 9H 10S JC QD KH", "4S", "5C", "6D")
-    assert engine.view_for(gs, second)["remaining"][0] is None
+    assert engine.view_for(gs, second)["remaining"][0] == 11
     _play(gs, first, [_ids(gs, first)[0]])
+    play = engine.view_for(gs, second)["last_play"]
     assert engine.view_for(gs, second)["remaining"][0] == 10
     _pass(gs, second, partner, fourth)
     view = engine.view_for(gs, second)
     assert (view["current_id"], view["lead_reason"], view["last_play"]) == (first, "pass", None)
+    assert view["play_history"] == [
+        {"player_id": uid, "deal": 1, "level": "2", "play": play if uid == first else None}
+        for uid in SEATS
+    ]
+    restored = persistence.loads_state(persistence.dumps_state(gs))
+    assert engine.view_for(restored, fourth)["play_history"] == view["play_history"]
+    view["play_history"][0]["play"]["cards"].clear()
+    assert engine.view_for(gs, fourth)["play_history"][0]["play"]["cards"] == [{"id": 0, "rank": "3", "suit": "C"}]
 
 
 def test_overtaking_the_last_hand_reopens_play_for_seats_that_passed():
@@ -268,10 +278,13 @@ class _NextDeal(Random):
 def test_single_tribute_includes_a_first_and_last_finisher_from_the_same_team():
     first, second, partner, fourth = SEATS
     gs = _single_down()
+    previous = engine.snapshot(gs)["play_history"]
     engine.apply(gs, first, "next", {"rng": _NextDeal(["BJ", "BJ", "SJ 3H", ""])})
     view = engine.view_for(gs, first)
     assert (view["deal"], view["phase"], view["current_id"]) == (2, "returning", None)
     assert (view["level"], view["level_team"]) == ("3", 0)
+    assert view["remaining"] == [28, 27, 26, 27]
+    assert view["play_history"] == previous
     pair, = view["exchange"]["pairs"]
     assert (pair["from_id"], pair["to_id"]) == (partner, first)
     assert pair["tribute"]["rank"] == "SJ"
@@ -283,6 +296,7 @@ def test_single_tribute_includes_a_first_and_last_finisher_from_the_same_team():
     view = engine.view_for(gs, partner)
     assert (view["phase"], view["current_id"], view["lead_reason"]) == ("playing", partner, "tribute")
     assert view["exchange"]["pairs"][0]["returned"]["id"] == card_id
+    assert view["remaining"] == [27, 27, 27, 27]
     assert card_id in _ids(gs, partner)
 
 

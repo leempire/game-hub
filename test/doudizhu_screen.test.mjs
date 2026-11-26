@@ -52,6 +52,18 @@ test('the table tells the player when a bot is thinking', () => {
   assert.match(html, /人机 思考中…/);
   assert.equal(ui.get('doudizhu-play').disabled, true);
 });
+
+test('the table shows the player’s own hand count and keeps past plays after a new lead', () => {
+  const ui = mountGame('Doudizhu', game({ play_history: [
+    { player_id: 3, play: { player_id: 3, cards: ['3C'], kind: 'single', label: '单张' } },
+    { player_id: 2, play: null },
+  ] }), { width: 390 });
+  assert.match(ui.render(), /剩 20 张/);
+  assert.ok(ui.get('doudizhu-history-feed'));
+  ui.press('doudizhu-history-open');
+  assert.ok(ui.get('doudizhu-history-modal'));
+  assert.match(ui.render(), /梅花3/);
+});
 test('only the matching pending hint selects cards and rejection retains the selected pair', () => {
   const ui = mount(390);
   ui.press('doudizhu-hint');
