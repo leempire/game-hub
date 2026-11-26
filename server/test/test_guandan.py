@@ -256,9 +256,18 @@ def _double_down():
 
 
 class _NextDeal(Random):
-    def __init__(self, requested):
+    # Python 3.10 的 `_random.Random.__new__` 会把构造参数当种子（非整数直接
+    # 抛 unhashable），所以不能给子类传参；用工厂方法注入要发的牌。
+    requested = ()
+
+    def __init__(self):
         super().__init__(0)
-        self.requested = requested
+
+    @classmethod
+    def with_cards(cls, requested):
+        rng = cls()
+        rng.requested = requested
+        return rng
 
     def shuffle(self, deck):
         available = deck.copy()
@@ -279,7 +288,7 @@ def test_single_tribute_includes_a_first_and_last_finisher_from_the_same_team():
     first, second, partner, fourth = SEATS
     gs = _single_down()
     previous = engine.snapshot(gs)["play_history"]
-    engine.apply(gs, first, "next", {"rng": _NextDeal(["BJ", "BJ", "SJ 3H", ""])})
+    engine.apply(gs, first, "next", {"rng": _NextDeal.with_cards(["BJ", "BJ", "SJ 3H", ""])})
     view = engine.view_for(gs, first)
     assert (view["deal"], view["phase"], view["current_id"]) == (2, "returning", None)
     assert (view["level"], view["level_team"]) == ("3", 0)
@@ -303,7 +312,7 @@ def test_single_tribute_includes_a_first_and_last_finisher_from_the_same_team():
 def test_double_tribute_ties_send_to_upper_seat_and_returns_commit_together():
     first, second, partner, fourth = SEATS
     gs = _double_down()
-    engine.apply(gs, first, "next", {"rng": _NextDeal(["BJ BJ", "SJ", "", "SJ"])})
+    engine.apply(gs, first, "next", {"rng": _NextDeal.with_cards(["BJ BJ", "SJ", "", "SJ"])})
     pairs = engine.view_for(gs, fourth)["exchange"]["pairs"]
     assert [(pair["from_id"], pair["to_id"]) for pair in pairs] == [(second, first), (fourth, partner)]
     assert [pair["tribute"]["rank"] for pair in pairs] == ["SJ", "SJ"]
@@ -335,7 +344,7 @@ def test_double_tribute_ties_send_to_upper_seat_and_returns_commit_together():
 def test_double_tribute_is_resisted_when_the_two_givers_share_two_big_jokers():
     first, *_ = SEATS
     gs = _double_down()
-    engine.apply(gs, first, "next", {"rng": _NextDeal(["", "BJ", "", "BJ"])})
+    engine.apply(gs, first, "next", {"rng": _NextDeal.with_cards(["", "BJ", "", "BJ"])})
     view = engine.view_for(gs, first)
     assert view["exchange"] == {"antitribute": True, "lead_id": first, "pairs": []}
     assert (view["phase"], view["current_id"], view["lead_reason"]) == ("playing", first, "antitribute")
@@ -344,7 +353,7 @@ def test_double_tribute_is_resisted_when_the_two_givers_share_two_big_jokers():
 def test_larger_double_tribute_goes_to_the_head_even_from_the_other_side():
     first, second, partner, fourth = SEATS
     gs = _double_down()
-    engine.apply(gs, first, "next", {"rng": _NextDeal(["BJ", "SJ SJ", "", "BJ"])})
+    engine.apply(gs, first, "next", {"rng": _NextDeal.with_cards(["BJ", "SJ SJ", "", "BJ"])})
     exchange = engine.view_for(gs, first)["exchange"]
     assert exchange["lead_id"] == fourth
     assert [(p["from_id"], p["to_id"], p["tribute"]["rank"]) for p in exchange["pairs"]] == [
@@ -369,7 +378,7 @@ def test_return_choices_fall_back_to_the_weakest_card_without_a_normal_option():
     first, *_ = SEATS
     gs = _single_down()
     high_cards = [f"{rank}{suit}" for rank in ("J", "Q", "K", "A", "3", "J", "Q") for suit in "SHDC"]
-    engine.apply(gs, first, "next", {"rng": _NextDeal([" ".join(high_cards[:27]), "BJ BJ", "SJ SJ", ""])})
+    engine.apply(gs, first, "next", {"rng": _NextDeal.with_cards([" ".join(high_cards[:27]), "BJ BJ", "SJ SJ", ""])})
     view = engine.view_for(gs, first)
     assert {c["rank"] for c in view["hand"] if c["id"] in view["return_choices"]} == {"J"}
     before = deepcopy(gs)

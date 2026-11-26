@@ -40,6 +40,7 @@ const ROUTE_BY_PATH: Record<string, string> = {
   guandan: 'Guandan',
   stasis: 'Stasis',
   abyss: 'Abyss',
+  fish: 'Fish',
   spider: 'Spider',
 };
 

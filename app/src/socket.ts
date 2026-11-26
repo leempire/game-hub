@@ -44,7 +44,7 @@ export class RoomSocket {
   private closed = false;
   private paused = false;
   private onOpenCallback: (() => void) | null = null;
-  private onCloseCallback: (() => void) | null = null;
+  private onCloseCallback: ((code: number) => void) | null = null;
   // 大厅类消息（ready/start/add_bot…）在连接建立前入队，onopen 后按序补发；
   // 对局内动作（move/fire/reveal）不排队，避免重连后发出过期操作。
   private pendingLobby: Record<string, unknown>[] = [];
@@ -54,7 +54,7 @@ export class RoomSocket {
     this.token = token;
   }
 
-  connect(onOpen?: () => void, onClose?: () => void): void {
+  connect(onOpen?: () => void, onClose?: (code: number) => void): void {
     this.onOpenCallback = onOpen ?? null;
     this.onCloseCallback = onClose ?? null;
     this.closed = false;
@@ -102,7 +102,7 @@ export class RoomSocket {
 
     this.ws.onclose = (event) => {
       this.stopPing();
-      this.onCloseCallback?.();
+      this.onCloseCallback?.(event.code);
       if (FATAL_CLOSE.has(event.code)) {
         this.closed = true;
         live.delete(this);

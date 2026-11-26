@@ -40,7 +40,7 @@ from app.game.connect4 import (
     COLS as C4_COLS, ROWS as C4_ROWS,
     BLACK as C4_BLACK, WHITE as C4_WHITE,
 )
-from app.game import abyss, doudizhu, doudizhu_ai, guandan, guandan_ai, undercover
+from app.game import abyss, doudizhu, doudizhu_ai, fish, guandan, guandan_ai, undercover
 from app.game import stasis as stasis_engine
 from app.game import (battleship_ai, gomoku_ai, reversi_ai, dots_ai, ludo_ai, xiangqi_ai,
                  connect4_ai, uno_ai, luzhanqi_ai)
@@ -127,7 +127,7 @@ async def ws_room(websocket: WebSocket, code: str):
         return
     # Check user is a player in the room
     player_ids = {p["id"] for p in room["players"]}
-    if user_id not in player_ids or (room["game"] == "abyss" and room["status"] == "playing"
+    if user_id not in player_ids or (room["game"] in ("abyss", "fish") and room["status"] == "playing"
                                      and not rm.user_in_game(room, user_id)):
         await websocket.close(code=4003, reason="你不在房间中")
         return
@@ -180,7 +180,7 @@ async def ws_room(websocket: WebSocket, code: str):
             conns = _connections.setdefault(code, {})
             if private_round and (rm.get_room(code) is not room or conns.get(user_id) is not websocket):
                 break
-            if room["game"] == "abyss" and conns.get(user_id) is not websocket:
+            if room["game"] in ("abyss", "fish") and conns.get(user_id) is not websocket:
                 break
             if user_id not in conns:
                 conns[user_id] = websocket
@@ -366,6 +366,9 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
         # 那正是本项目最忌讳的失败模式，所以这里回一句能看懂的话。
         # 这一支不解析载荷、不写状态，下一版连常量一起删。
         await _send_error(code, user_id, "客户端版本过旧，请更新后再改玩法设置")
+    elif msg_type == "fish_move":
+        if room["game"] == "fish" and rm.user_in_game(room, user_id):
+            fish.move(room["game_state"], user_id, data.get("dx"), data.get("dy"))
     elif msg_type in ("abyss_move", "abyss_pick"):
         if room["game"] == "abyss" and rm.user_in_game(room, user_id):
             gs = room["game_state"]
@@ -495,6 +498,9 @@ async def _handle_start(code: str, user_id: int):
         return
     if room["game"] == "undercover":
         _send_undercover_update(room, kind="game_start")
+        return
+    if room["game"] == "fish":
+        _stasis_send_all(code, {"type": "game_start", "game": fish.snapshot(gs)})
         return
     if room["game"] == "abyss":
         _stasis_send_all(code, {"type": "game_start", "game": abyss.snapshot(gs)})
@@ -928,7 +934,7 @@ async def _handle_surrender(code: str, user_id: int):
         if room["status"] == "playing":
             await _handle_leave(code, user_id)
         return
-    if room["game"] == "abyss":
+    if room["game"] in ("abyss", "fish"):
         await _handle_leave(code, user_id)
         return
     if room["game"] == "stasis":
@@ -1115,6 +1121,8 @@ async def _broadcast_leave(code: str, user_id: int, action: str,
             await _uno_event(code, "leave", seat)
             await _send_uno_state(code, updated_room)
             await _broadcast_uno_game_over(code, updated_room)
+        elif updated_room["game"] == "fish":
+            send_fish_end(updated_room)
         elif updated_room["game"] == "abyss":
             send_abyss_end(updated_room)
         elif updated_room["game"] == "stasis":
@@ -1128,7 +1136,7 @@ async def _broadcast_leave(code: str, user_id: int, action: str,
                 "type": "game_over", "winner": winner, "reason": reason,
             })
         # Also broadcast updated lobby (host may have transferred)
-        if updated_room["game"] != "abyss":
+        if updated_room["game"] not in ("abyss", "fish"):
             await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(updated_room)})
     elif action == "removed" and updated_room:
         if updated_room["game"] in ("minesweeper", "ludo", "uno", "stasis"):
@@ -1238,6 +1246,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = guandan.view_for(room["game_state"], user_id)
         elif room["game"] == "undercover":
             game_info = _undercover_view(room, user_id)
+        elif room["game"] == "fish":
+            game_info = fish.snapshot(room["game_state"])
         elif room["game"] == "abyss":
             game_info = abyss.snapshot(room["game_state"])
         elif room["game"] == "stasis":
@@ -1258,6 +1268,9 @@ def _build_sync(room: dict, user_id: int) -> dict:
     return {
         "type": "sync", "room": room_dict, "game": game_info,
         "in_game": rm.user_in_game(room, user_id),
+        **({"fish_result": fish.snapshot(room["game_state"])}
+           if room["game"] == "fish" and room["status"] == "waiting"
+           and (room.get("game_state") or {}).get("finished") else {}),
         **({"abyss_result": abyss.snapshot(room["game_state"])}
            if room["game"] == "abyss" and room["status"] == "waiting"
            and (room.get("game_state") or {}).get("finished") else {}),
@@ -2977,6 +2990,26 @@ def _stasis_send_all(code: str, message: dict, droppable: bool = False):
         _stasis_enqueue(ws, message, droppable)
 
 
+def send_fish_tick(room: dict):
+    ready = [ws for ws in _connections.get(room["code"], {}).values() if _pending_send(ws) is None]
+    if ready:
+        payload = {"type": "fish_state", "game": fish.snapshot(room["game_state"])}
+        encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+        for ws in ready:
+            _stasis_enqueue(ws, encoded, droppable=True)
+
+
+def send_fish_lobby(room: dict):
+    _stasis_send_all(room["code"], {"type": "lobby", "room": rm.room_to_dict(room)})
+
+
+def send_fish_end(room: dict):
+    gs = room["game_state"]
+    _stasis_send_all(room["code"], {"type": "game_over", "reason": gs["reason"], "game": fish.snapshot(gs)})
+    room.pop("_lobby_after_game_over", None)
+    send_fish_lobby(room)
+
+
 def send_abyss_tick(room: dict):
     ready = [ws for ws in _connections.get(room["code"], {}).values() if _pending_send(ws) is None]
     if not ready:
@@ -3157,6 +3190,12 @@ async def reschedule_after_restore():
                 # 恢复只需要重起任务。因为用的是**游戏内时钟**而不是墙钟，
                 # 恢复后时间从最后一次关键帧继续，不会跳变（最多丢 5 秒游戏时间）。
                 rm._ensure_stasis_tick(room["code"])
+            elif room["game"] == "fish":
+                for p in room["players"]:
+                    fish.stop(gs, p["id"])
+                    if rm.user_in_game(room, p["id"]):
+                        rm._start_dc_timer(room["code"], p["id"], asyncio.get_running_loop())
+                rm._ensure_fish_tick(room)
             elif room["game"] == "abyss":
                 for p in room["players"]:
                     abyss.stop(gs, p["id"])

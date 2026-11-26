@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon,
   Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon,
-  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon,
+  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon, FishIcon,
 } from './icons';
 
 /**
@@ -24,7 +24,7 @@ import {
 export type GameKey =
   | 'gomoku' | 'minesweeper' | 'reversi' | 'battleship' | 'dots' | 'ludo'
   | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt' | 'abyss'
-  | 'undercover' | 'doudizhu' | 'guandan';
+  | 'undercover' | 'doudizhu' | 'guandan' | 'fish';
 
 export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop' | 'single';
 
@@ -96,6 +96,8 @@ export const GAMES: GameEntry[] = [
   { key: 'spider', title: '蜘蛛纸牌', short: '蜘蛛纸牌', desc: '各自整理黑桃顺牌，收齐八组 K 到 A',
     badge: '1–4 人 · 独立牌桌', category: 'solo', ionicon: 'layers', Icon: SpiderIcon },
 
+  { key: 'fish', title: '潮汐鱼群', short: '潮汐鱼群', desc: '同游一片海，吞小鱼、躲大鱼，比谁长得快',
+    badge: '1–4 人 · 同图竞速', category: 'solo', ionicon: 'fish-outline', Icon: FishIcon },
   { key: 'abyss', title: '深渊回声', short: '深渊回声', desc: '潜入沉没回收站，合力打退深海怪潮',
     badge: '1–4 人 · 合作', category: 'coop', ionicon: 'water-outline', Icon: AbyssIcon },
   { key: 'stasis', title: '深空休眠', short: '深空休眠', desc: '实时合作守舱，打死静默体',

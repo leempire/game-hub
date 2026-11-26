@@ -318,7 +318,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   // 人数要求：扫雷 1 人即可开（单机）；2048 / 俄罗斯方块 / 蜘蛛纸牌 1-4 人各自独立盘
   // （1 人即可开）；飞行棋 / UNO / 深空休眠至少 2 人，谁是卧底至少 4 人；其余须满员
   const minPlayers = isUndercover ? 4 : (isLudo || isUno || isStasis) ? 2 : room.max_players;
-  const needMorePlayers = isMine || is2048 || isTetris || room.game === 'spider' || room.game === 'abyss'
+  const needMorePlayers = isMine || is2048 || isTetris || room.game === 'spider' || room.game === 'abyss' || room.game === 'fish'
     ? false
     : room.players.length < minPlayers;
   const waitingForOnlinePlayers = needsEveryoneOnline && room.players.some(player => !player.connected);
@@ -371,7 +371,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
           </View>
         </TouchableOpacity>
 
-        <GameIntro game={room.game} userId={user?.id} practice={room.practice} onPractice={room.game === 'abyss' ? undefined : async () => {
+        <GameIntro game={room.game} userId={user?.id} practice={room.practice} onPractice={['abyss', 'fish'].includes(room.game) ? undefined : async () => {
           if (!token) throw new Error('请先登录');
           const result = await createPractice(token, room.game);
           if (focusedRef.current) navigation.replace('Room', { code: result.code });

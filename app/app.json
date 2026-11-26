@@ -2,7 +2,7 @@
   "expo": {
     "name": "GameHub",
     "slug": "gamehub",
-    "version": "1.29.2",
+    "version": "1.32.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.gamehub.app",
-      "versionCode": 51,
+      "versionCode": 54,
       "adaptiveIcon": {
         "backgroundColor": "#4338CA",
         "foregroundImage": "./assets/android-icon-foreground.png",

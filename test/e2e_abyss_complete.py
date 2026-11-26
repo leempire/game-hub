@@ -1347,13 +1347,13 @@ def main(minutes):
             gs['fields'].clear()
             lead = next(iter(gs['players'].values()))
             lead['orbits'].clear()
-            lead.update(weapons={'rivet': 7}, passives={'empty_tome': 5})
+            lead.update(weapons={'rivet': 4}, passives={'empty_tome': 5})
             abyss._refresh_stats(lead)
 
         in_match(code, set_upgrade)
         host.get_by_text('选择强化 · 10s', exact=True).wait_for(timeout=3000)
         card = host.get_by_test_id('abyss-choice-rivet')
-        card.get_by_text('可用宝箱进化为圣铆炮', exact=True).wait_for()
+        card.get_by_text('进化条件达成：圣铆炮', exact=True).wait_for()
         choice_frames = host.evaluate("""() => new Promise(resolve => {
           const frames = [];
           let last = 0;
@@ -1409,7 +1409,7 @@ def main(minutes):
         ok('20 级升级显示成长加成、进化条件、新武器一级数值和实际修补量')
         evolution_ready = host.get_by_test_id('abyss-evolution-ready')
         evolution_ready.wait_for()
-        assert host.get_by_test_id('abyss-inventory').get_attribute('aria-label') == '装备，可用宝箱进化为圣铆炮'
+        assert host.get_by_test_id('abyss-inventory').get_attribute('aria-label') == '装备，可进化为圣铆炮'
 
 
         host.get_by_test_id('abyss-audio').click()
@@ -1427,7 +1427,7 @@ def main(minutes):
         clash_effect = in_match(code, start_boss)
         host.get_by_test_id('abyss-warden-warning').get_by_text('断缆落点', exact=False).wait_for()
         host.wait_for_function('abyssMusicElement.volume === .28')
-        max_hp = {12: 2160, 20: 2916, 30: 4320}[minutes]
+        max_hp = {12: 8325, 20: 11239, 30: 16650}[minutes]
         host.get_by_test_id('abyss-warden-health').get_by_text(
             re.compile(rf'^断缆守卫(?: · 狂暴)? · [0-9.]+ / {max_hp}$')).wait_for()
         arena = host.get_by_test_id('abyss-arena')
@@ -2047,7 +2047,7 @@ def main(minutes):
         solo_report = solo.get_by_test_id('abyss-result-summary')
         solo_report.get_by_text('本局贡献', exact=True).wait_for()
         solo_report.get_by_text('地图 · 无尽', exact=True).wait_for()
-        solo_report.get_by_text('拾取经验 7', exact=False).wait_for()
+        solo_report.get_by_text(f'拾取经验 {round(7 * abyss.XP_GAIN_SCALE)}', exact=False).wait_for()
         solo_report.get_by_text('输出伤害 9', exact=False).wait_for()
         assert solo_report.get_by_text('全队击退', exact=True).count() == 0
         award = solo.get_by_test_id('abyss-talent-award')

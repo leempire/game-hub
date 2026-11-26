@@ -453,6 +453,13 @@ def _build_results_record(room: dict) -> list[dict]:
                 result = "win" if roles[p["id"]] == summary["winner"] else "lose"
             results.append({"username": p["username"], "result": result})
         return results
+    if room["game"] == "fish":
+        from app.game.fish import ranking
+        rows = {row["id"]: row for row in ranking(gs)}
+        return [{"username": p["username"], "score": rows[p["id"]]["score"],
+                 "rank": rows[p["id"]]["rank"],
+                 "result": "win" if rows[p["id"]]["rank"] == 1 else "lose"}
+                for p in room["players"]]
     if room["game"] == "abyss":
         return [{"username": p["username"], "score": gs["players"][p["id"]]["kills"],
                  "result": "win" if gs["result"] == "won" and not gs["players"][p["id"]]["departed"] else "lose"}
@@ -561,6 +568,9 @@ def _build_snapshot(room: dict) -> dict:
     if game == "doudizhu":
         from app.game.doudizhu import snapshot
         return {**snapshot(gs), "game": game}
+    if game == "fish":
+        from app.game.fish import ranking
+        return {"game": game, "ranking": ranking(gs), "reason": gs["reason"]}
     if game == "abyss":
         from app.game.abyss import record_summary
         return record_summary(gs)
