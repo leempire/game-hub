@@ -232,6 +232,7 @@ def test_following_checks_shape_and_rank_then_two_passes_restore_lead():
     assert engine.view_for(gs, landlord)["revision"] == 1
     opening = gs["hands"][landlord][:5]
     engine.play(gs, landlord, opening)
+    first_play = engine.view_for(gs, farmer)["last_play"]
     before = persistence.dumps_state(gs)
     for cards in (gs["hands"][farmer], ["9C"], ["9C", "9C"], ["BJ"], [{}], None, "9C"):
         with pytest.raises(ValueError):
@@ -247,6 +248,11 @@ def test_following_checks_shape_and_rank_then_two_passes_restore_lead():
     assert view["last_play"] is None
     assert view["can_pass"] is False
     assert engine.hint(gs, landlord) == ["8C"]
+    assert engine.view_for(persistence.loads_state(persistence.dumps_state(gs)), farmer)["play_history"] == [
+        {"player_id": landlord, "play": first_play},
+        {"player_id": farmer, "play": None},
+        {"player_id": other, "play": None},
+    ]
 
 
 def test_bomb_beats_normal_play_and_higher_bomb_then_rocket_win():
@@ -278,6 +284,7 @@ def test_landlord_spring_scores_two_farmers_and_terminal_projection_is_public():
     gs["hands"][29] = _cards("3 3 3 3")
     engine.play(gs, 29, _cards("3 3 3 3"))
     end = engine.snapshot(gs)
+    assert end.pop("play_history") == [{"player_id": 29, "play": end["last_play"]}]
     assert end == {
         "match_id": "fixed-match", "revision": 4, "seat_uids": SEATS,
         "landlord_id": 29, "winner": "landlord", "reason": "empty_hand",

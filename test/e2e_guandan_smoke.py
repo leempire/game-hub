@@ -68,7 +68,7 @@ def main():
         host.get_by_text("开始游戏", exact=True).click()
         starts = [player.received("game_start")["game"] for player in players]
         assert len({card["id"] for state in starts for card in state["hand"]}) == 108
-        assert all("hands" not in state and state["remaining"].count(None) == 3 for state in starts)
+        assert all("hands" not in state and state["remaining"] == [27, 27, 27, 27] for state in starts)
         for player in players:
             expect(player.page.locator(HAND)).to_have_count(27)
 
@@ -78,11 +78,34 @@ def main():
         page = leader.page
         for width, height, rows in ((320, 568, 3), (390, 844, 2), (667, 375, 2), (1440, 900, 1)):
             page.set_viewport_size({"width": width, "height": height})
-            expect(page.locator('[data-testid^="guandan-hand-row-"]')).to_have_count(rows)
-            expect(page.get_by_test_id("guandan-play")).to_be_in_viewport()
+            hand_rows = page.locator('[data-testid^="guandan-hand-row-"]')
+            expect(hand_rows).to_have_count(rows)
+            play_button = page.get_by_test_id("guandan-play")
+            expect(play_button).to_be_in_viewport()
+            button_box = play_button.bounding_box()
+            hand_box = page.get_by_test_id("guandan-hand").bounding_box()
+            assert button_box["y"] + button_box["height"] <= hand_box["y"], "操作区应与斗地主一样位于手牌上方"
+            expect(page.get_by_test_id("guandan-score")).to_contain_text("第 1 副")
+            expect(page.get_by_test_id("guandan-score")).to_contain_text("打 2")
+            expect(page.get_by_test_id("guandan-turn")).to_be_in_viewport()
+            expect(page.get_by_test_id("guandan-history-open")).to_be_in_viewport()
+            partner = state["players"][(state["players"].index(leader.uid) + 2) % 4]
+            expect(page.get_by_test_id(f"guandan-seat-{partner}")).to_have_attribute("aria-label", re.compile(r"搭档.*剩 27 张"))
             for slot in page.locator(HAND).all():
                 expect(slot).to_be_in_viewport(ratio=0.99)
                 assert slot.bounding_box()["width"] >= 24
+            row_elements = hand_rows.all()
+            for upper, lower in zip(row_elements, row_elements[1:]):
+                upper_faces = upper.locator("..").locator(':scope > [aria-hidden="true"]')
+                lower_face = lower.locator("..").locator(':scope > [aria-hidden="true"]').first.bounding_box()
+                first_face = upper_faces.first.bounding_box()
+                assert first_face["y"] + first_face["height"] > lower_face["y"], "相邻手牌行应覆盖牌面留白"
+                lower_edge = lower.bounding_box()["y"]
+                for face in upper_faces.all():
+                    labels = face.get_by_text(re.compile(r"^(?:[2-9]|10|[JQKA]|大王|小王|级|配|还)$")).all()
+                    for glyph in labels + face.locator("svg").all():
+                        box = glyph.bounding_box()
+                        assert box["y"] + box["height"] <= lower_edge + 1, "下一行抬起时仍需露出牌角"
             assert page.locator("html").evaluate("el => el.scrollWidth === el.clientWidth")
 
         page.set_viewport_size({"width": 320, "height": 568})
@@ -91,6 +114,12 @@ def main():
         card.focus()
         page.keyboard.press("Space")
         expect(card).to_have_attribute("aria-pressed", "true")
+        second_row = page.get_by_test_id("guandan-hand-row-2").locator(HAND).first
+        second_row.click(position={"x": 3, "y": 3})
+        expect(second_row).to_have_attribute("aria-pressed", "true")
+        expect(card).to_have_attribute("aria-pressed", "true")
+        second_row.click(position={"x": 3, "y": 3})
+        expect(second_row).to_have_attribute("aria-pressed", "false")
         page.get_by_test_id("guandan-expand").click()
         expect(page.get_by_test_id(f"guandan-large-card-{pick}")).to_have_attribute("aria-pressed", "true")
         page.get_by_test_id("guandan-picker-close").click()
@@ -101,6 +130,8 @@ def main():
         state = leader.received("guandan_state", lambda m: m["game"]["revision"] > state["revision"])["game"]
         assert state["last_play"]["uid"] == leader.uid and state["last_play"]["cards"][0]["id"] == pick
         expect(page.locator(HAND)).to_have_count(26)
+        expect(page.get_by_test_id("guandan-public-cards")).to_be_in_viewport(ratio=0.95)
+        expect(page.get_by_test_id("guandan-turn")).to_be_in_viewport(ratio=0.95)
         offset = len(leader.messages)
         page.reload(timeout=90000)
         restored = leader.received("sync", lambda m: (m.get("game") or {}).get("match_id") == match, offset)["game"]
@@ -110,6 +141,15 @@ def main():
             by_id[state["current_id"]].page.get_by_test_id("guandan-pass").click()
             state = leader.received("guandan_state", lambda m: m["game"]["revision"] > state["revision"])["game"]
         assert state["current_id"] == leader.uid and state["last_play"] is None
+        feed = page.get_by_test_id("guandan-history-feed")
+        expect(feed).to_contain_text("单张")
+        expect(feed.get_by_text("过牌", exact=True)).to_have_count(3)
+        assert feed.evaluate("el => el.clientHeight > 0 && el.scrollHeight > el.clientHeight")
+        feed.evaluate("el => { el.scrollTop = el.scrollHeight; }")
+        assert feed.evaluate("el => el.scrollTop > 0")
+        page.get_by_test_id("guandan-history-open").click()
+        expect(page.get_by_test_id("guandan-history-modal")).to_contain_text("第 1 副")
+        page.get_by_test_id("guandan-history-close").click()
         page.go_back()
         expect(page.get_by_test_id("guandan-confirm")).to_be_visible()
         page.get_by_text("取消", exact=True).click()

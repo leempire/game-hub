@@ -79,7 +79,7 @@ def test_guandan_private_hand_preview_reconnect_and_team_zero_result(client):
         seats = list(sockets)
         assert all(len(state["hand"]) == 27 for state in states.values())
         assert len({card["id"] for state in states.values() for card in state["hand"]}) == 108
-        assert states[seats[0]]["remaining"] == [27, None, None, None]
+        assert all(state["remaining"] == [27, 27, 27, 27] for state in states.values())
         actor = states[seats[0]]["current_id"]
         state = states[actor]
         card = state["hand"][0]

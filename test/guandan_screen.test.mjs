@@ -7,7 +7,7 @@ const hand = Array.from({ length: 27 }, (_, index) => ({
 }));
 const game = (overrides = {}) => ({
   game: 'guandan', match_id: 'match-one', revision: 6, phase: 'playing', deal: 1, players: [1, 2, 3, 4],
-  levels: ['2', '2'], level: '5', level_team: null, current_id: 1, hand, remaining: [27, null, 10, null],
+  levels: ['2', '2'], level: '5', level_team: null, current_id: 1, hand, remaining: [27, 18, 10, 24],
   passed: [], finish_order: [], last_play: null, exchange: null, return_choices: [], lead_reason: 'first',
   deal_result: null, ...overrides,
 });
@@ -61,6 +61,26 @@ test('hand and public cards use vector pips with readable card labels', () => {
   assert.match(ui.render(), /<svg/);
   assert.doesNotMatch(ui.render(), /[♠♥♣♦]/);
   assert.equal(ui.get(card(1)).accessibilityLabel, '黑桃10');
+});
+
+test('seat panels show the partner, public hand counts, and each seat action', () => {
+  const ui = mount(320, 568, game({ current_id: 3, passed: [2], last_play: { uid: 4, ...pair } }));
+  assert.match(ui.get('guandan-seat-3').accessibilityLabel, /搭档.*剩 10 张.*行动中/);
+  assert.match(ui.get('guandan-seat-2').accessibilityLabel, /剩 18 张.*过牌/);
+  assert.match(ui.get('guandan-seat-4').accessibilityLabel, /已出牌/);
+});
+
+test('play history is available across deals and interprets wild cards at their original level', () => {
+  const ui = mount(390, 844, game({ deal: 2, level: '7', play_history: [
+    { player_id: 2, deal: 1, level: '5', play: { uid: 2, ...pair, wild: [{ id: 3, rank: '10', suit: 'S' }] } },
+    { player_id: 3, deal: 1, level: '5', play: null },
+  ] }));
+  assert.ok(ui.get('guandan-history-feed'));
+  assert.match(ui.render(), /第 1 副.*红桃5 当黑桃10/);
+  ui.press('guandan-history-open');
+  assert.ok(ui.get('guandan-history-modal'));
+  ui.press('guandan-history-close');
+  assert.equal(ui.get('guandan-history-modal'), undefined);
 });
 
 test('the recap at Ace shows the same level for the next deal', () => {
@@ -155,6 +175,17 @@ test('only legal return cards submit and a between-deal result displays before t
   assert.ok(ui.get('guandan-deal-result'));
   ui.press('guandan-next');
   assert.equal(ui.calls.at(-1).action, 'next');
+});
+
+test('completed tribute remains available after play moves to following', () => {
+  const ui = mount(390, 844, game({ current_id: 1, last_play: { uid: 2, ...pair }, exchange: {
+    antitribute: false, lead_id: 2, pairs: [
+      { from_id: 2, to_id: 1, tribute: hand[0], returned: hand[3], submitted: true },
+    ],
+  } }));
+  ui.press('guandan-exchange-details');
+  assert.ok(ui.get('guandan-exchange-modal'));
+  assert.match(ui.render(), /已还 方片6/);
 });
 
 test('terminal sync restores the result even when opening the game route without a live snapshot', () => {

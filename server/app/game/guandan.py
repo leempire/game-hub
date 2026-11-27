@@ -42,6 +42,7 @@ def create_game(players, match_id, rng=None):
         "passed": [],
         "finish_order": [],
         "last_play": None,
+        "play_history": [],
         "lead_reason": "first",
         "exchange": None,
         "return_submissions": {},
@@ -113,11 +114,18 @@ def _finish_deal(gs):
         gs.update(phase="between", current_id=None)
 
 
+def _record_play(gs, uid, play):
+    gs.setdefault("play_history", []).append({
+        "player_id": uid, "deal": gs["deal"], "level": gs["level"], "play": play,
+    })
+
+
 def _play(gs, uid, ids):
     combo = preview(gs, uid, ids)
     selected = set(ids)
     gs["hands"][uid] = [card for card in gs["hands"][uid] if card["id"] not in selected]
     gs.update(last_play={"uid": uid, **combo}, passed=[], lead_reason=None)
+    _record_play(gs, uid, gs["last_play"])
     order = gs["finish_order"]
     if not gs["hands"][uid]:
         order.append(uid)
@@ -135,6 +143,7 @@ def _pass(gs, uid):
     _require_turn(gs, uid)
     if gs["last_play"] is None:
         raise ValueError("领出时必须出牌")
+    _record_play(gs, uid, None)
     last_uid = gs["last_play"]["uid"]
     gs["passed"].append(uid)
     waiting = any(player != last_uid and gs["hands"][player] and player not in gs["passed"]
@@ -249,24 +258,29 @@ def depart(gs, uid, reason):
     gs["revision"] += 1
 
 
+def _remaining(gs):
+    return [len(gs["hands"][player]) for player in gs["players"]]
+
+
 def view_for(gs, uid):
     uid = uid if type(uid) is int else None
     public = {key: gs[key] for key in (
         "match_id", "revision", "phase", "deal", "players", "levels", "level", "level_team", "current_id",
         "passed", "finish_order", "last_play", "exchange", "lead_reason", "deal_result",
     )}
-    remaining = [len(gs["hands"][player]) for player in gs["players"]]
     return deepcopy({
         "game": "guandan",
         **public,
         "hand": gs["hands"].get(uid, []),
-        "remaining": [count if player == uid or count <= 10 else None
-                      for player, count in zip(gs["players"], remaining)],
+        "remaining": _remaining(gs),
+        "play_history": gs.get("play_history", []),
         "return_choices": _return_choices(gs, uid),
     })
 
 
 def snapshot(gs):
-    return deepcopy({key: gs[key] for key in (
-        "match_id", "players", "levels", "deal", "winner", "reason", "deal_result",
-    )})
+    return deepcopy({
+        **{key: gs[key] for key in ("match_id", "players", "levels", "deal", "winner", "reason", "deal_result")},
+        "remaining": _remaining(gs),
+        "play_history": gs.get("play_history", []),
+    })

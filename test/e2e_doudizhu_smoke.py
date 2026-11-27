@@ -196,6 +196,8 @@ def main():
             expect(player.page.get_by_test_id("doudizhu-table")).to_be_visible()
             expect(player.page.locator(HAND_CARDS)).to_have_count(17)
             assert game["phase"] == "bidding" and game["bottom"] == [] and "hands" not in game
+            assert game["remaining"] == [17, 17, 17]
+            expect(player.page.get_by_test_id(f"doudizhu-seat-{player.uid}")).to_contain_text("剩 17 张")
             assert game["rules"] == {"all_pass": "redeal", "airplane_pair_as_singles": True,
                                      "four_pair_as_singles": True}
 
@@ -246,14 +248,16 @@ def main():
         for player, state in zip(players, played):
             assert state["last_play"]["player_id"] == landlord.uid
             assert state["last_play"]["cards"] == [lead]
-            expect(player.page.get_by_test_id("doudizhu-public-play")).to_contain_text("出牌 · 单张 · 1 张")
+            expect(player.page.get_by_test_id("doudizhu-public-play")).to_contain_text("单张 · 1 张")
+            expect(player.page.get_by_test_id("doudizhu-history-feed")).to_contain_text("单张")
+            assert state["remaining"][state["seat_uids"].index(landlord.uid)] == 19
         expect(own_cards).to_have_count(19)
         saved = next(state for player, state in zip(players, played) if player is landlord)
         received = len(landlord.incoming)
         page.reload(timeout=90000)
         synced = landlord.wait_message("sync", lambda msg: (msg.get("game") or {}).get("match_id") == match_id,
                                        after=received)["game"]
-        for key in ("revision", "current_id", "hand", "last_play"):
+        for key in ("revision", "current_id", "hand", "last_play", "play_history"):
             assert synced[key] == saved[key], f"刷新后 {key} 丢失"
         expect(own_cards).to_have_count(len(saved["hand"]))
 
@@ -264,6 +268,11 @@ def main():
             game = landlord.wait_message("doudizhu_state", lambda msg: msg["game"]["revision"] > revision)["game"]
         assert game["current_id"] == landlord.uid and game["last_play"] is None
         expect(page.get_by_test_id("doudizhu-public-play")).to_contain_text("轮到你领出")
+        feed = page.get_by_test_id("doudizhu-history-feed")
+        expect(feed.get_by_text("不出", exact=True)).to_have_count(2)
+        page.get_by_test_id("doudizhu-history-open").click()
+        expect(page.get_by_test_id("doudizhu-history-modal")).to_contain_text("单张")
+        page.get_by_test_id("doudizhu-history-close").click()
 
         page.get_by_text("认输", exact=True).click()
         page.get_by_text("确认认输", exact=True).click()
@@ -273,6 +282,7 @@ def main():
             button = player.page.get_by_test_id("doudizhu-back-to-room")
             expect(button).to_be_visible()
             expect(player.page.get_by_text("农民胜利", exact=True)).to_be_visible()
+            expect(player.page.get_by_test_id("game-result").get_by_test_id("doudizhu-history-feed")).to_contain_text("单张")
             button.click()
             player.page.get_by_text("房间号", exact=True).wait_for()
             expect(player.page.get_by_text(code, exact=True)).to_be_visible()

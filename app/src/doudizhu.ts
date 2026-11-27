@@ -1,3 +1,5 @@
+import type { PokerPlayRecord } from './PokerPlayHistory';
+
 export interface DoudizhuRules {
   all_pass: 'redeal' | 'first_bidder';
   airplane_pair_as_singles: boolean;
@@ -29,6 +31,7 @@ export interface DoudizhuView {
   available_bids: number[];
   can_pass: boolean;
   last_play: DoudizhuPlay | null;
+  play_history?: PokerPlayRecord<DoudizhuPlay>[];
   actions: (DoudizhuSeatAction | null)[];
   rules: DoudizhuRules;
 }
@@ -47,6 +50,7 @@ export interface DoudizhuSnapshot {
   spring: 'spring' | 'reverse' | null;
   scores: Record<string, number> | null;
   last_play: DoudizhuPlay | null;
+  play_history?: PokerPlayRecord<DoudizhuPlay>[];
   rules: DoudizhuRules;
   remaining: number[];
 }
@@ -110,6 +114,10 @@ export function describeDoudizhuCard(card: string) {
   }
   const suit = suits[card.slice(-1)];
   return { rank, suit: suit?.glyph ?? '', label: `${suit?.name ?? ''}${rank}`, red: suit?.red ?? false };
+}
+
+export function describeDoudizhuPlay(play: DoudizhuPlay) {
+  return { label: play.label, cards: play.cards.map(describeDoudizhuCard) };
 }
 
 export const doudizhuCardWidth = 52;

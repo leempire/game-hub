@@ -33,7 +33,7 @@
 from dataclasses import dataclass
 from typing import Callable
 
-from app.game import abyss, battleship, doudizhu, minesweeper, stasis as stasis_engine, stasis_map, uno_rules
+from app.game import abyss, battleship, concentration, doudizhu, minesweeper, stasis as stasis_engine, stasis_map, uno_rules
 
 KIND_CHOICE = "choice"
 KIND_TOGGLE = "toggle"
@@ -399,6 +399,12 @@ def _spectator_setting():
                    blurb="房主可在开局前开放只读观战；观战不占座，不显示UNO手牌，密码房仍需密码。")
 
 
+def _apply_concentration_cards(room, value):
+    if type(value) is not int:
+        raise ValueError("牌数只能选择 16 或 24 张")
+    room["concentration_cards"] = value
+
+
 _GAMES: dict[str, list[Setting]] = {
     "minesweeper": _mine_settings(),
     "luzhanqi": [*_luzhanqi_settings(), Setting(
@@ -412,6 +418,15 @@ _GAMES: dict[str, list[Setting]] = {
     "tetris": _tetris_settings(),
     "uno": [_uno_preset_setting(), *_uno_rule_settings(), _spectator_setting()],
     "doudizhu": _doudizhu_settings(),
+    "concentration": [Setting(
+        key="concentration_cards", label="牌数", kind=KIND_CHOICE,
+        store="concentration_cards", default=concentration.DEFAULT_CARD_COUNT,
+        in_summary=True, apply=_apply_concentration_cards,
+        choices=(
+            {"value": 16, "label": "快局 · 16 张", "blurb": "4 列 × 4 行，共 8 对。"},
+            {"value": 24, "label": "标准局 · 24 张", "blurb": "4 列 × 6 行，共 12 对。"},
+        ),
+    )],
     "gomoku": [*_gomoku_settings(), _clock_setting()],
     "reversi": [_board_sizes("board_size", "reversi_size", 8, (6, 8, 10)), _clock_setting()],
     "dots": [_board_sizes("dots", "dots_count", 5, (4, 5, 6), "点阵")],

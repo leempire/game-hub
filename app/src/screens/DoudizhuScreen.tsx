@@ -7,10 +7,11 @@ import { getRoom, leaveRoom } from '../api';
 import type { Room, RoomSetting } from '../api';
 import { useAuth } from '../auth';
 import { onConfirmLeave } from '../backGuard';
-import { doudizhuRole, formatDoudizhuResult } from '../doudizhu';
+import { describeDoudizhuPlay, doudizhuRole, formatDoudizhuResult } from '../doudizhu';
 import type { DoudizhuAction, DoudizhuResultMessage, DoudizhuView } from '../doudizhu';
 import DoudizhuTable from '../DoudizhuTable';
 import GameShell, { GameResult } from '../GameShell';
+import PokerPlayHistory from '../PokerPlayHistory';
 import type { RootStackParamList } from '../navigation';
 import { RoomSocket } from '../socket';
 import type { SocketMessage } from '../socket';
@@ -268,14 +269,17 @@ export default function DoudizhuScreen({ code }: { code: string }) {
         roomButtonTestID="doudizhu-back-to-room" onBackToRoom={backToRoom}
         onViewHistory={() => { backToRoom(); navigation.navigate('History'); }}>
         <View testID="doudizhu-result" style={styles.scores}>
-          {summary.seat_uids.map(id => {
+          {summary.seat_uids.map((id, seat) => {
             const score = summary.scores?.[id];
             return <View key={id} style={styles.scoreRow}>
-              <Text style={styles.scoreName}>{name(id)}{id === uid ? '（我）' : ''} · {doudizhuRole(id, summary.landlord_id)}</Text>
+              <Text style={styles.scoreName}>{name(id)}{id === uid ? '（我）' : ''} · {doudizhuRole(id, summary.landlord_id)}
+                {summary.remaining?.[seat] !== undefined ? ` · 剩 ${summary.remaining[seat]} 张` : ''}</Text>
               <Text style={styles.score}>{score !== undefined ? `${score > 0 ? '+' : ''}${score} 分` : '—'}</Text>
             </View>;
           })}
         </View>
+        {!!summary.play_history?.length && <PokerPlayHistory game="doudizhu" records={summary.play_history}
+          name={name} describe={describeDoudizhuPlay} result />}
       </GameResult>}
     </GameShell>
   </View>;

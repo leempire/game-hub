@@ -28,6 +28,7 @@ import TetrisScreen from './screens/TetrisScreen';
 import UnoScreen from './screens/UnoScreen';
 import DoudizhuScreen from './screens/DoudizhuScreen';
 import GuandanScreen from './screens/GuandanScreen';
+import ConcentrationScreen from './screens/ConcentrationScreen';
 import UndercoverScreen from './screens/UndercoverScreen';
 import StasisScreen from './screens/StasisScreen';
 import FishScreen from './screens/FishScreen';
@@ -69,6 +70,7 @@ export type RootStackParamList = {
   Uno: { code: string };
   Doudizhu: { code: string };
   Guandan: { code: string };
+  Concentration: { code: string };
   Undercover: { code: string };
   Stasis: { code: string };
   Abyss: { code: string };
@@ -314,6 +316,8 @@ function RoomScreenWrapper({ route, navigation }: { route: any; navigation: any 
           navigation.navigate('Doudizhu', { code: c });
         } else if (game === 'guandan') {
           navigation.navigate('Guandan', { code: c });
+        } else if (game === 'concentration') {
+          navigation.navigate('Concentration', { code: c });
         } else if (game === 'undercover') {
           navigation.navigate('Undercover', { code: c });
         } else if (game === 'fish') {
@@ -413,6 +417,10 @@ function DoudizhuScreenWrapper({ route }: { route: { params: RootStackParamList[
 
 function GuandanScreenWrapper({ route }: { route: { params: RootStackParamList['Guandan'] } }) {
   return <GuandanScreen key={route.params.code} code={route.params.code} />;
+}
+
+function ConcentrationScreenWrapper({ route }: { route: { params: RootStackParamList['Concentration'] } }) {
+  return <ConcentrationScreen key={route.params.code} code={route.params.code} />;
 }
 
 function UndercoverScreenWrapper({ route }: { route: { params: RootStackParamList['Undercover'] } }) {
@@ -629,6 +637,11 @@ export default function AppNavigation() {
             name="Guandan"
             component={GuandanScreenWrapper}
             options={{ orientation: 'default', title: gameTitle('guandan') }}
+          />
+          <Stack.Screen
+            name="Concentration"
+            component={ConcentrationScreenWrapper}
+            options={{ orientation: 'default', title: gameTitle('concentration') }}
           />
           <Stack.Screen
             name="Undercover"

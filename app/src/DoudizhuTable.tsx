@@ -2,19 +2,17 @@ import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RoomSetting } from './api';
-import { describeDoudizhuCard, doudizhuCardWidth, doudizhuRole, layoutDoudizhuHand } from './doudizhu';
+import { describeDoudizhuCard, describeDoudizhuPlay, doudizhuCardWidth, doudizhuRole, layoutDoudizhuHand } from './doudizhu';
 import type { DoudizhuAction, DoudizhuView } from './doudizhu';
 import { boldSegments } from './richText';
 import PlayingCardSuit from './PlayingCardSuit';
+import PokerPlayHistory from './PokerPlayHistory';
+import { pokerCardRaise as raise, PokerSeat, pokerStyles, pokerTableEdge as edge, pokerTableMax as tableMax } from './PokerTable';
 import { settingBlurb } from './roomSettings';
 import { colors, doudizhuColors as ink, fontSize, radius, spacing } from './theme';
 import { AppModal } from './ui';
 
 type Name = (id: number) => string;
-
-const tableMax = 1120;
-const edge = 12;
-const raise = 8;
 
 function CardFace({ card, width, height, selected, small, large }: {
   card?: string; width: number; height: number; selected?: boolean; small?: boolean; large?: boolean;
@@ -41,23 +39,12 @@ function Seat({ game, index, name, wide, offline }: {
   const action = game.actions[index];
   const remaining = game.remaining[index];
   const active = id === game.current_id;
-  const low = remaining <= 2;
   const actionLabel = action?.kind === 'bid'
     ? action.bid === 0 ? '不叫' : `叫 ${action.bid} 分`
     : action?.kind === 'pass' ? '不出' : action?.kind === 'play' ? '已出牌' : '';
-  return <View testID={`doudizhu-seat-${id}`} style={[styles.seat, !wide && styles.topSeat, active && styles.activeSeat, low && styles.lowSeat]}>
-    <View style={styles.seatDetails}>
-      <Text numberOfLines={1} style={styles.seatName}>{name(id)}</Text>
-      <Text numberOfLines={2} style={styles.muted}>{doudizhuRole(id, game.landlord_id)}</Text>
-    </View>
-    <View style={styles.seatCount}>
-      <Text style={[styles.count, low && styles.gold]}>{remaining}</Text>
-      <Text style={styles.muted}>张</Text>
-    </View>
-    {(active || offline || !!actionLabel) && <Text numberOfLines={2} style={[styles.seatAction, active && styles.gold]}>
-      {[active && '行动中', offline && '离线', actionLabel].filter(Boolean).join(' · ')}
-    </Text>}
-  </View>;
+  return <PokerSeat id={`doudizhu-seat-${id}`} name={name(id)} role={doudizhuRole(id, game.landlord_id)}
+    remaining={remaining} active={active} style={!wide ? styles.topSeat : undefined}
+    status={[active && '行动中', offline && '离线', actionLabel].filter(Boolean).join(' · ')} />;
 }
 
 function PublicPlay({ game, uid, name, compact }: { game: DoudizhuView; uid: number; name: Name; compact: boolean }) {
@@ -80,7 +67,7 @@ function PublicPlay({ game, uid, name, compact }: { game: DoudizhuView; uid: num
   const groups = [cards.slice(0, bodyCount), cards.slice(bodyCount)].filter(group => group.length > 0);
   return <View style={[styles.playArea, compact && styles.playAreaCompact]} testID="doudizhu-public-play">
     {play && <Text numberOfLines={2} style={styles.muted}>
-      {play.player_id === uid ? '你' : name(play.player_id)}出牌 · {play.label} · {cards.length} 张
+      当前牌 · {play.player_id === uid ? '你' : name(play.player_id)} · {play.label} · {cards.length} 张
     </Text>}
     {play && <View style={styles.publicCards} accessibilityLabel={cards.map(card => describeDoudizhuCard(card).label).join('、')}>
       {groups.map((group, index) => <View key={index} style={styles.publicGroup}>
@@ -194,7 +181,10 @@ export default function DoudizhuTable({
           {wide
             ? <View style={styles.side}>{leftSeat}</View>
             : <View style={styles.topSeats}>{leftSeat}{rightSeat}</View>}
-          <PublicPlay game={game} uid={uid} name={name} compact={compact} />
+          <View style={[styles.center, compact && styles.centerCompact]}>
+            <PublicPlay game={game} uid={uid} name={name} compact={compact} />
+            <PokerPlayHistory game="doudizhu" records={game.play_history} name={name} describe={describeDoudizhuPlay} compact={compact} />
+          </View>
           {wide && <View style={styles.side}>{rightSeat}</View>}
         </View>
       </ScrollView>
@@ -202,7 +192,7 @@ export default function DoudizhuTable({
         <ActionBar {...actionProps} />
         <View style={styles.playerHeading} testID={`doudizhu-seat-${uid}`}>
           <Text style={styles.playerName} numberOfLines={2}>
-            你 · {doudizhuRole(uid, game.landlord_id)}{game.current_id === uid ? ' · 行动中' : ''}
+            你 · {doudizhuRole(uid, game.landlord_id)} · 剩 {game.hand.length} 张{game.current_id === uid ? ' · 行动中' : ''}
           </Text>
           {game.phase === 'playing' && <Pressable testID="doudizhu-surrender" accessibilityRole="button"
             onPress={onSurrender} style={styles.plainButton}><Text style={styles.plainLabel}>认输</Text></Pressable>}
@@ -267,85 +257,14 @@ export default function DoudizhuTable({
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, minHeight: 0, backgroundColor: ink.felt },
-  table: { flex: 1, minHeight: 0, width: '100%', maxWidth: tableMax, alignSelf: 'center' },
-  fieldScroll: { flex: 1, minHeight: 0 },
-  field: { flexGrow: 1, paddingHorizontal: edge, paddingTop: spacing.md, gap: spacing.md },
-  fieldCompact: { paddingTop: spacing.xs, gap: spacing.xs },
+  ...pokerStyles,
   bottomCards: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs },
   bidStatus: { color: ink.light, fontSize: fontSize.xs, fontWeight: '700', marginLeft: spacing.sm, flexShrink: 1 },
   ruleButton: { marginLeft: spacing.xs, minHeight: 44, minWidth: 44, paddingHorizontal: spacing.xs,
     alignItems: 'center', justifyContent: 'center' },
-  arena: { flex: 1, gap: spacing.sm },
-  arenaWide: { flexDirection: 'row', alignItems: 'center' },
-  topSeats: { flexDirection: 'row', gap: spacing.sm },
-  side: { width: '21%', maxWidth: 184 },
-  seat: { minWidth: 0, backgroundColor: ink.panel, borderRadius: radius.md, borderWidth: 1,
-    borderColor: ink.line, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs, padding: spacing.sm },
-  topSeat: { flex: 1 },
-  activeSeat: { borderColor: ink.active },
-  lowSeat: { borderColor: ink.gold },
-  seatDetails: { flex: 1, minWidth: 36 },
-  seatName: { color: ink.light, fontSize: fontSize.sm, fontWeight: '700' },
-  seatCount: { flexDirection: 'row', gap: spacing.xs, alignItems: 'baseline' },
-  count: { color: ink.light, fontSize: fontSize.lg, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  gold: { color: ink.gold },
-  muted: { color: ink.muted, fontSize: fontSize.xs },
-  seatAction: { width: '100%', color: ink.muted, fontSize: fontSize.xs, fontWeight: '600' },
-  playArea: { flex: 1, minHeight: 85, alignItems: 'center', justifyContent: 'center', gap: spacing.xs, padding: spacing.xs },
-  playAreaCompact: { minHeight: 34, paddingVertical: 0 },
-  publicCards: { flexDirection: 'row', width: '100%', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.xs },
   publicGroup: { flexDirection: 'row', minWidth: 0, flexShrink: 1, flexWrap: 'wrap', justifyContent: 'center', gap: 2 },
-  turn: { color: ink.light, fontSize: fontSize.sm, fontWeight: '700', textAlign: 'center' },
-  compactCard: { flexDirection: 'row', alignItems: 'center', gap: 1, paddingHorizontal: 3,
-    borderRadius: radius.sm, backgroundColor: ink.paper },
-  compactRank: { fontSize: 11, fontWeight: '700' },
-  playerArea: { borderTopWidth: 1, borderTopColor: ink.line, paddingHorizontal: edge, paddingTop: spacing.xs, paddingBottom: spacing.sm },
-  actionBar: { gap: spacing.xs },
-  actionRow: { alignSelf: 'center', width: '100%', maxWidth: 400, flexDirection: 'row', gap: spacing.xs },
-  action: { flex: 1, minHeight: 48, minWidth: 48, alignItems: 'center', justifyContent: 'center',
-    paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, borderWidth: 1, borderColor: ink.line,
-    backgroundColor: ink.panel, borderRadius: radius.md },
-  primary: { backgroundColor: ink.active, borderColor: ink.active },
-  actionDisabled: { backgroundColor: ink.panel, borderColor: ink.panel },
-  pressed: { opacity: 0.8 },
-  actionLabel: { color: ink.light, fontSize: fontSize.sm, textAlign: 'center', fontWeight: '700' },
-  disabledLabel: { color: ink.muted },
-  primaryLabel: { color: ink.black },
-  feedback: { color: ink.gold, fontSize: fontSize.xs, textAlign: 'center' },
-  modalFeedback: { color: colors.warning },
-  playerHeading: { alignSelf: 'center', width: '100%', maxWidth: 850, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
-  playerName: { flex: 1, minWidth: 51, color: ink.light, fontSize: fontSize.xs, fontWeight: '700' },
-  plainButton: { minWidth: 48, minHeight: 48, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
-  plainLabel: { color: ink.muted, fontSize: fontSize.xs },
-  expandLabel: { color: ink.active, fontSize: fontSize.xs, fontWeight: '700' },
-  hand: { alignItems: 'center', gap: spacing.xs },
-  handRow: { position: 'relative' },
-  facePosition: { position: 'absolute' },
-  hitRow: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, flexDirection: 'row' },
-  cardFace: { backgroundColor: ink.paper, borderWidth: 1, borderColor: ink.cardEdge, borderRadius: radius.sm,
-    paddingLeft: 3, paddingTop: 2, overflow: 'hidden' },
-  cardSelected: { borderColor: ink.selected, backgroundColor: ink.selectedPaper, borderWidth: 2, paddingLeft: 2, paddingTop: 1 },
-  rank: { fontSize: fontSize.md, fontWeight: '800', includeFontPadding: false },
-  smallRank: { fontSize: fontSize.xs },
-  largeRank: { fontSize: fontSize.xl },
-  joker: { fontSize: 10, lineHeight: 15 },
-  smallJoker: { fontSize: 10 },
-  largeJoker: { fontSize: fontSize.sm },
-  cardMotif: { position: 'absolute', bottom: 7, right: 8, width: 14, height: 14, transform: [{ rotate: '45deg' }],
-    borderWidth: 1, borderColor: ink.motif },
   cardBack: { backgroundColor: ink.back, borderWidth: 1, borderColor: ink.active, borderRadius: radius.sm, padding: 4 },
   cardBackInset: { flex: 1, borderWidth: 1, borderColor: ink.active, borderRadius: 2 },
-  modalCard: { maxWidth: 460, padding: spacing.md },
-  picker: { gap: spacing.sm },
-  pickerHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  pickerTitles: { flex: 1 },
-  pickerTitle: { color: colors.text, fontSize: fontSize.md, fontWeight: '800' },
-  pickerCount: { color: colors.textMuted, fontSize: fontSize.xs },
-  pickerClose: { paddingHorizontal: spacing.sm, minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  pickerCloseLabel: { color: colors.primary, fontSize: fontSize.sm, fontWeight: '700' },
-  pickerScroll: { flex: 1, minHeight: 0 },
-  grid: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, justifyContent: 'center', alignSelf: 'center' },
   rule: { gap: spacing.xs },
   ruleValue: { color: colors.text, fontSize: fontSize.sm, fontWeight: '600' },
   ruleStrong: { fontWeight: '700' },

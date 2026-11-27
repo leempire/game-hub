@@ -179,6 +179,7 @@ def create_game(seat_uids: list[int], rules: dict | None, match_id: str, rng: Ra
         "rng": rng,
         "landlord_id": None,
         "last_play": None,
+        "play_history": [],
         "last_rank": None,
         "passes": 0,
         "play_counts": {uid: 0 for uid in seats},
@@ -268,6 +269,7 @@ def play(gs, user_id, cards):
     gs["hands"][user_id] = [card for card in hand if card not in played]
     gs["last_play"] = {"player_id": user_id, "cards": ordered, "kind": kind,
                        "label": "王炸" if kind == "rocket" else _PATTERNS[kind].label}
+    gs.setdefault("play_history", []).append({"player_id": user_id, "play": gs["last_play"]})
     gs["last_rank"] = rank
     gs["passes"] = 0
     gs["play_counts"][user_id] += 1
@@ -286,6 +288,7 @@ def pass_turn(gs, user_id):
     _require_turn(gs, user_id, "playing")
     if _active_play(gs) is None:
         raise ValueError("领出时必须出牌")
+    gs.setdefault("play_history", []).append({"player_id": user_id, "play": None})
     gs["passes"] += 1
     gs["current_id"] = _next_seat(gs, user_id)
     _record_action(gs, user_id, {"kind": "pass"})
@@ -373,6 +376,7 @@ def view_for(gs, user_id) -> dict:
         "available_bids": _available_bids(gs) if active and gs["phase"] == "bidding" else [],
         "can_pass": active and gs["phase"] == "playing" and _active_play(gs) is not None,
         "last_play": deepcopy(_active_play(gs)),
+        "play_history": deepcopy(gs.get("play_history", [])),
         "actions": deepcopy(gs["actions"]),
     }
 
@@ -389,4 +393,5 @@ def snapshot(gs) -> dict | None:
         "spring": gs["spring"],
         "scores": deepcopy(gs["scores"]),
         "last_play": deepcopy(gs["last_play"]),
+        "play_history": deepcopy(gs.get("play_history", [])),
     }

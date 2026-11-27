@@ -18,7 +18,7 @@ from app import room_timing
 from app.competition_rules import challenge_seed, challenge_info
 from app.game import spider, uttt, uttt_ai, xiangqi as xiangqi_engine
 from app.game import stasis as stasis_engine
-from app.game import abyss, doudizhu, fish, guandan, stasis_ai, undercover
+from app.game import abyss, concentration, doudizhu, fish, guandan, stasis_ai, undercover
 
 # Room idle TTL in seconds. Sweeper deletes rooms exceeding this.
 # Monkeypatch this constant in tests to avoid real 30-minute waits.
@@ -390,6 +390,8 @@ def restore_rooms() -> int:
             _notify_game_end(room)
         if room["game"] == "guandan" and (room.get("game_state") or {}).get("phase") == "finished":
             _notify_game_end(room)
+        if room["game"] == "concentration" and (room.get("game_state") or {}).get("finished"):
+            _notify_game_end(room)
         restored += 1
     return restored
 
@@ -527,12 +529,13 @@ def create_room(
     """Create a new room."""
     if game not in ("gomoku", "reversi", "minesweeper", "battleship", "dots", "ludo",
                     "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider", "uttt",
-                    "abyss", "undercover", "doudizhu", "guandan", "fish"):
+                    "abyss", "undercover", "doudizhu", "guandan", "fish", "concentration"):
         raise ValueError("不支持的游戏类型")
     code = _generate_code()
     room_name = name or f"{user['username']}的房间"
     # 深空休眠 6 人（12 间舱室 / 12 个座位），其余多人游戏 4 人上限
-    max_players = {"undercover": undercover.MAX_PLAYERS, "stasis": 6, "doudizhu": 3}.get(
+    max_players = {"undercover": undercover.MAX_PLAYERS, "stasis": 6, "doudizhu": 3,
+                   "concentration": concentration.MAX_PLAYERS}.get(
         game, 4 if game in ("minesweeper", "ludo", "2048", "tetris", "uno", "spider", "abyss", "guandan", "fish") else 2)
     room = {
         "code": code,
@@ -813,6 +816,8 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
             return _leave_abyss(room, user_id)
         if room["game"] == "undercover":
             return _leave_undercover(room, user_id, "leave")
+        if room["game"] == "concentration":
+            return _leave_concentration(room, user_id, "leave")
         if room["game"] == "doudizhu":
             finish_doudizhu(room, user_id, "leave")
             room["players"] = [p for p in room["players"] if p["id"] != user_id]
@@ -1001,6 +1006,8 @@ def _start_game_engine(code: str, user_id: int, *, prepared_spider: dict | None 
         return _start_guandan(room)
     if room["game"] == "undercover":
         return _start_undercover(room)
+    if room["game"] == "concentration":
+        return _start_concentration(room)
     if room["game"] == "fish":
         return _start_fish(room)
     if room["game"] == "abyss":
@@ -1634,6 +1641,83 @@ def _leave_undercover(room: dict, user_id: int, reason: str) -> tuple[str, dict]
         _commit_undercover(room, phase_id)
         if not room_timing.undercover_online(room):
             room_timing.cancel(room["code"])
+    _maybe_destroy_or_mark(room)
+    return ("game_over" if room["status"] == "waiting" else "removed", room)
+
+
+def _start_concentration(room: dict) -> dict:
+    players = room["players"]
+    if any(not p["connected"] or p.get("is_bot") for p in players):
+        raise ValueError("请等待所有真人玩家上线后再开始")
+    gs = concentration.create_game([p["id"] for p in players], room["concentration_cards"],
+                                   uuid4().hex, random.SystemRandom())
+    room["_concentration_roster"] = [
+        {"id": p["id"], "username": p["username"], "nickname": p["nickname"]} for p in players
+    ]
+    room.update(status="playing", game_started_at=_now_iso(), empty_since=None, game_state=gs)
+    return gs
+
+
+def _commit_concentration(room: dict):
+    finished = room["game_state"].get("finished")
+    if finished:
+        _back_to_lobby(room)
+        room["empty_since"] = None if _has_human_online(room) else _time.time()
+        room_timing.forget(room["code"])
+        _cancel_all_dc_tasks(room["code"])
+    _touch_activity(room)
+    if finished:
+        _notify_game_end(room)
+
+
+def expire_concentration(room: dict) -> bool:
+    gs = room.get("game_state")
+    if room["status"] != "playing" or not gs or gs["reveal_ms"] != 0:
+        return False
+    concentration.finish_reveal(gs)
+    room_timing.cancel(room["code"])
+    _commit_concentration(room)
+    return True
+
+
+def concentration_flip(room: dict, user_id: int, data: dict) -> tuple[str | None, bool]:
+    if not user_in_game(room, user_id):
+        return "你不在本局游戏中", False
+    gs = room["game_state"]
+    if room_timing.settle(room) == "concentration":
+        expire_concentration(room)
+        return "牌桌已更新，请查看当前回合", True
+    revision = data.get("revision")
+    if data.get("match_id") != gs["match_id"] or type(revision) is not int or revision != gs["revision"]:
+        return "牌桌已更新，请查看当前回合", False
+    try:
+        concentration.flip(gs, user_id, data.get("index"))
+    except ValueError as error:
+        return str(error), False
+    if gs["phase"] == "revealing":
+        room_timing.reset_deadline(room)
+    _touch_activity(room)
+    return None, True
+
+
+def concentration_forfeit(room: dict, user_id: int, reason: str) -> bool:
+    if room_timing.settle(room) == "concentration":
+        expire_concentration(room)
+        if room["status"] == "waiting":
+            return True
+    if room["status"] != "playing" or not concentration.forfeit(room["game_state"], user_id, reason):
+        return False
+    _commit_concentration(room)
+    return True
+
+
+def _leave_concentration(room: dict, user_id: int, reason: str) -> tuple[str, dict]:
+    room["players"] = [p for p in room["players"] if p["id"] != user_id]
+    _transfer_host(room)
+    task = _dc_tasks.pop((room["code"], user_id), None)
+    if task and not task.done():
+        task.cancel()
+    concentration_forfeit(room, user_id, reason)
     _maybe_destroy_or_mark(room)
     return ("game_over" if room["status"] == "waiting" else "removed", room)
 
@@ -2549,6 +2633,8 @@ def user_in_game(room: dict, user_id: int) -> bool:
         return not gs["players"].get(user_id, {}).get("departed", True)
     if game == "undercover":
         return user_id in gs.get("alive", ())
+    if game == "concentration":
+        return concentration.is_active(gs, user_id)
     if game == "spider":
         board = gs.get("boards", {}).get(user_id)
         return board is not None and not board["finished"]
@@ -3796,6 +3882,10 @@ def handle_player_disconnect(code: str, user_id: int, loop: asyncio.AbstractEven
         # 牌桌不能把房间永久锁住——立即按结束结算，随后再按离线情况标空房。
         _settle_spider(room)
         _maybe_destroy_or_mark(room)
+    elif room["game"] == "concentration":
+        if user_in_game(room, user_id):
+            _start_dc_timer(code, user_id, loop)
+        _maybe_destroy_or_mark(room)
     elif room["status"] == "playing":
         _start_dc_timer(code, user_id, loop)
 
@@ -3840,6 +3930,17 @@ def handle_player_reconnect(code: str, user_id: int):
                 for other in room["players"]:
                     if not other.get("is_bot") and not other["connected"] and (code, other["id"]) not in _dc_tasks:
                         _start_dc_timer(code, other["id"], asyncio.get_running_loop())
+            if room["game"] == "concentration" and user_in_game(room, user_id):
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop is not None:
+                    for other in room["players"]:
+                        if (not other["connected"] and user_in_game(room, other["id"])
+                                and (code, other["id"]) not in _dc_tasks):
+                            other["disconnected_at"] = _time.time()
+                            _start_dc_timer(code, other["id"], loop)
             _touch_activity(room)
             return True
     return False
@@ -3857,7 +3958,7 @@ def _start_dc_timer(code: str, user_id: int, loop: asyncio.AbstractEventLoop):
     async def _timeout():
         try:
             await asyncio.sleep(_disconnect_timeout)
-            if room and room["game"] in ("undercover", "doudizhu", "guandan") and (
+            if room and room["game"] in ("undercover", "doudizhu", "guandan", "concentration") and (
                 _rooms.get(code) is not room or room.get("game_state") is not state
                 or _dc_tasks.get(key) is not asyncio.current_task()
             ):
@@ -3915,6 +4016,18 @@ def _on_dc_timeout(code: str, user_id: int):
             event = {"game_state": state, "revision": state.get("revision")}
             try:
                 asyncio.get_running_loop().create_task(_dc_timeout_callback(code, user_id, event))
+            except RuntimeError:
+                pass
+        return
+    if room["game"] == "concentration":
+        if not any(p["id"] == user_id and not p["connected"] for p in room["players"]):
+            return
+        state = room["game_state"]
+        _leave_concentration(room, user_id, "disconnect")
+        if _dc_timeout_callback:
+            try:
+                asyncio.get_running_loop().create_task(_dc_timeout_callback(
+                    code, user_id, {"game": "concentration", "game_state": state, "revision": state["revision"]}))
             except RuntimeError:
                 pass
         return

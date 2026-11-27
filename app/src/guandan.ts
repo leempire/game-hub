@@ -1,3 +1,5 @@
+import type { PokerPlayRecord } from './PokerPlayHistory';
+
 export interface GuandanCard {
   id: number;
   rank: string;
@@ -31,6 +33,8 @@ export interface GuandanVersion {
   deal: number;
 }
 
+type GuandanPlay = GuandanCombo & { uid: number };
+
 export interface GuandanView extends GuandanVersion {
   game: 'guandan';
   phase: 'returning' | 'playing' | 'between' | 'finished';
@@ -40,10 +44,11 @@ export interface GuandanView extends GuandanVersion {
   level_team: 0 | 1 | null;
   current_id: number | null;
   hand: GuandanCard[];
-  remaining: (number | null)[];
+  remaining: number[];
   passed: number[];
   finish_order: number[];
-  last_play: (GuandanCombo & { uid: number }) | null;
+  last_play: GuandanPlay | null;
+  play_history?: PokerPlayRecord<GuandanPlay>[];
   exchange: {
     antitribute: boolean;
     lead_id: number;
@@ -68,6 +73,8 @@ export interface GuandanSnapshot {
   winner: 0 | 1 | null;
   reason: 'clear_ace' | 'surrender' | 'leave' | 'disconnect' | null;
   deal_result: GuandanDealResult | null;
+  remaining?: number[];
+  play_history?: PokerPlayRecord<GuandanPlay>[];
 }
 
 export interface GuandanResultMessage {
@@ -85,9 +92,10 @@ export function guandanTeam(players: number[], uid?: number) {
   return seat < 0 ? null : seat % 2;
 }
 
+export const guandanPlaces = ['头游', '二游', '三游', '末游'];
+
 export function guandanRanks(players: number[], result: GuandanDealResult) {
-  const places = ['头游', '二游', '三游', '末游'];
-  return players.map(id => ({ id, place: places[result.finish_order.indexOf(id)] ?? '双下' }));
+  return players.map(id => ({ id, place: guandanPlaces[result.finish_order.indexOf(id)] ?? '双下' }));
 }
 
 export function formatGuandanResult(result: GuandanSnapshot, viewerId?: number) {
@@ -126,10 +134,11 @@ export function describeGuandanCombo(combo: GuandanCombo, level: string) {
   return [combo.kind === 'joker_bomb' ? label : `${label} ${rank}`, ...substitutions].join(' · ');
 }
 
-export const guandanHandInset = 12;
-export const guandanTableMax = 1120;
-export const guandanActionRail = 104;
-export const guandanWideHand = 788;
+export function describeGuandanPlay(play: GuandanPlay, level = '2') {
+  return { label: describeGuandanCombo(play, level), cards: play.cards.map(describeGuandanCard) };
+}
+
+const guandanWideHand = 788;
 
 export function layoutGuandanHand(hand: GuandanCard[], width: number) {
   const wide = width >= guandanWideHand;

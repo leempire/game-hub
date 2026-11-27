@@ -40,7 +40,7 @@ from app.game.connect4 import (
     COLS as C4_COLS, ROWS as C4_ROWS,
     BLACK as C4_BLACK, WHITE as C4_WHITE,
 )
-from app.game import abyss, doudizhu, doudizhu_ai, fish, guandan, guandan_ai, undercover
+from app.game import abyss, concentration, doudizhu, doudizhu_ai, fish, guandan, guandan_ai, undercover
 from app.game import stasis as stasis_engine
 from app.game import (battleship_ai, gomoku_ai, reversi_ai, dots_ai, ludo_ai, xiangqi_ai,
                  connect4_ai, uno_ai, luzhanqi_ai)
@@ -58,6 +58,13 @@ def _register_dc_timeout_callback():
 
     async def _on_timeout(code: str, winner: str | int, timeout_event: dict | None = None):
         room = rm.get_room(code)
+        if timeout_event and timeout_event.get("game") == "concentration":
+            if room and room["game_state"] is timeout_event["game_state"]:
+                if room["game_state"]["revision"] == timeout_event["revision"]:
+                    _send_concentration_update(room, lobby=True)
+                else:
+                    await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(room)})
+            return
         if room and room["game"] == "undercover":
             gs = room["game_state"]
             if timeout_event and gs is timeout_event["game_state"] and gs.get("revision") == timeout_event["revision"]:
@@ -133,11 +140,13 @@ async def ws_room(websocket: WebSocket, code: str):
         return
     await websocket.accept()
     is_undercover = room["game"] == "undercover"
-    private_round = is_undercover or room["game"] in ("doudizhu", "guandan")
+    private_round = is_undercover or room["game"] in ("doudizhu", "guandan", "concentration")
     if private_round and (rm.get_room(code) is not room
                           or not any(p["id"] == user_id for p in room["players"])):
         await websocket.close(code=4003, reason="你不在房间中")
         return
+    if room["game"] == "concentration":
+        await _time_guard(code)
     # Register connection
     if code not in _connections:
         _connections[code] = {}
@@ -153,12 +162,12 @@ async def ws_room(websocket: WebSocket, code: str):
             _stasis_enqueue(websocket, _build_sync(room, user_id))
             if was_paused and (rm.room_timing.undercover_online(room) or room["status"] == "waiting"):
                 _send_undercover_update(room, exclude={user_id})
-        elif room["game"] == "guandan":
+        elif room["game"] in ("guandan", "concentration"):
             if not reconnected:
                 await websocket.close(code=4003, reason="你不在房间中")
                 return
             _stasis_enqueue(websocket, _build_sync(room, user_id))
-            if room["status"] == "playing":
+            if room["game"] == "guandan" and room["status"] == "playing":
                 _maybe_schedule_bot_turn(code, room, room["game_state"])
         else:
             await websocket.send_json(_build_sync(room, user_id))
@@ -263,6 +272,14 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
         return
     if msg_type == "guandan_action":
         await _handle_guandan_action(code, room, user_id, data)
+        return
+    if msg_type == "concentration_flip":
+        await _handle_concentration_flip(code, room, user_id, data)
+        return
+    if room["game"] == "concentration" and msg_type not in (
+        "ping", "ready", "unready", "start", "add_bot", "remove_bot", "room_setting",
+        "swap_request", "swap_respond", "surrender", "leave",
+    ):
         return
     if room["game"] == "guandan" and msg_type not in (
         "ping", "ready", "unready", "start", "add_bot", "remove_bot", "swap_request", "swap_respond", "surrender", "leave",
@@ -498,6 +515,9 @@ async def _handle_start(code: str, user_id: int):
         return
     if room["game"] == "undercover":
         _send_undercover_update(room, kind="game_start")
+        return
+    if room["game"] == "concentration":
+        _send_concentration_update(room, kind="game_start")
         return
     if room["game"] == "fish":
         _stasis_send_all(code, {"type": "game_start", "game": fish.snapshot(gs)})
@@ -934,6 +954,10 @@ async def _handle_surrender(code: str, user_id: int):
         if room["status"] == "playing":
             await _handle_leave(code, user_id)
         return
+    if room["game"] == "concentration":
+        if rm.concentration_forfeit(room, user_id, "surrender"):
+            _send_concentration_update(room)
+        return
     if room["game"] in ("abyss", "fish"):
         await _handle_leave(code, user_id)
         return
@@ -1065,7 +1089,7 @@ async def _handle_leave(code: str, user_id: int):
     if ws is not None and conns.get(user_id) is ws:
         conns.pop(user_id)
         try:
-            if room["game"] in ("undercover", "doudizhu", "guandan") and (tail := _pending_send(ws)) is not None:
+            if room["game"] in ("undercover", "doudizhu", "guandan", "concentration") and (tail := _pending_send(ws)) is not None:
                 await tail
             await ws.close()
         except Exception:
@@ -1083,6 +1107,12 @@ async def _broadcast_leave(code: str, user_id: int, action: str,
     if updated_room and updated_room["game"] == "undercover":
         if action == "game_over" or updated_room["status"] == "playing":
             _send_undercover_update(updated_room, lobby=True)
+        else:
+            await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(updated_room)})
+        return
+    if updated_room and updated_room["game"] == "concentration":
+        if action == "game_over" or updated_room["status"] == "playing":
+            _send_concentration_update(updated_room, lobby=True)
         else:
             await _broadcast(code, {"type": "lobby", "room": rm.room_to_dict(updated_room)})
         return
@@ -1177,7 +1207,7 @@ async def _broadcast(code: str, message: dict, exclude: set[int] | None = None):
     conns = _connections.get(code, {})
     room = rm.get_room(code)
     exclude = exclude or set()
-    if room and room["game"] in ("undercover", "guandan"):
+    if room and room["game"] in ("undercover", "guandan", "concentration"):
         for p in room["players"]:
             uid = p["id"]
             if uid not in exclude and uid in conns:
@@ -1246,6 +1276,9 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = guandan.view_for(room["game_state"], user_id)
         elif room["game"] == "undercover":
             game_info = _undercover_view(room, user_id)
+        elif room["game"] == "concentration":
+            if user_id in room["game_state"]["scores"]:
+                game_info = concentration.view(room["game_state"])
         elif room["game"] == "fish":
             game_info = fish.snapshot(room["game_state"])
         elif room["game"] == "abyss":
@@ -1258,7 +1291,7 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = lzq.game_to_sync(room["game_state"], user_id)
         else:
             game_info = _game_state_for_sync(room["game_state"], user_id)
-    if game_info is not None and room["game"] not in ("undercover", "guandan"):
+    if game_info is not None and room["game"] not in ("undercover", "guandan", "concentration"):
         game_info = _timed_view(room, user_id, game_info)
     if game_info is not None and room.get("challenge_date"):
         game_info["challenge"] = rm.challenge_info(room)
@@ -1276,11 +1309,64 @@ def _build_sync(room: dict, user_id: int) -> dict:
            and (room.get("game_state") or {}).get("finished") else {}),
         **({"undercover_result": result} if room["game"] == "undercover"
            and (result := _undercover_result(room, user_id)) is not None else {}),
+        **({"concentration_result": result} if room["game"] == "concentration"
+           and (result := _concentration_result(room, user_id)) is not None else {}),
         **({"doudizhu_result": result} if room["game"] == "doudizhu"
            and (result := _doudizhu_result(room.get("game_state"), user_id)) is not None else {}),
         **({"guandan_result": result} if room["game"] == "guandan"
            and (result := _guandan_result(room.get("game_state"), user_id)) is not None else {}),
     }
+
+
+def _concentration_result(room: dict, user_id: int) -> dict | None:
+    gs = room.get("game_state")
+    if room["status"] == "waiting" and gs and gs.get("finished") and user_id in gs["scores"]:
+        return concentration.view(gs)
+    return None
+
+
+def _send_concentration_update(room: dict, *, only=None, kind="concentration_state", lobby=False):
+    code = room["code"]
+    if rm.get_room(code) is not room:
+        return
+    gs = room["game_state"]
+    view = concentration.view(gs)
+    state = {"type": kind, "game": view}
+    if kind == "game_start":
+        state["room"] = rm.room_to_dict(room)
+    over = None
+    if gs.get("finished"):
+        winners = [score["id"] for score in view["scores"] if score["rank"] == 1]
+        over = {"type": "game_over", "game": "concentration", "match_id": gs["match_id"],
+                "winner": winners[0] if len(winners) == 1 else "draw", "reason": gs["reason"]}
+        lobby = True
+    lobby_state = {"type": "lobby", "room": rm.room_to_dict(room)} if lobby else None
+    connections = _connections.get(code, {})
+    for player in room["players"]:
+        uid = player["id"]
+        ws = connections.get(uid)
+        if ws is None or (only is not None and only != uid):
+            continue
+        if uid in gs["scores"]:
+            _stasis_enqueue(ws, state)
+            if over is not None:
+                _stasis_enqueue(ws, over)
+        if lobby_state is not None:
+            _stasis_enqueue(ws, lobby_state)
+
+
+async def _handle_concentration_flip(code: str, room: dict, user_id: int, data: dict):
+    if room["game"] != "concentration":
+        await _send_error(code, user_id, "当前房间未开启「精神衰弱」")
+        return
+    error, changed = rm.concentration_flip(room, user_id, data)
+    ws = _connections.get(code, {}).get(user_id)
+    if error and ws is not None:
+        _stasis_enqueue(ws, {"type": "error", "message": error})
+    if changed or room["status"] == "playing":
+        _send_concentration_update(room, only=None if changed else user_id)
+    elif ws is not None and (result := _concentration_result(room, user_id)) and result["match_id"] == data.get("match_id"):
+        _stasis_enqueue(ws, _build_sync(room, user_id))
 
 
 def _doudizhu_result(gs: dict | None, user_id: int) -> dict | None:
@@ -3206,7 +3292,7 @@ async def reschedule_after_restore():
                 for p in room["players"]:
                     if not p["connected"] and rm.user_in_game(room, p["id"]):
                         rm._start_dc_timer(room["code"], p["id"], asyncio.get_running_loop())
-            elif room["game"] in ("doudizhu", "guandan"):
+            elif room["game"] in ("doudizhu", "guandan", "concentration"):
                 continue  # The first reconnect resumes disconnect grace for the other seats.
             elif room["game"] == "battleship" and gs.get("phase") == "placing":
                 for pid in gs["player_colors"]:
@@ -3248,7 +3334,7 @@ def _broadcast_lobby_after_game_end(room: dict):
     callback preserves the old lobby-only notification while reading the final
     membership, rather than capturing stale room_to_dict data during the save.
     """
-    if room["game"] in ("undercover", "doudizhu", "guandan"):
+    if room["game"] in ("undercover", "doudizhu", "guandan", "concentration"):
         return  # The result and lobby are enqueued together for each recipient.
     room["_lobby_after_game_over"] = True
     try:
@@ -3299,6 +3385,9 @@ async def _on_room_deadline(code: str, room: dict, event: str):
     elif event == "undercover":
         if rm.expire_undercover(room):
             _send_undercover_update(room)
+    elif event == "concentration":
+        if rm.expire_concentration(room):
+            _send_concentration_update(room)
     elif event == "checkpoint" and room["status"] == "playing":
         if gs.get("clock"):
             await _broadcast(code, {"type": "clock_update", "clock": rm.room_timing.decorate(room, {})["clock"]})
