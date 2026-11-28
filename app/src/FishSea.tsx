@@ -2,24 +2,17 @@ import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Image, Platform, StyleSheet, Text, View } from 'react-native';
 import type { FishDirection, FishState } from './fish';
 import { fishColors as c } from './theme';
+import { fishSpecies, fishSprites, type FishSpecies } from './fishArt';
 
 const reef = require('../assets/fish/reef.webp');
-const sprites = {
-  self: [require('../assets/fish/self-0.webp'), require('../assets/fish/self-1.webp')],
-  peer: [require('../assets/fish/peer-0.webp'), require('../assets/fish/peer-1.webp')],
-  prey: [require('../assets/fish/prey-0.webp'), require('../assets/fish/prey-1.webp')],
-  neutral: [require('../assets/fish/neutral-0.webp'), require('../assets/fish/neutral-1.webp')],
-  predator: [require('../assets/fish/predator-0.webp'), require('../assets/fish/predator-1.webp')],
-  apex: [require('../assets/fish/apex-0.webp'), require('../assets/fish/apex-1.webp')],
-};
-type Kind = keyof typeof sprites;
+type Kind = 'self' | 'peer' | 'prey' | 'neutral' | 'predator' | 'apex';
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
 const nativeDriver = Platform.OS !== 'web';
 const cameraOffset = (position: number, view: number, world: number) =>
   Math.min(0, world - view) / 2 + clamp(position - view / 2, 0, world - view);
 
-const Swimmer = memo(function Swimmer({ x, y, r, facing, kind, phase, name, shield, immune, position, live }: {
-  x: number; y: number; r: number; facing: number; kind: Kind; phase: number;
+const Swimmer = memo(function Swimmer({ x, y, r, facing, kind, species, phase, name, shield, immune, position, live }: {
+  x: number; y: number; r: number; facing: number; kind: Kind; species: FishSpecies; phase: number;
   name?: string; shield?: boolean; immune?: boolean; live: boolean;
   position?: { x: Animated.Value; y: Animated.Value; facing: Animated.Value };
 }) {
@@ -36,10 +29,10 @@ const Swimmer = memo(function Swimmer({ x, y, r, facing, kind, phase, name, shie
   const xy = position ?? motion;
   const isPlayer = kind === 'self' || kind === 'peer';
   return <Animated.View testID={kind === 'self' ? 'fish-player-self' : undefined} style={[styles.entity, { transform: [{ translateX: xy.x }, { translateY: xy.y }] }]}>
-    {(kind === 'predator' || kind === 'apex') && <View style={[styles.halo, { left: -r, top: -r, width: 2 * r, height: 2 * r, borderColor: c.coral, borderStyle: kind === 'apex' ? 'dashed' : 'solid' }]} />}
+    {(kind === 'prey' || kind === 'predator' || kind === 'apex') && <View style={[styles.halo, { left: -r, top: -r, width: 2 * r, height: 2 * r, borderColor: kind === 'prey' ? c.green : c.coral, borderStyle: kind === 'prey' ? 'dotted' : kind === 'apex' ? 'dashed' : 'solid' }]} />}
     {(immune || shield || kind === 'self') && <View style={[styles.halo, { left: -r - 4, top: -r - 4, width: 2 * r + 8, height: 2 * r + 8, borderColor: shield && !immune ? c.amber : c.cyan, opacity: immune || shield ? 1 : .5 }]} />}
-    <Animated.Image source={sprites[kind][phase]} fadeDuration={0}
-      style={{ position: 'absolute', left: -1.65 * r, top: -r, width: 3.3 * r, height: 2 * r, transform: [{ scaleX: position?.facing ?? facing }] }} />
+    <Animated.Image source={fishSprites[species]} resizeMode="contain" fadeDuration={0} testID={`fish-species-${species}`}
+      style={{ position: 'absolute', left: -1.65 * r, top: -r, width: 3.3 * r, height: 2 * r, transform: [{ scaleX: position?.facing ?? facing }, { scaleY: phase ? .97 : 1 }] }} />
     {isPlayer && <Text numberOfLines={1} style={[styles.fishName, { top: r + 1, color: kind === 'self' ? c.cyan : c.peer }]}>{name}</Text>}
   </Animated.View>;
 });
@@ -145,7 +138,7 @@ const FishSea = memo(function FishSea({ game, uid, width, height, input, live, w
       {walls.filter(b => visible(b.x, b.y)).map(b =>
         <View key={b.key} style={[styles.bubble, { left: b.x * scale, top: b.y * scale, width: b.r, height: b.r }]} />)}
       {game.fish.filter(([, x, y]) => visible(x, y)).map(([id, x, y, r, facing]) =>
-        <Swimmer key={id} x={x * scale} y={y * scale} r={r * scale} facing={facing} phase={(phase + id) % 2} live={live}
+        <Swimmer key={id} x={x * scale} y={y * scale} r={r * scale} facing={facing} species={fishSpecies(r, id)} phase={(phase + id) % 2} live={live}
           kind={r > size * 1.08 ? (r >= 73 ? 'apex' : 'predator') : r < size * .92 ? 'prey' : 'neutral'} />)}
       {game.items.filter(([, x, y]) => visible(x, y)).map(([id, x, y, kind]) =>
         <View key={id} style={[styles.orb, { left: x * scale - 11, top: y * scale - 11, borderColor: kind === 'boost' ? c.green : c.amber }]}>
@@ -153,7 +146,7 @@ const FishSea = memo(function FishSea({ game, uid, width, height, input, live, w
         </View>)}
       {game.players.filter(p => p.lives > 0 && visible(p.x, p.y)).map(p =>
         <Swimmer key={`${p.id}:${p.lives}`} x={p.x * scale} y={p.y * scale} r={p.r * scale} facing={p.facing}
-          name={p.id === uid ? '你' : p.name} kind={p.id === uid ? 'self' : 'peer'}
+          species={fishSpecies(p.r, p.id)} name={p.id === uid ? '你' : p.name} kind={p.id === uid ? 'self' : 'peer'}
           shield={p.shield} immune={p.immune > 0} phase={phase} live={live}
           position={p.id === uid ? motion.local : undefined} />)}
     </Animated.View>}
