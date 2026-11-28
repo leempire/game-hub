@@ -28,11 +28,12 @@ export default function SharedReplayScreen({ route }: { route: { params: { token
         <Text style={styles.hint}>重新加载</Text>
       </TouchableOpacity></Card>}
     {record && <Card style={styles.card}>
-      <Text style={styles.title}>{gameTitle(record.game)} · {record.game === 'concentration' ? '结算' : '终局回放'}</Text>
+      <Text style={styles.title}>{gameTitle(record.game)} · {['turtle_soup', 'concentration'].includes(record.game) ? '结算' : '终局回放'}</Text>
       <Text style={styles.hint}>{record.players.map(player => player.nickname || player.username).join(' / ')}</Text>
       <Text style={styles.hint}>{record.ended_at} · 只读分享</Text>
       <BoardSnapshot rec={record} />
-      <Text style={styles.hint}>{record.game === 'undercover' ? '词语和阵营仅在参赛者的战绩中显示。'
+      <Text style={styles.hint}>{record.game === 'turtle_soup' ? '公开分享只展示汤面和结果，不公布汤底。'
+        : record.game === 'undercover' ? '词语和阵营仅在参赛者的战绩中显示。'
         : record.game === 'concentration' ? '此页展示配对数和名次。'
         : '分享不包含 UNO 剩余手牌、抽牌堆或房间邀请。此页面不能加入或操作对局。'}</Text>
     </Card>}

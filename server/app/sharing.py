@@ -110,10 +110,15 @@ def public_share(token: str) -> dict | None:
         if row is None:
             return None
         snapshot = record_snapshot(row['snapshot_json'], row['share_owner_id'])
+        soup_source = snapshot.get('source') if row['game'] == 'turtle_soup' else None
         fields = {'abyss': _ABYSS_SUMMARY_FIELDS, 'undercover': _UNDERCOVER_SUMMARY_FIELDS,
                   'guandan': _GUANDAN_SUMMARY_FIELDS,
-                  'concentration': _CONCENTRATION_SUMMARY_FIELDS}.get(row['game'], _SNAPSHOT_FIELDS)
+                  'concentration': _CONCENTRATION_SUMMARY_FIELDS,
+                  'turtle_soup': {'game', 'title', 'surface', 'winner', 'reason', 'request_count'}}.get(row['game'], _SNAPSHOT_FIELDS)
         snapshot = _public_values({key: value for key, value in snapshot.items() if key in fields})
+        if isinstance(soup_source, dict):
+            snapshot['source'] = {key: soup_source[key] for key in ('name', 'license', 'license_url') if key in soup_source}
+            snapshot['source']['url'] = soup_source.get('credit_url') or soup_source.get('license_url', '')
         if row['game'] == 'abyss':
             snapshot['players'] = [
                 {key: value for key, value in player.items() if key in _ABYSS_DIVER_FIELDS}

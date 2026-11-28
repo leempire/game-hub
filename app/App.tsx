@@ -35,6 +35,7 @@ const LINKING = {
       Tetris: 'tetris/:code',
       Uno: 'uno/:code',
       Undercover: 'undercover/:code',
+      TurtleSoup: 'turtle-soup/:code',
       Doudizhu: 'doudizhu/:code',
       Guandan: 'guandan/:code',
       Concentration: 'concentration/:code',

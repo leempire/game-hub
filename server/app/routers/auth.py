@@ -53,6 +53,8 @@ def _recent_fails(key: tuple[str, str], now: float) -> list[float]:
 
 @router.post("/register")
 def register(req: RegisterRequest):
+    if req.temporary_test != bool(req.test_batch and req.test_batch.strip()):
+        raise HTTPException(400, "临时测试账号必须同时提供测试标记和批次")
     if not _USERNAME_RE.match(req.username):
         raise HTTPException(400, "用户名需3-20位字母数字下划线")
     _check_password_rule(req.password)
@@ -66,9 +68,9 @@ def register(req: RegisterRequest):
             raise HTTPException(409, "用户名已存在")
         now = datetime.now(timezone.utc).isoformat()
         cur = conn.execute(
-            """INSERT INTO users (username, password_hash, salt, role, created_at)
-               VALUES (?, ?, ?, 'user', ?)""",
-            (req.username, pw_hash, salt, now),
+            """INSERT INTO users (username, password_hash, salt, role, created_at, temporary_test, test_batch)
+               VALUES (?, ?, ?, 'user', ?, ?, ?)""",
+            (req.username, pw_hash, salt, now, int(req.temporary_test), req.test_batch),
         )
         conn.commit()
         row = conn.execute(

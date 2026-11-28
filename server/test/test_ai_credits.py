@@ -46,6 +46,7 @@ def account(tmp_path, monkeypatch):
 
 def _room():
     room = rm.create_room({'id': 1, 'username': 'user1', 'nickname': 'Host'}, None, None, 'undercover')
+    ai_credits.set_balance(1, 100, 1)
     room['players'][0]['connected'] = True
     for _ in range(3):
         rm.add_bot(room['code'], 1)
@@ -249,6 +250,7 @@ def test_eliminated_ai_observer_resumes_but_bots_alone_pause(account, monkeypatc
     room = _room()
     gs = rm.start_game(room['code'], 1)
     gs['alive'].remove(1)
+    gs['pending_speakers'] = [uid for uid in gs['pending_speakers'] if uid != 1]
     assert room_timing.undercover_online(room)
     room['players'][0]['connected'] = False
     assert not room_timing.undercover_online(room)
@@ -298,3 +300,28 @@ def test_graceful_shutdown_finishes_inflight_billing(account, monkeypatch):
     _run_async(scenario())
     assert ai_credits.balance_units(1) < 100 * ai_credits.UNITS
     assert gs['pending_speakers'][0] == 1
+
+
+
+def test_add_paid_bot_low_credit_message(account):
+    room = rm.create_room({'id': 1, 'username': 'user1', 'nickname': None}, None, None, 'undercover')
+    with pytest.raises(ValueError, match='^AI积分不足$'):
+        rm.add_bot(room['code'], 1)
+    assert len(room['players']) == 1
+    ai_credits.set_balance(1, 100, 1)
+    rm.add_bot(room['code'], 1)
+    assert len(room['players']) == 2
+
+
+def test_undercover_agent_private_plan_never_becomes_public(monkeypatch):
+    captured=[]
+    async def call(messages,*args):
+        captured.append(json.loads(messages[1]['content']))
+        return {'plan':{'camp':'undercover','civilian_word':'雨伞'},'text':'下雨出门会带上','secret':'hidden'}
+    monkeypatch.setattr(ai_service,'call_json',call)
+    view={'your_id':1,'your_word':'雨衣','can_clue':True,'roles':{1:'spy'},'words':['雨伞','雨衣'],
+          'clues':[{'round':1,'user_id':2,'text':'手里举着','private_word':'雨伞'}]}
+    result=_run_async(undercover_agent.decide(view,1,'test-operation'))
+    assert result=={'text':'下雨出门会带上'}
+    assert 'roles' not in captured[0] and 'words' not in captured[0]
+    assert 'private_word' not in captured[0]['clues'][0]

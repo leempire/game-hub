@@ -1,6 +1,7 @@
 import { abyssResults } from '../abyss';
 import AbyssResult from '../AbyssResult';
 import UndercoverSummary from '../UndercoverSummary';
+import TurtleSoupSummary from '../TurtleSoupSummary';
 import { undercoverWinnerLabels, type UndercoverSnapshot } from '../undercover';
 import { doudizhuRole, formatDoudizhuResult, type DoudizhuSnapshot } from '../doudizhu';
 import { formatGuandanResult } from '../guandan';
@@ -16,7 +17,7 @@ import RecordShareActions from '../RecordShareActions';
 import { useAuth } from '../auth';
 import { fetchMyHistory, GameRecord, HistoryResult, AbyssSnapshot, ConnectFourSnapshot, LuzhanqiSnapshot } from '../api';
 import { replayStepCount, snapshotAtStep } from '../replay';
-import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon, ConcentrationIcon } from '../icons';
+import { GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon, Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon, LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, TurtleSoupIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon, ConcentrationIcon } from '../icons';
 import { UnoCardView } from '../UnoCardView';
 import LuzhanqiBoardView from './LuzhanqiBoardView';
 import { LzqView } from '../luzhanqi';
@@ -103,6 +104,7 @@ export default function HistoryScreen() {
   };
 
   const renderGameIcon = (game: string) => {
+    if (game === 'turtle_soup') return <TurtleSoupIcon size={36} />;
     if (game === 'undercover') return <UndercoverIcon size={36} />;
     if (game === 'doudizhu') return <DoudizhuIcon size={36} />;
     if (game === 'guandan') return <GuandanIcon size={36} />;
@@ -170,7 +172,7 @@ export default function HistoryScreen() {
                     .map(player => player.nickname || player.username).join('、')).join(' vs ') : rec.players.map((p) => {
                     const difficulty = p.ai_difficulty && { easy: '简单', normal: '普通', hard: '困难' }[p.ai_difficulty];
                     return `${p.nickname || p.username}${difficulty ? ' · ' + difficulty : ''}`;
-                  }).join(['abyss', 'undercover', 'doudizhu', 'concentration'].includes(rec.game) ? ' / ' : ' vs ')}
+                  }).join(['turtle_soup', 'abyss', 'undercover', 'doudizhu', 'concentration'].includes(rec.game) ? ' / ' : ' vs ')}
                 </Text>
               </View>
               <Text style={styles.arrow}>{expanded ? '∨' : '›'}</Text>
@@ -302,6 +304,7 @@ export function BoardSnapshot({ rec, viewerId }: { rec: GameRecord; viewerId?: n
       <AbyssResult game={dive} uid={viewerId} />
     </View>;
   }
+  if (view.game === 'turtle_soup') return <TurtleSoupSummary summary={view} testID="soup-history" />;
   if (view.game === 'undercover') {
     const summary: UndercoverSnapshot = view;
     const names = new Map(rec.players.map(player => [player.user_id, player.nickname || player.username]));

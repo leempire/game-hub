@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 class RegisterRequest(BaseModel):
     username: str
     password: str
+    temporary_test: bool = False
+    test_batch: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class LoginRequest(BaseModel):

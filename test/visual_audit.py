@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import time
 
@@ -18,6 +19,7 @@ BASE = 'http://localhost:50540'
 REPO = pathlib.Path(__file__).resolve().parent.parent
 APP_SRC = REPO / 'app/src'
 APP_ENTRY = REPO / 'app/App.tsx'
+TEST_BATCH = f'visual-audit-{time.time_ns()}'
 SERVER_CONFIG = REPO / 'server/config/config.json'
 
 
@@ -142,6 +144,9 @@ def main():
             viewport={'width': 390, 'height': 844}, device_scale_factor=2,
             user_agent='Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148')
         pg = ctx.new_page()
+        pg.route('**/api/auth/register', lambda route: route.continue_(post_data=json.dumps({
+            **route.request.post_data_json, 'temporary_test': True, 'test_batch': TEST_BATCH,
+        })))
 
         # 登录/注册页
         pg.goto(BASE, timeout=120000)
@@ -238,4 +243,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    finally:
+        subprocess.run([sys.executable, str(REPO / 'bin/cleanup-test-users.py'),
+                        '--batch', TEST_BATCH, '--apply'], check=True)

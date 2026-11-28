@@ -30,6 +30,7 @@ import DoudizhuScreen from './screens/DoudizhuScreen';
 import GuandanScreen from './screens/GuandanScreen';
 import ConcentrationScreen from './screens/ConcentrationScreen';
 import UndercoverScreen from './screens/UndercoverScreen';
+import TurtleSoupScreen from './screens/TurtleSoupScreen';
 import StasisScreen from './screens/StasisScreen';
 import FishScreen from './screens/FishScreen';
 import AbyssScreen from './screens/AbyssScreen';
@@ -72,6 +73,7 @@ export type RootStackParamList = {
   Guandan: { code: string };
   Concentration: { code: string };
   Undercover: { code: string };
+  TurtleSoup: { code: string };
   Stasis: { code: string };
   Abyss: { code: string };
   Fish: { code: string };
@@ -318,6 +320,8 @@ function RoomScreenWrapper({ route, navigation }: { route: any; navigation: any 
           navigation.navigate('Guandan', { code: c });
         } else if (game === 'concentration') {
           navigation.navigate('Concentration', { code: c });
+        } else if (game === 'turtle_soup') {
+          navigation.navigate('TurtleSoup', { code: c });
         } else if (game === 'undercover') {
           navigation.navigate('Undercover', { code: c });
         } else if (game === 'fish') {
@@ -421,6 +425,10 @@ function GuandanScreenWrapper({ route }: { route: { params: RootStackParamList['
 
 function ConcentrationScreenWrapper({ route }: { route: { params: RootStackParamList['Concentration'] } }) {
   return <ConcentrationScreen key={route.params.code} code={route.params.code} />;
+}
+
+function TurtleSoupScreenWrapper({ route }: { route: { params: RootStackParamList['TurtleSoup'] } }) {
+  return <TurtleSoupScreen key={route.params.code} code={route.params.code} />;
 }
 
 function UndercoverScreenWrapper({ route }: { route: { params: RootStackParamList['Undercover'] } }) {
@@ -642,6 +650,11 @@ export default function AppNavigation() {
             name="Concentration"
             component={ConcentrationScreenWrapper}
             options={{ orientation: 'default', title: gameTitle('concentration') }}
+          />
+          <Stack.Screen
+            name="TurtleSoup"
+            component={TurtleSoupScreenWrapper}
+            options={{ title: gameTitle('turtle_soup'), headerStyle: { backgroundColor: colors.card } }}
           />
           <Stack.Screen
             name="Undercover"

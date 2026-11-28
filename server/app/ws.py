@@ -9,7 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.security import decode_token_ws
 from app.database import get_conn, row_to_user
-from app import undercover_bots, abyss_stream, room_manager as rm, spectating
+from app import turtle_soup_host, turtle_soup_views, undercover_bots, abyss_stream, room_manager as rm, spectating
 from app.game.minesweeper import game_to_sync as mine_game_to_sync
 from app.game.reversi import game_to_sync as reversi_game_to_sync
 from app.game.battleship import game_to_sync as bs_game_to_sync
@@ -58,6 +58,10 @@ def _register_dc_timeout_callback():
 
     async def _on_timeout(code: str, winner: str | int, timeout_event: dict | None = None):
         room = rm.get_room(code)
+        if timeout_event and timeout_event.get('game') == 'turtle_soup':
+            if room and room.get('game_state') is timeout_event['game_state']:
+                _send_turtle_soup_update(room)
+            return
         if timeout_event and timeout_event.get("game") == "concentration":
             if room and room["game_state"] is timeout_event["game_state"]:
                 if room["game_state"]["revision"] == timeout_event["revision"]:
@@ -140,7 +144,7 @@ async def ws_room(websocket: WebSocket, code: str):
         return
     await websocket.accept()
     is_undercover = room["game"] == "undercover"
-    private_round = is_undercover or room["game"] in ("doudizhu", "guandan", "concentration")
+    private_round = is_undercover or room["game"] in ("turtle_soup", "doudizhu", "guandan", "concentration")
     if private_round and (rm.get_room(code) is not room
                           or not any(p["id"] == user_id for p in room["players"])):
         await websocket.close(code=4003, reason="你不在房间中")
@@ -162,7 +166,7 @@ async def ws_room(websocket: WebSocket, code: str):
             _stasis_enqueue(websocket, _build_sync(room, user_id))
             if was_paused and (rm.room_timing.undercover_online(room) or room["status"] == "waiting"):
                 _send_undercover_update(room, exclude={user_id})
-        elif room["game"] in ("guandan", "concentration"):
+        elif room["game"] in ("turtle_soup", "guandan", "concentration"):
             if not reconnected:
                 await websocket.close(code=4003, reason="你不在房间中")
                 return
@@ -266,6 +270,20 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
     msg_type = data.get("type")
     room = rm.get_room(code)
     if not room:
+        return
+    if msg_type in ('soup_submit', 'soup_reveal'):
+        error = turtle_soup_host.submit(room, user_id, data)
+        connection = _connections.get(code, {}).get(user_id)
+        if connection:
+            if error:
+                _stasis_enqueue(connection, {'type': 'error', 'message': error,
+                                             'request_id': data.get('request_id')})
+            _stasis_enqueue(connection, _build_sync(room, user_id))
+        return
+    if room['game'] == 'turtle_soup' and msg_type not in (
+        'ping', 'ready', 'unready', 'start', 'add_bot', 'remove_bot', 'room_setting',
+        'swap_request', 'swap_respond', 'surrender', 'leave',
+    ):
         return
     if msg_type == "doudizhu_action":
         await _handle_doudizhu_action(code, room, user_id, data)
@@ -519,6 +537,9 @@ async def _handle_start(code: str, user_id: int):
         return
     if room["game"] == "guandan":
         _send_guandan_update(room, kind="game_start")
+        return
+    if room["game"] == "turtle_soup":
+        _send_turtle_soup_update(room, kind="game_start")
         return
     if room["game"] == "undercover":
         _send_undercover_update(room, kind="game_start")
@@ -957,6 +978,10 @@ async def _handle_surrender(code: str, user_id: int):
             rm.finish_guandan(room, user_id, "surrender")
             _send_guandan_update(room)
         return
+    if room["game"] == "turtle_soup":
+        if room["status"] == "playing":
+            await _handle_leave(code, user_id)
+        return
     if room["game"] == "undercover":
         if room["status"] == "playing":
             await _handle_leave(code, user_id)
@@ -1096,7 +1121,7 @@ async def _handle_leave(code: str, user_id: int):
     if ws is not None and conns.get(user_id) is ws:
         conns.pop(user_id)
         try:
-            if room["game"] in ("undercover", "doudizhu", "guandan", "concentration") and (tail := _pending_send(ws)) is not None:
+            if room["game"] in ("turtle_soup", "undercover", "doudizhu", "guandan", "concentration") and (tail := _pending_send(ws)) is not None:
                 await tail
             await ws.close()
         except Exception:
@@ -1110,6 +1135,9 @@ async def _broadcast_leave(code: str, user_id: int, action: str,
         return
     if action == "game_over" and updated_room and updated_room["game"] == "guandan":
         _send_guandan_update(updated_room)
+        return
+    if updated_room and updated_room['game'] == 'turtle_soup':
+        _send_turtle_soup_update(updated_room)
         return
     if updated_room and updated_room["game"] == "undercover":
         if action == "game_over" or updated_room["status"] == "playing":
@@ -1214,7 +1242,7 @@ async def _broadcast(code: str, message: dict, exclude: set[int] | None = None):
     conns = _connections.get(code, {})
     room = rm.get_room(code)
     exclude = exclude or set()
-    if room and room["game"] in ("undercover", "guandan", "concentration"):
+    if room and room["game"] in ("turtle_soup", "undercover", "guandan", "concentration"):
         for p in room["players"]:
             uid = p["id"]
             if uid not in exclude and uid in conns:
@@ -1281,6 +1309,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = doudizhu.view_for(room["game_state"], user_id)
         elif room["game"] == "guandan":
             game_info = guandan.view_for(room["game_state"], user_id)
+        elif room["game"] == "turtle_soup":
+            game_info = turtle_soup_views.playing_view(room, user_id)
         elif room["game"] == "undercover":
             game_info = _undercover_view(room, user_id)
         elif room["game"] == "concentration":
@@ -1298,7 +1328,7 @@ def _build_sync(room: dict, user_id: int) -> dict:
             game_info = lzq.game_to_sync(room["game_state"], user_id)
         else:
             game_info = _game_state_for_sync(room["game_state"], user_id)
-    if game_info is not None and room["game"] not in ("undercover", "guandan", "concentration"):
+    if game_info is not None and room["game"] not in ("turtle_soup", "undercover", "guandan", "concentration"):
         game_info = _timed_view(room, user_id, game_info)
     if game_info is not None and room.get("challenge_date"):
         game_info["challenge"] = rm.challenge_info(room)
@@ -1314,6 +1344,8 @@ def _build_sync(room: dict, user_id: int) -> dict:
         **({"abyss_result": abyss.snapshot(room["game_state"])}
            if room["game"] == "abyss" and room["status"] == "waiting"
            and (room.get("game_state") or {}).get("finished") else {}),
+        **({'soup_result': result} if room['game'] == 'turtle_soup'
+           and (result := turtle_soup_views.result_for(room, user_id)) is not None else {}),
         **({"undercover_result": result} if room["game"] == "undercover"
            and (result := _undercover_result(room, user_id)) is not None else {}),
         **({"concentration_result": result} if room["game"] == "concentration"
@@ -1463,6 +1495,21 @@ async def _handle_guandan_action(code: str, room: dict, user_id: int, data: dict
         message = {"combo": combo}
     await _send_to(code, user_id, {"type": f"guandan_{action}", **version,
                                   "request_id": data.get("request_id"), **message})
+
+
+def _send_turtle_soup_update(room, *, kind='soup_state'):
+    members = {p['id'] for p in room['players']}
+    playing = room['status'] == 'playing'
+    for uid, connection in list(_connections.get(room['code'], {}).items()):
+        if playing and uid in members:
+            payload = {'type': kind, 'game': turtle_soup_views.playing_view(room, uid)}
+            if kind == 'game_start':
+                payload['room'] = rm.room_to_dict(room)
+            _stasis_enqueue(connection, payload)
+        elif not playing and (result := turtle_soup_views.result_for(room, uid)):
+            _stasis_enqueue(connection, result)
+        if uid in members:
+            _stasis_enqueue(connection, {'type': 'lobby', 'room': rm.room_to_dict(room)})
 
 
 def _undercover_view(room: dict, user_id: int) -> dict:
@@ -3323,6 +3370,8 @@ async def reschedule_after_restore():
                     if rm.user_in_game(room, p["id"]):
                         rm._start_dc_timer(room["code"], p["id"], asyncio.get_running_loop())
                 rm._ensure_abyss_tick(room)
+            elif room["game"] == "turtle_soup":
+                turtle_soup_host.recover(room)
             elif room["game"] == "undercover":
                 for p in room["players"]:
                     if not p["connected"] and rm.user_in_game(room, p["id"]):
@@ -3369,7 +3418,7 @@ def _broadcast_lobby_after_game_end(room: dict):
     callback preserves the old lobby-only notification while reading the final
     membership, rather than capturing stale room_to_dict data during the save.
     """
-    if room["game"] in ("undercover", "doudizhu", "guandan", "concentration"):
+    if room["game"] in ("turtle_soup", "undercover", "doudizhu", "guandan", "concentration"):
         return  # The result and lobby are enqueued together for each recipient.
     room["_lobby_after_game_over"] = True
     try:
@@ -3451,3 +3500,6 @@ rm.room_timing.configure(rm.get_room, _on_room_deadline)
 rm.set_bot_turn_callback(_bot_do_turn)
 rm.set_bot_placement_callback(_bot_do_placement)
 rm.add_game_end_listener(_broadcast_lobby_after_game_end)
+
+
+turtle_soup_host.configure(_send_turtle_soup_update)

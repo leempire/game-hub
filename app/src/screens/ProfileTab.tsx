@@ -248,7 +248,7 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
         <View style={styles.roleBadge}>
           <Text style={styles.roleText}>{user.role === 'admin' ? '管理员' : '用户'}</Text>
         </View>
-        <Text style={styles.joinDate}>AI 积分：{Math.floor(user.ai_credits ?? 0)}（由管理员设置）</Text>
+        <Text style={styles.joinDate}>AI 积分：{Math.floor(user.ai_credits ?? 0)}</Text>
         <Text style={styles.joinDate}>注册于 {formatDate(user.created_at)}</Text>
       </View>
 

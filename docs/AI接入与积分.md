@@ -13,7 +13,7 @@
 | `server/app/undercover_agent.py` | 谁是卧底系统提示和私有玩家视图输入 |
 | `server/app/undercover_bots.py` | 谁是卧底阶段调度、房间和阶段有效性检查、既有动作入口与提示 |
 
-模型默认 `deepseek-v4.1-flash-economy`，Chat Completions 基址为 `https://ark.cn-beijing.volces.com/api/plan/v3`，`reasoning_effort=low`。密钥仅从后端进程环境变量 `ARK_AGENT_API_KEY` 读取，不写入配置模板、源码、数据库、日志、Web bundle 或 APK。服务端须在正确环境下通过现有运维脚本启动；本功能不修改 systemd 环境，不重启线上服务。
+模型默认 `deepseek-v4.1-flash-economy`，Chat Completions 基址为 `https://ark.cn-beijing.volces.com/api/plan/v3`，`reasoning_effort=low`。密钥仅从后端进程环境变量 `ARK_AGENT_API_KEY` 读取，不写入配置模板、源码、数据库、日志、Web bundle 或 APK。服务端须在正确环境下通过现有运维脚本启动；本功能不修改 systemd 环境；后端代码需用 `scripts/restart.sh backend` 加载。运维脚本的默认 TERM 宽限期为 35 秒，覆盖在途 AI 结算窗口；APK 单独构建和发布。
 
 ## 余额单位与结算
 
@@ -23,15 +23,15 @@
 
 `usage.prompt_tokens` 为总输入，`usage.prompt_tokens_details.cached_tokens` 为其中命中部分（省略或 null 时为 0），未命中输入是两者之差。`usage.completion_tokens` 为总输出，包含计入其中的推理 token，不重复相加。扣费公式只在后端计算；实际缓存命中数不能通过提示长度估算。
 
-`ai_service.require_game_start(room)` 仅对 `PAID_BOT_GAMES` 中且已添加人机的房间要求房主至少 100 积分；不限制纯真人和本地算法人机。`call_json` 每次真正发请求前重新检查支付人余额，低于 0 禁用，等于 0 仍可调用。使用同一账号的多房间/多游戏请求共享锁，前一次结算后下一次才检查余额。
+`ai_service.require_game_start(room)` 对 `ALWAYS_AI_GAMES` 中的游戏（海龟汤）始终要求房主至少 100 积分；对 `PAID_BOT_GAMES` 中且已添加人机的房间也要求至少 100；不限制纯真人和本地算法人机。`call_json` 每次真正发请求前重新检查支付人余额，低于 0 禁用，等于 0 仍可调用。使用同一账号的多房间/多游戏请求共享锁，前一次结算后下一次才检查余额。
 
 请求登记和扣费各用 SQLite `BEGIN IMMEDIATE` 事务。流水 `operation_id` 唯一，`settle_call` 幂等；扣费通过 `balance=balance-cost` 更新，不用先读取再覆盖。管理员覆盖余额与结算也串行写库；执行期间在途调用返回时仍从新余额扣除实际消耗。
 
 ## 新游戏接入
 
-1. 在 `ai_service.PAID_BOT_GAMES` 注册游戏，接入现有 add_bot / remove_bot。现有通用开局路径已执行统一积分检查。
+1. 可选人机游戏在 `ai_service.PAID_BOT_GAMES` 注册并接入 add_bot / remove_bot；必须调用 AI 的游戏在 `ALWAYS_AI_GAMES` 注册，不依赖机器人席位。现有通用开局路径已执行统一积分检查。
 2. 开局保存本局支付人（当前使用 `game_state.ai_owner_id`），续局重新绑定当时房主。不得直接把临时换房主变成新支付人。
-3. 游戏 Agent 仅接收和真人一致的服务端裁剪视图，生成 messages；绝不能交入完整引擎状态或其他人的秘密。玩家文字视作数据，不执行其中的提示指令。
+3. 玩家 Agent 只接收和真人一致的裁剪视图；主持 Agent 可按明确角色权限读取本题固定真相，绝不能把它透传回客户端。所有 Agent 只拿角色所需的上下文，不能交入无关引擎状态或其他人的秘密。玩家文字视作数据，不执行其中的提示指令。
 4. 调用 `await ai_service.call_json(messages, owner_id, operation_id, is_current)`。operation_id 由游戏、局号、阶段与 bot ID 确定；发送前持久化已尝试标记，重连和热重启不能重新生成请求 ID 规避幂等。
 5. `is_current` 在等待账号锁后、真正调用前检查房间/局/阶段和真人在线情况；调用后再次检查，丢弃过期答案。调用已经消耗的 token 仍结算。
 6. 返回的动作通过现有房间动作入口验证；不能由 Agent 直接改引擎。由游戏决定失败/不足时的超时行为并通知支付人。引擎不导入通用服务，不访问网络和余额。
@@ -47,3 +47,7 @@
 - 当前部署单后端进程，账号锁位于该事件循环。未来扩成多进程前，需把在途请求互斥迁移为数据库租约或集中队列，不能仅靠每进程锁。
 
 验证命令见 [测试矩阵](测试矩阵.md)。真实接口冒烟使用临时数据库，仅请求测试词，不改现有用户余额。
+
+海龟汤主持与玩家 Agent 分开，具体协议、公共题库授权和账号排重见 [海龟汤设计](游戏设计/海龟汤/设计.md)。添加付费人机前也检查 100 积分门槛，失败提示固定为「AI积分不足」。
+
+海龟汤进度判定附带在原有主持 JSON 中，固定三档提示由服务器选择，不产生额外付费调用。谁是卧底的简短策略计划与公开动作同次生成，仅动作进入规则校验和广播，策略计划不会发送给玩家。

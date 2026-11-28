@@ -36,6 +36,7 @@ const ROUTE_BY_PATH: Record<string, string> = {
   tetris: 'Tetris',
   uno: 'Uno',
   undercover: 'Undercover',
+  'turtle-soup': 'TurtleSoup',
   doudizhu: 'Doudizhu',
   guandan: 'Guandan',
   concentration: 'Concentration',

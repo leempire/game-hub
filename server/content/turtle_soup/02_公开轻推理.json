@@ -1,0 +1,145 @@
+{
+  "batch": "公开轻推理题",
+  "retrieved_at": "2026-11-28",
+  "puzzles": [
+    {
+      "id": "eason_empty-frame",
+      "family": "eason_empty-frame",
+      "title": "空荡荡的合照",
+      "surface": "六个朋友请摄影师拍一张合照。按下快门前，摄影师却让所有人都站到镜头外。照片出来后，大家都说：“一个也没少，正是我们想要的。”他们没有使用拼图或后期合成。",
+      "solution": "大家事先约好拍一张影子合照。他们站在镜头外、灯光前，让六个人的影子一起投到白墙上。摄影师只拍墙上的六道影子，所以照片里没有真人，却保留了每个人独特的姿势。",
+      "essential_facts": [
+        "照片表现的是大家的影子，不是普通正面人像；说出“影子合照”即可表达这个转折，不必复述事先约定的过程。",
+        "镜头拍到了人物投在背景上的影子。背景设定为白墙，但墙的颜色、灯的具体位置、影子的姿势不是还原必需细节。"
+      ],
+      "source": {
+        "name": "EasonZhu1997 / AIUI-TurtleSoup",
+        "url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/server/puzzles.mjs",
+        "license": "MIT",
+        "license_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/LICENSE",
+        "credit_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup"
+      },
+      "hints": [
+        "照片可以表现一个人，却不一定直接拍到本人。",
+        "光照和墙面可能参与了这张合照。",
+        "人站在画面外，仍能在画面内留下什么轮廓？"
+      ]
+    },
+    {
+      "id": "eason_reversed-menu",
+      "family": "eason_reversed-menu",
+      "title": "倒着写的菜单",
+      "surface": "新来的店员把菜单写得整整齐齐，老板却请她把每个字都反着写。她照做以后，顾客反而都能顺畅地读出菜单，没一个人需要照镜子。",
+      "solution": "菜单写在临街的透明玻璃上。店员站在店内写字，排队的顾客却从街上隔着玻璃读。她从自己这一面把字写成镜像，顾客从玻璃另一面看到的就是正常文字。",
+      "essential_facts": [
+        "菜单写在透明玻璃上，能从两面透过玻璃读字；是否提到“临街”不影响还原。",
+        "店员在玻璃内侧书写，顾客在玻璃外侧阅读，双方处于相反两面。",
+        "店员从自己的方向把文字写成镜像，隔着玻璃的顾客看到正常方向的字。"
+      ],
+      "source": {
+        "name": "EasonZhu1997 / AIUI-TurtleSoup",
+        "url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/server/puzzles.mjs",
+        "license": "MIT",
+        "license_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/LICENSE",
+        "credit_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup"
+      },
+      "hints": [
+        "同一个字，从两侧看不一定相同。",
+        "注意菜单所在的材料和读菜单的人站的位置。",
+        "想想透过透明表面，从另一面看字的效果。"
+      ]
+    },
+    {
+      "id": "eason_quiet-dance",
+      "family": "eason_quiet-dance",
+      "title": "音乐停了才开场",
+      "surface": "主持人宣布舞会开始，工作人员立刻关掉大厅的音箱。走廊里的人听不到一点音乐，厅内的客人却越跳越起劲，而且没有人在假装。",
+      "solution": "这是为避免打扰邻居而办的耳机舞会。开场前大厅音箱只用于说明规则，正式开始后关闭。每个参加者都戴着接收同一节目音频的无线耳机，所以他们仍然听着音乐跳舞，走廊里却听不到音箱声。",
+      "essential_facts": [
+        "所有跳舞的参加者都佩戴无线耳机。",
+        "正式音乐通过耳机持续播放，关掉的只是大厅音箱。"
+      ],
+      "source": {
+        "name": "EasonZhu1997 / AIUI-TurtleSoup",
+        "url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/server/puzzles.mjs",
+        "license": "MIT",
+        "license_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/LICENSE",
+        "credit_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup"
+      },
+      "hints": [
+        "大厅没有外放声音，不等于每个人都听不到音乐。",
+        "每位参加者可能有各自接收声音的方式。",
+        "想想能让声音只传给佩戴者的设备。"
+      ]
+    },
+    {
+      "id": "eason_empty-box-delivery",
+      "family": "eason_empty-box-delivery",
+      "title": "签收一箱空气",
+      "surface": "快递员送来一个空箱子，收件人认真检查后，开心地签了字。他早就知道箱子里什么都没有，也不是为了收藏包装，更不是在恶作剧。",
+      "solution": "收件人负责回收循环使用的保温周转箱。箱子先前装着商品送到客户那里，客户用完后把空箱退回。这个箱子本身就是需要回收清洁、再次使用的物品，检查完好后签收，代表一次正常的回收完成。",
+      "essential_facts": [
+        "本次运输要交付的是可重复使用的箱体本身；不必说出“保温”材质或用途。",
+        "这是把用过的周转箱退回以便再次使用的回收返程；不必复述此前具体装过什么商品。"
+      ],
+      "source": {
+        "name": "EasonZhu1997 / AIUI-TurtleSoup",
+        "url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/server/puzzles.mjs",
+        "license": "MIT",
+        "license_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/LICENSE",
+        "credit_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup"
+      },
+      "hints": [
+        "先不要认定这次配送是在交付里面的商品。",
+        "箱子本身可能就是这次要接收的东西。",
+        "考虑循环包装用完之后的回收流程。"
+      ]
+    },
+    {
+      "id": "eason_one-stop-ride",
+      "family": "eason_one-stop-ride",
+      "title": "只坐一站的旅客",
+      "surface": "一个人连续几天带着同一只狗上公交，只坐一站就下车，再慢慢走回原来的站点。他不赶时间，也没有忘带东西。后来，他终于能多坐几站，反而特别高兴。",
+      "solution": "他是一位协助训练导盲犬的人，正在让一只训练中的犬逐步适应公交的声音、晃动和上下车流程。起初只安排短短一站，回程步行让它放松，之后再慢慢延长乘坐距离。能平静地多坐几站，说明适应训练取得了进展。",
+      "essential_facts": [
+        "乘车是为了训练狗适应公交，不是为了赶路。正式故事中的狗是导盲犬，但只说训练狗乘车就已命中核心，不必猜出导盲犬身份。",
+        "训练从短程逐渐延长，能多坐几站代表狗更适应乘车；不必复述公交的声音或晃动等具体刺激。"
+      ],
+      "source": {
+        "name": "EasonZhu1997 / AIUI-TurtleSoup",
+        "url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/server/puzzles.mjs",
+        "license": "MIT",
+        "license_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/LICENSE",
+        "credit_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup"
+      },
+      "hints": [
+        "乘车的目的可能不是到达目的地。",
+        "同行者需要逐步适应车内环境。",
+        "关注导盲犬训练中对声音、晃动和上下车的适应。"
+      ]
+    },
+    {
+      "id": "eason_growing-bookshelf",
+      "family": "eason_growing-bookshelf",
+      "title": "越卖越满的书架",
+      "surface": "一家小书店办了一下午活动。老板卖出了很多书，没有进货，也没人退货，结束时书架上的书却比开场更多。每位客人都知道规则，老板也没有算错。",
+      "solution": "这是一次旧书公益换购活动：客人带来两本可阅读的旧书，再付一小笔钱挑走一本。老板把大家带来的书检查后放回共享书架。每成交一次，书店收到两本、送出一本，所以卖得越多，书架反而越满。",
+      "essential_facts": [
+        "成交客人带来的旧书多于挑走的书。活动具体采用两本换一本并付少量费用，但没有说出确切数字或付款细节也可命中这个转折。",
+        "客人带来的旧书补回书架，所以书架净增加；不必复述老板的检查流程或共享书架名称。"
+      ],
+      "source": {
+        "name": "EasonZhu1997 / AIUI-TurtleSoup",
+        "url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/server/puzzles.mjs",
+        "license": "MIT",
+        "license_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup/blob/main/LICENSE",
+        "credit_url": "https://github.com/EasonZhu1997/AIUI-TurtleSoup"
+      },
+      "hints": [
+        "每笔交易可能同时有书进来和出去。",
+        "这里的购买方式不一定只需要付钱。",
+        "比较客人每次带来的旧书数量与挑走的数量。"
+      ]
+    }
+  ]
+}

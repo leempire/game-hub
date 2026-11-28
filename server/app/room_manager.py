@@ -18,8 +18,8 @@ from app import room_timing
 from app.competition_rules import challenge_seed, challenge_info
 from app.game import spider, uttt, uttt_ai, xiangqi as xiangqi_engine
 from app.game import stasis as stasis_engine
-from app import ai_service
-from app.game import abyss, concentration, doudizhu, fish, guandan, stasis_ai, undercover
+from app import ai_service, turtle_soup_catalog
+from app.game import turtle_soup, abyss, concentration, doudizhu, fish, guandan, stasis_ai, undercover
 
 # Room idle TTL in seconds. Sweeper deletes rooms exceeding this.
 # Monkeypatch this constant in tests to avoid real 30-minute waits.
@@ -384,7 +384,7 @@ def restore_rooms() -> int:
             if room.get("empty_since") is None:
                 room["empty_since"] = _time.time()
         _rooms[code] = room
-        if room["game"] == "undercover" and (room.get("game_state") or {}).get("summary"):
+        if room["game"] in ("undercover", "turtle_soup") and (room.get("game_state") or {}).get("summary"):
             # The final room checkpoint can survive an interruption before history commits.
             _notify_game_end(room)
         if room["game"] == "doudizhu" and (room.get("game_state") or {}).get("finished"):
@@ -530,12 +530,12 @@ def create_room(
     """Create a new room."""
     if game not in ("gomoku", "reversi", "minesweeper", "battleship", "dots", "ludo",
                     "2048", "xiangqi", "connect4", "tetris", "uno", "stasis", "luzhanqi", "spider", "uttt",
-                    "abyss", "undercover", "doudizhu", "guandan", "fish", "concentration"):
+                    "abyss", "undercover", "doudizhu", "guandan", "fish", "concentration", "turtle_soup"):
         raise ValueError("不支持的游戏类型")
     code = _generate_code()
     room_name = name or f"{user['username']}的房间"
     # 深空休眠 6 人（12 间舱室 / 12 个座位），其余多人游戏 4 人上限
-    max_players = {"undercover": undercover.MAX_PLAYERS, "stasis": 6, "doudizhu": 3,
+    max_players = {"turtle_soup": turtle_soup.MAX_PLAYERS, "undercover": undercover.MAX_PLAYERS, "stasis": 6, "doudizhu": 3,
                    "concentration": concentration.MAX_PLAYERS}.get(
         game, 4 if game in ("minesweeper", "ludo", "2048", "tetris", "uno", "spider", "abyss", "guandan", "fish") else 2)
     room = {
@@ -644,6 +644,7 @@ def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
     # 飞行棋/UNO max_players=4，可连加 3 个凑满 4 人局
     if len(room["players"]) >= room["max_players"]:
         raise ValueError("房间已满")
+    ai_service.require_bot_add(room)
     bot_names = {p.get("nickname") for p in room["players"] if p.get("is_bot")}
     seq = next(i for i in range(1, room["max_players"] + 1) if _bot_nickname(i) not in bot_names)
     bot = _make_bot_player(code, seq)
@@ -817,6 +818,8 @@ def leave_room(code: str, user_id: int) -> tuple[str, dict | None]:
             return _leave_fish(room, user_id)
         if room["game"] == "abyss":
             return _leave_abyss(room, user_id)
+        if room["game"] == "turtle_soup":
+            return _leave_turtle_soup(room, user_id)
         if room["game"] == "undercover":
             return _leave_undercover(room, user_id, "leave")
         if room["game"] == "concentration":
@@ -1008,6 +1011,8 @@ def _start_game_engine(code: str, user_id: int, *, prepared_spider: dict | None 
         return _start_doudizhu(room)
     if room["game"] == "guandan":
         return _start_guandan(room)
+    if room["game"] == "turtle_soup":
+        return _start_turtle_soup(room)
     if room["game"] == "undercover":
         return _start_undercover(room)
     if room["game"] == "concentration":
@@ -1542,6 +1547,47 @@ def guandan_action(room: dict, user_id: int, data: dict) -> dict | None:
 def finish_guandan(room: dict, user_id: int, reason: str):
     guandan.depart(room["game_state"], user_id, reason)
     _commit_guandan(room)
+
+
+def _start_turtle_soup(room):
+    players = room['players']
+    if not 1 <= len(players) <= turtle_soup.MAX_PLAYERS or any(p.get('is_bot') for p in players):
+        raise ValueError('海龟汤需要 1–8 名真人，AI 主持不占玩家席位')
+    if any(not p['connected'] for p in players):
+        raise ValueError('请等待所有玩家上线后再开始')
+    match_id = uuid4().hex
+    puzzle = turtle_soup_catalog.draw_for_players([p['id'] for p in players], match_id)
+    gs = turtle_soup.create_game(puzzle, [p['id'] for p in players], match_id, room['host_id'])
+    room['_turtle_soup_roster'] = [
+        {key: p.get(key) for key in ('id', 'username', 'nickname')} for p in players]
+    room.update(status='playing', game_started_at=_now_iso(), empty_since=None, game_state=gs)
+    return gs
+
+
+def commit_turtle_soup(room):
+    gs = room['game_state']
+    if gs['phase'] == 'finished' and not gs.get('summary'):
+        summary = turtle_soup.snapshot(gs)
+        terminal = {'match_id': gs['match_id'], 'phase': 'finished', 'finished': True,
+                    'winner': gs['winner'], 'reason': gs['reason'], 'summary': summary}
+        gs.clear()
+        gs.update(terminal)
+        _back_to_lobby(room)
+        _cancel_all_dc_tasks(room['code'])
+        _touch_activity(room)
+        _notify_game_end(room)
+    else:
+        _touch_activity(room)
+
+
+def _leave_turtle_soup(room, user_id):
+    turtle_soup.depart(room['game_state'], user_id)
+    commit_turtle_soup(room)
+    room['players'] = [p for p in room['players'] if p['id'] != user_id]
+    _transfer_host(room)
+    _prune_swap_requests(room)
+    _maybe_destroy_or_mark(room)
+    return ('game_over' if room['status'] == 'waiting' else 'removed', room)
 
 
 def _start_undercover(room: dict) -> dict:
@@ -2639,6 +2685,8 @@ def user_in_game(room: dict, user_id: int) -> bool:
     game = room["game"]
     if game in ("abyss", "fish"):
         return not gs["players"].get(user_id, {}).get("departed", True)
+    if game == "turtle_soup":
+        return user_id in gs.get("active", ())
     if game == "undercover":
         return user_id in gs.get("alive", ())
     if game == "concentration":
@@ -3936,7 +3984,7 @@ def handle_player_reconnect(code: str, user_id: int):
                     _commit_undercover(room, phase_id)
                     return True
                 room_timing.reset_deadline(room)
-            if room["game"] in ("doudizhu", "guandan") and room["status"] == "playing":
+            if room["game"] in ("turtle_soup", "doudizhu", "guandan") and room["status"] == "playing":
                 for other in room["players"]:
                     if not other.get("is_bot") and not other["connected"] and (code, other["id"]) not in _dc_tasks:
                         _start_dc_timer(code, other["id"], asyncio.get_running_loop())
@@ -3968,7 +4016,7 @@ def _start_dc_timer(code: str, user_id: int, loop: asyncio.AbstractEventLoop):
     async def _timeout():
         try:
             await asyncio.sleep(_disconnect_timeout)
-            if room and room["game"] in ("undercover", "doudizhu", "guandan", "concentration") and (
+            if room and room["game"] in ("turtle_soup", "undercover", "doudizhu", "guandan", "concentration") and (
                 _rooms.get(code) is not room or room.get("game_state") is not state
                 or _dc_tasks.get(key) is not asyncio.current_task()
             ):
@@ -4016,6 +4064,15 @@ def _on_dc_timeout(code: str, user_id: int):
                     code, user_id, {"game_state": room["game_state"]}))
             except RuntimeError:
                 pass
+        return
+    if room["game"] == "turtle_soup":
+        if not any(p['id'] == user_id and not p['connected'] for p in room['players']):
+            return
+        state = room['game_state']
+        _leave_turtle_soup(room, user_id)
+        if _dc_timeout_callback:
+            asyncio.get_running_loop().create_task(_dc_timeout_callback(
+                code, user_id, {'game': 'turtle_soup', 'game_state': state}))
         return
     if room["game"] == "undercover":
         if not any(p["id"] == user_id and not p["connected"] for p in room["players"]):

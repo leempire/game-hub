@@ -18,11 +18,13 @@ BASE_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3'
 MODEL = 'deepseek-v4.1-flash-economy'
 REASONING_EFFORT = 'low'
 PAID_BOT_GAMES = frozenset({'undercover'})
+ALWAYS_AI_GAMES = frozenset({'turtle_soup'})
 _HOST_LOCKS = WeakValueDictionary()
 
 
 def uses_paid_ai(room):
-    return room['game'] in PAID_BOT_GAMES and any(p.get('is_bot') for p in room['players'])
+    return (room['game'] in ALWAYS_AI_GAMES
+            or room['game'] in PAID_BOT_GAMES and any(p.get('is_bot') for p in room['players']))
 
 
 def require_game_start(room):
@@ -31,7 +33,14 @@ def require_game_start(room):
     if not configured():
         raise ValueError('AI 服务未配置 ARK_AGENT_API_KEY')
     if ai_credits.balance_units(room['host_id']) < MIN_START_CREDITS * ai_credits.UNITS:
-        raise ValueError(f'有 AI 人机的对局需要房主 AI 积分至少为 {MIN_START_CREDITS}')
+        label = 'AI 主持对局' if room['game'] in ALWAYS_AI_GAMES else '有 AI 人机的对局'
+        raise ValueError(f'{label}需要房主 AI 积分至少为 {MIN_START_CREDITS}')
+
+
+def require_bot_add(room):
+    if (room['game'] in PAID_BOT_GAMES
+            and ai_credits.balance_units(room['host_id']) < MIN_START_CREDITS * ai_credits.UNITS):
+        raise ValueError('AI积分不足')
 
 
 def configured():

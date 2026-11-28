@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 # Ensure app package is importable when running from server/
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import undercover_bots
+from app import turtle_soup_host, undercover_bots
 from app.cfg import config, server_dir
 from app.database import init_db, seed_admin, set_password
 from app.security import init_security, hash_password
@@ -45,6 +45,7 @@ async def on_startup():
     线程池，get_event_loop 拿不到主循环，sweeper/恢复任务可能不执行）。
     """
     undercover_bots.startup()
+    turtle_soup_host.startup()
     db_path = config.get("db_path", "data/gamehub.db")
     # Resolve relative to server/ directory
     if not os.path.isabs(db_path):
@@ -92,7 +93,7 @@ async def on_startup():
 @app.on_event("shutdown")
 async def on_shutdown():
     """Save timed-room balances before the service stops."""
-    await undercover_bots.shutdown()
+    await asyncio.gather(undercover_bots.shutdown(), turtle_soup_host.shutdown())
     await rm.room_timing.shutdown(rm.all_rooms())
 
 

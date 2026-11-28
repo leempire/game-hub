@@ -1,0 +1,75 @@
+{
+  "batch": "公开日常题",
+  "retrieved_at": "2026-11-28",
+  "puzzles": [
+    {
+      "id": "azhi_soup_sample_001",
+      "family": "azhi_soup_sample_001",
+      "title": "闹钟",
+      "surface": "我定了早上7点的闹钟。早上它响了，我按掉，继续睡。10点我自然醒过来，一看手机，闹钟设置明明还是7点，可它再也没有响过第二次。",
+      "solution": "我设的是'单次闹钟'，响过这一次就结束了。我以为闹钟每天早上都会响，按掉之后安心继续睡，结果再也不会响第二遍——迟到是我自己的认知问题。",
+      "essential_facts": [
+        "所设闹钟是单次，不是重复闹钟",
+        "响过被关闭后，该闹钟不再重复提醒"
+      ],
+      "source": {
+        "name": "AZHi-xinxin / haiguitang-coop",
+        "url": "https://github.com/AZHi-xinxin/haiguitang-coop/blob/main/samples/sample_soups.json",
+        "license": "CC BY 4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "credit_url": "https://github.com/AZHi-xinxin/haiguitang-coop"
+      },
+      "hints": [
+        "问题可能在闹钟的重复方式，而不是手机故障。",
+        "显示的时间相同，不代表还会再次触发。",
+        "比较只响一次的闹钟和重复提醒的闹钟。"
+      ]
+    },
+    {
+      "id": "azhi_soup_sample_002",
+      "family": "azhi_soup_sample_002",
+      "title": "鱼缸",
+      "surface": "我养了一缸热带鱼。昨天我给鱼缸换了水，用的是刚买的矿泉水。今天早上，鱼全死了。",
+      "solution": "我把鱼缸里的水一次性全换成了矿泉水。新水没有困过、没有调温，水温跟鱼缸差很多，水质也突变，鱼承受不住直接应激死了。问题不在矿泉水干不干净，在于换水方式太粗暴。",
+      "essential_facts": [
+        "鱼缸的水一次性全部换掉",
+        "新旧水的温度和水质突变导致鱼应激死亡"
+      ],
+      "source": {
+        "name": "AZHi-xinxin / haiguitang-coop",
+        "url": "https://github.com/AZHi-xinxin/haiguitang-coop/blob/main/samples/sample_soups.json",
+        "license": "CC BY 4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "credit_url": "https://github.com/AZHi-xinxin/haiguitang-coop"
+      },
+      "hints": [
+        "干净并不是鱼能适应新水的唯一条件。",
+        "重点看换水过程改变了多少原有环境。",
+        "水温、水质突然改变，以及一次换水的比例，可能更关键。"
+      ]
+    },
+    {
+      "id": "azhi_soup_sample_005",
+      "family": "azhi_soup_sample_005",
+      "title": "送信",
+      "surface": "邮递员以前每天都会往我家门缝里塞一封信。有一天起，他不再塞信了，我反而特别高兴。",
+      "solution": "那些信是银行寄来的催款单。我欠的钱终于还清了，催款单自然就停了。所以邮递员不再塞信，对我而言是债务清空的好消息。",
+      "essential_facts": [
+        "每天收到的信是欠债的催款单",
+        "还清债务后催款单不再寄来，因此高兴"
+      ],
+      "source": {
+        "name": "AZHi-xinxin / haiguitang-coop",
+        "url": "https://github.com/AZHi-xinxin/haiguitang-coop/blob/main/samples/sample_soups.json",
+        "license": "CC BY 4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "credit_url": "https://github.com/AZHi-xinxin/haiguitang-coop"
+      },
+      "hints": [
+        "先想想那些信的内容，以及他为什么不喜欢收到它们。",
+        "信件是否寄来，可能取决于某项事务是否结束。",
+        "考虑欠款结清后，银行是否还会继续催款。"
+      ]
+    }
+  ]
+}

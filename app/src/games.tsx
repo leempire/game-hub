@@ -3,7 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   GomokuIcon, MineIcon, ReversiIcon, BattleshipIcon, DotsIcon, LudoIcon,
   Game2048Icon, XiangqiIcon, ConnectFourIcon, TetrisIcon, UnoIcon, StasisIcon,
-  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon, FishIcon, ConcentrationIcon,
+  LuzhanqiIcon, SpiderIcon, UltimateTicTacToeIcon, AbyssIcon, TurtleSoupIcon, UndercoverIcon, DoudizhuIcon, GuandanIcon, FishIcon, ConcentrationIcon,
 } from './icons';
 
 /**
@@ -24,7 +24,7 @@ import {
 export type GameKey =
   | 'gomoku' | 'minesweeper' | 'reversi' | 'battleship' | 'dots' | 'ludo'
   | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'stasis' | 'luzhanqi' | 'spider' | 'uttt' | 'abyss'
-  | 'undercover' | 'doudizhu' | 'guandan' | 'fish' | 'concentration';
+  | 'turtle_soup' | 'undercover' | 'doudizhu' | 'guandan' | 'fish' | 'concentration';
 
 export type GameCategoryKey = 'board' | 'table' | 'solo' | 'coop' | 'single';
 
@@ -85,6 +85,8 @@ export const GAMES: GameEntry[] = [
     badge: '2–4 人 · 记忆配对', category: 'table', ionicon: 'grid-outline', Icon: ConcentrationIcon },
   { key: 'ludo', title: '飞行棋', short: '飞行棋', desc: '掷骰起飞，撞敌回基地抢先终点',
     badge: '2–4 人 · 对战', category: 'table', ionicon: 'airplane', Icon: LudoIcon },
+  { key: 'turtle_soup', title: '海龟汤', short: '海龟汤', desc: 'AI 主持答疑，和朋友一起还原隐藏真相',
+    badge: '1–8 人 · AI 主持', category: 'coop', ionicon: 'help-circle-outline', Icon: TurtleSoupIcon },
   { key: 'undercover', title: '谁是卧底', short: '谁是卧底', desc: '偷偷看词，轮流给线索，投票找卧底',
     badge: '4–8 人 · AI 人机', category: 'table', ionicon: 'search-outline', Icon: UndercoverIcon },
 

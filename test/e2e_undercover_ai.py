@@ -72,7 +72,7 @@ def browser_checks(api, db_path):
         page.on('websocket', lambda ws: ws.on('framereceived', lambda raw: messages.append(json.loads(raw))))
         page.goto(BASE, timeout=90000)
         page.get_by_text('我的', exact=True).click()
-        expect(page.get_by_text('AI 积分：0（由管理员设置）', exact=True)).to_be_visible()
+        expect(page.get_by_text('AI 积分：0', exact=True)).to_be_visible()
         page.get_by_text('用户管理', exact=True).click()
         page.get_by_text('设置 AI 积分', exact=True).click()
         page.locator('input').last.fill('100')
