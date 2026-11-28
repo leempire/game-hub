@@ -1494,3 +1494,44 @@ def test_keyboard_tap_applies_at_most_one_unprocessed_step(preserve_tap, ticks_h
         abyss.advance(gs)
     assert player['x'] == pytest.approx(initial_x + expected_ticks * data.PLAYER_SPEED * abyss.STEP)
     assert (player['dx'], player['dy'], player['input_until']) == (0, 0, 0)
+
+
+def test_delta_stream_is_opt_in_and_can_refresh_full_state(client):
+    with ExitStack() as stack:
+        code, users, sockets = _open_room(client, stack, count=2)
+        sockets[0].send_json({'type': 'abyss_stream', 'version': 1})
+        baseline = _recv(sockets[0], 'abyss_state')['game']
+        delta = _recv(sockets[0], 'abyss_delta')
+        assert delta['base'] == baseline['frame']
+        assert delta['game']['frame'] > delta['base']
+        legacy = _recv(sockets[1], 'abyss_state')['game']
+        assert all(key in legacy for key in ('effects', 'enemies', 'players', 'shots'))
+        sockets[0].send_json({'type': 'abyss_stream', 'version': 1})
+        refreshed = _recv(sockets[0], 'abyss_state')['game']
+        assert refreshed['frame'] >= baseline['frame']
+
+
+def test_projectile_grid_matches_scan_in_vertical_and_negative_cells():
+    gs = abyss.create([{'id': 1, 'username': 'diver'}], 19, map_size='endless')
+    p = gs['players'][1]
+    for i in range(90):
+        abyss._spawn(gs, 'drifter', p)
+        gs['enemies'][-1].update(x=-110 + (i % 3) * 18, y=-800 + i * 20)
+    targets = abyss._ProjectileTargets(gs['enemies'])
+    shot = {'x': -95, 'y': 900, 'r': 7, 'hit': set()}
+    def contacts(index):
+        return [(t, e['id']) for t, e in abyss._projectile_contacts(
+            gs['enemies'], 30, shot, -95, -900, index)]
+    assert contacts(targets) == contacts(None)
+    enemy = gs['enemies'][0]
+    old_x, old_y = enemy['x'], enemy['y']
+    enemy['y'] += 400
+    targets.moved(enemy, old_x, old_y)
+    assert contacts(targets) == contacts(None)
+
+
+def test_weapon_heavy_sparse_wave_uses_dense_snapshot_cadence():
+    gs = abyss.create([{'id': 1, 'username': 'diver'}], 19)
+    assert abyss.snapshot_interval(gs) == abyss.SNAPSHOT_INTERVAL
+    gs['shots'] = [{} for _ in range(abyss.DENSE_SNAPSHOT_THRESHOLD)]
+    assert abyss.snapshot_interval(gs) == abyss.DENSE_SNAPSHOT_INTERVAL

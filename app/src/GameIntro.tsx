@@ -8,7 +8,7 @@ import { colors, fontSize, radius, spacing } from './theme';
 
 const GUIDES: Record<string, { title: string; body: string }[]> = {
   fish: [
-    { title: '跟着自己的鱼走', body: '拖动水域控制游动。桌面也可以用 WASD 或方向键。青绿色野生鱼可以吃，红圈鱼会吃掉你。' },
+    { title: '跟着自己的鱼走', body: '拖动水域控制游动。桌面也可以用 WASD 或方向键。绿圈野生鱼可以吃，红圈鱼会吃掉你。' },
     { title: '三条命，比谁游得好', body: '每次被吃掉一条命，复活有 3 秒无敌。玩家之间可以互相穿过。10 分钟内多吃鱼、提升体型拿高分。' },
   ],
   abyss: [

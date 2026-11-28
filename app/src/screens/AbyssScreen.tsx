@@ -5,6 +5,7 @@ import { useIsFocused, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AbyssBoard from '../AbyssBoard';
+import { applyAbyssDelta, type AbyssDelta } from '../abyssStream';
 import AbyssMinimap, { abyssMinimapLayout } from '../AbyssMinimap';
 import AbyssAudio from '../AbyssAudio';
 import AbyssResult from '../AbyssResult';
@@ -138,6 +139,10 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
         applySnapshot(state ?? null);
         setWaiting(!state);
         setConnected(true);
+      } else if (msg.type === 'abyss_delta') {
+        const state = applyAbyssDelta(latestState, msg as unknown as AbyssDelta);
+        if (state) applySnapshot(state, true);
+        else ws.send({ type: 'abyss_stream', version: 1 });
       } else if (msg.type === 'abyss_state' || msg.type === 'game_start' || msg.type === 'game_over') {
         if (msg.game) {
           setWaiting(false);
@@ -157,7 +162,7 @@ export default function AbyssScreen({ code, onBack, onExit }: Props) {
       }
     });
     ws.connect(
-      () => { lastSnapshotAt.current = performance.now(); },
+      () => { lastSnapshotAt.current = performance.now(); ws.send({ type: 'abyss_stream', version: 1 }); },
       () => { clearChoice(); setConnected(false); setStalled(false); },
     );
     return () => {

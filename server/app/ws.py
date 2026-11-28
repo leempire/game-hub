@@ -9,7 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.security import decode_token_ws
 from app.database import get_conn, row_to_user
-from app import room_manager as rm, spectating
+from app import abyss_stream, room_manager as rm, spectating
 from app.game.minesweeper import game_to_sync as mine_game_to_sync
 from app.game.reversi import game_to_sync as reversi_game_to_sync
 from app.game.battleship import game_to_sync as bs_game_to_sync
@@ -386,6 +386,13 @@ async def _dispatch_message(code: str, user_id: int, data: dict):
     elif msg_type == "fish_move":
         if room["game"] == "fish" and rm.user_in_game(room, user_id):
             fish.move(room["game_state"], user_id, data.get("dx"), data.get("dy"))
+    elif msg_type == "abyss_stream":
+        if room["game"] == "abyss" and data.get("version") == 1:
+            connection = _connections.get(code, {}).get(user_id)
+            if connection is not None:
+                connection._abyss_stream = {"previous": None, "source": None, "keyframe": 0}
+                if room["status"] == "playing":
+                    send_abyss_tick(room)
     elif msg_type in ("abyss_move", "abyss_pick"):
         if room["game"] == "abyss" and rm.user_in_game(room, user_id):
             gs = room["game_state"]
@@ -3100,11 +3107,30 @@ def send_abyss_tick(room: dict):
     ready = [ws for ws in _connections.get(room["code"], {}).values() if _pending_send(ws) is None]
     if not ready:
         return
-    # All recipients share the same snapshot and wire encoding.
-    message = {"type": "abyss_state", "game": abyss.snapshot(room["game_state"])}
-    encoded = json.dumps(message, separators=(",", ":"), ensure_ascii=False)
-    for ws in ready:
-        _stasis_enqueue(ws, encoded, droppable=True)
+    gs = room["game_state"]
+    current = abyss.snapshot(gs)
+    full = json.dumps({"type": "abyss_state", "game": current}, separators=(",", ":"), ensure_ascii=False)
+    # Clients explicitly opt in. Old APKs keep receiving complete states.
+    encoded_deltas = {}
+    for connection in ready:
+        stream = getattr(connection, "_abyss_stream", None)
+        previous = stream["previous"] if stream else None
+        keyframe = (not previous or stream["source"] is not gs
+                    or gs["frame"] - stream["keyframe"] >= 100)
+        encoded = full
+        if not keyframe:
+            # Connections sharing a baseline reuse the same diff and JSON encoding.
+            baseline = id(previous)
+            if baseline not in encoded_deltas:
+                delta = abyss_stream.encode(previous, current)
+                encoded_deltas[baseline] = json.dumps(delta, separators=(",", ":"), ensure_ascii=False)
+            if len(encoded_deltas[baseline]) < len(full):
+                encoded = encoded_deltas[baseline]
+        if stream is not None:
+            stream.update(previous=current, source=gs)
+            if encoded is full:
+                stream["keyframe"] = gs["frame"]
+        _stasis_enqueue(connection, encoded, droppable=True)
 
 
 def send_abyss_end(room: dict):

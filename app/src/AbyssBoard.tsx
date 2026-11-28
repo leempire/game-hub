@@ -8,6 +8,7 @@ import { abyssLowPressure, abyssRescue, abyssWorld, type AbyssState, type AbyssW
 import { abyssItemArt } from './abyssItemArt';
 import { abyssColors as c } from './theme';
 import AbyssObjective from './AbyssObjective';
+import { batchableShots, budgetEffects, impactPath, projectileBatchThreshold, projectilePath } from './abyssRendering';
 import { AbyssCacheMarker } from './AbyssMinimap';
 import { CreatureDefinitions, wardenImage } from './AbyssCreatures';
 
@@ -239,9 +240,23 @@ function impactSprite(prefix: string, effect: CombatEffect, scale: number, opaci
     transform={`translate(${effect.x ?? 0} ${effect.y ?? 0}) rotate(${(effect.angle ?? 0) * radians}) scale(${scale})`} />;
 }
 
-const GroupedSparks = memo(function GroupedSparks({ prefix, entries, reduceMotion }: {
-  prefix: string; entries: DrawnEffect[]; reduceMotion: boolean;
+const GroupedSparks = memo(function GroupedSparks({ prefix, entries, reduceMotion, batch }: {
+  prefix: string; entries: DrawnEffect[]; reduceMotion: boolean; batch: boolean;
 }) {
+  const paths = useMemo(() => {
+    if (!batch) return [];
+    const groups = new Map<string, string[]>();
+    for (const { effect } of entries) {
+      const pieces = groups.get(effect.weapon) ?? [];
+      pieces.push(impactPath(effect.x ?? 0, effect.y ?? 0, effect.angle ?? 0,
+        (effect.r ?? 12) / 12 * (reduceMotion ? 1 : .85)));
+      groups.set(effect.weapon, pieces);
+    }
+    return [...groups].map(([weapon, pieces]) => [weapon, pieces.join('')]);
+  }, [batch, entries, reduceMotion]);
+  if (batch) return <>{paths.map(([weapon, path]) => <Path key={weapon}
+    testID="abyss-spark-batch" d={path} stroke={weaponColor(weapon)} strokeWidth={2.8}
+    strokeLinecap="round" fill="none" />)}</>;
   return <>{entries.map(({ effect }) => impactSprite(prefix, effect, (effect.r ?? 0) / 12 * (reduceMotion ? 1 : .85)))}</>;
 });
 
@@ -640,7 +655,9 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
     // The next snapshot can omit effects that still exist at the interpolated frame.
     return [...previousEffects.filter(effect => !currentIds.has(effect.id)), ...current].map(describeEffect);
   }, [previousEffects, scene.effects]);
-  const impactGroups = useMemo(() => groupImpactSparks(effects), [effects]);
+  const drawnEffects = useMemo(() => budgetEffects(effects,
+    game.players.find(player => player.id === (watching ?? uid))?.position), [effects, game.players, uid, watching]);
+  const impactGroups = useMemo(() => groupImpactSparks(drawnEffects), [drawnEffects]);
   const groupedImpactIds = useMemo(
     () => new Set(impactGroups.flatMap(([, group]) => group.entries.map(({ effect }) => effect.id))),
     [impactGroups],
@@ -710,6 +727,33 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
   }
 
   const warningZones = wardenAttack?.zones.filter(([x, y, radius]) => visible(x, y, radius + 4));
+
+  const shots = visibleShots.map(([id, weapon, x, y, angle, r, launch]) => {
+    const old = previous?.shots.get(id);
+    const contact = shotContacts.get(id);
+    const end = contact?.start ?? scene.frame;
+    if (contact && sceneTime >= end) return null;
+    const progress = contact && previous
+      ? clamp((sceneTime - previous.game.frame) / Math.max(1, end - previous.game.frame), 0, 1) : fraction;
+    let px = old ? mix(old[2], contact?.x ?? x, progress) : x;
+    let py = old ? mix(old[3], contact?.y ?? y, progress) : y;
+    if (!old && launch && scene.frame > launch[0]) {
+      if (sceneTime < launch[0]) return null;
+      const progress = (sceneTime - launch[0]) / (scene.frame - launch[0]);
+      px = mix(launch[1], x, progress);
+      py = mix(launch[2], y, progress);
+    }
+    if (!visible(px, py, Math.max(r * 2.6, 75))) return null;
+    return { id, weapon, r, x: px, y: py, angle: old ? mixAngle(old[4], contact?.angle ?? angle, progress) : angle };
+  }).filter(shot => shot !== null);
+  const shotBatches = new Map<AbyssWeapon, string[]>();
+  const individualShots = shots.filter(shot => {
+    if (shots.length < projectileBatchThreshold || !batchableShots.has(shot.weapon)) return true;
+    const paths = shotBatches.get(shot.weapon) ?? [];
+    paths.push(projectilePath(shot.x, shot.y, shot.angle, shot.weapon === 'holy_wand'));
+    shotBatches.set(shot.weapon, paths);
+    return false;
+  });
 
   return <View style={StyleSheet.absoluteFill} pointerEvents="none">
     <Floor left={left} top={top} zoom={zoom} width={width} height={height} worldWidth={worldWidth} worldHeight={worldHeight} />
@@ -860,26 +904,10 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
             <Use href={`#${artPrefix}-area-${weapon}`} transform={`scale(${hitRadius + 2})`} />
           </G>;
         })}
-        {visibleShots.map(([id, weapon, x, y, angle, r, launch]) => {
-          const old = previous?.shots.get(id);
-          const contact = shotContacts.get(id);
-          const end = contact?.start ?? scene.frame;
-          if (contact && sceneTime >= end) return null;
-          const progress = contact && previous
-            ? clamp((sceneTime - previous.game.frame) / Math.max(1, end - previous.game.frame), 0, 1) : fraction;
-          let px = old ? mix(old[2], contact?.x ?? x, progress) : x;
-          let py = old ? mix(old[3], contact?.y ?? y, progress) : y;
-          if (!old && launch && scene.frame > launch[0]) {
-            if (sceneTime < launch[0]) return null;
-            const progress = (sceneTime - launch[0]) / (scene.frame - launch[0]);
-            px = mix(launch[1], x, progress);
-            py = mix(launch[2], y, progress);
-          }
-          if (!visible(px, py, Math.max(r * 2.6, 75))) return null;
-          return <Shot key={id} prefix={artPrefix} id={id} weapon={weapon} r={r} x={px} y={py}
-            angle={old ? mixAngle(old[4], contact?.angle ?? angle, progress) : angle} />;
-        })}
-        {effects.map(entry => {
+        {individualShots.map(shot => <Shot key={shot.id} prefix={artPrefix} {...shot} />)}
+        {Array.from(shotBatches, ([weapon, paths]) => <Path key={weapon}
+          testID={`abyss-projectile-batch-${weapon}`} d={paths.join('')} fill={weaponColor(weapon)} />)}
+        {drawnEffects.map(entry => {
           if (groupedImpactIds.has(entry.effect.id)) return null;
           if (!effectInView(entry)) return null;
           const { effect, points } = entry;
@@ -896,7 +924,7 @@ const AbyssBoard = memo(function AbyssBoard({ game, uid, watching, offlinePeers,
           const entries = fullyInView ? group.entries : group.entries.filter(effectInView);
           if (!entries.length) return null;
           return <G key={key} testID="abyss-impact-group" opacity={fade}>
-            <GroupedSparks prefix={artPrefix} entries={entries} reduceMotion={reduceMotion} />
+            <GroupedSparks prefix={artPrefix} entries={entries} reduceMotion={reduceMotion} batch={effects.length > 128} />
           </G>;
         })}
         {wardenAttack && !!warningZones?.length && <WardenAttack attack={wardenAttack} zones={warningZones} sampleAge={attackAge} reduceMotion={reduceMotion} outline />}

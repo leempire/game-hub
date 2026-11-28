@@ -300,7 +300,7 @@ export default function FishScreen({ code, onBack, onExit }: {
       </View>}
     </View>
     <View style={styles.legend}>
-      <Text style={[styles.legendText, { color: c.green }]}>青绿可吃</Text>
+      <Text style={[styles.legendText, { color: c.green }]}>绿圈可吃</Text>
       <Text style={[styles.legendText, { color: c.coral }]}>红圈危险</Text>
       <Text style={styles.legendText}>{Platform.OS === 'web' ? '拖动 / WASD / 方向键' : '拖动水域游动'}</Text>
     </View>
