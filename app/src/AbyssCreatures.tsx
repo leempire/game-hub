@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Defs, Ellipse, G, Path } from 'react-native-svg';
+import Svg, { Circle, Defs, Ellipse, G, Image as SvgImage, Path } from 'react-native-svg';
 import type { AbyssEnemy } from './abyss';
 import { abyssColors as c, colors } from './theme';
 
@@ -74,9 +74,24 @@ function Creature({ kind }: { kind: CreatureKind }) {
   </G>;
 }
 
-export const CreatureDefinitions = memo(function CreatureDefinitions({ prefix }: { prefix: string }) {
+const creatureSprites: Record<CreatureKind, number> = {
+  drifter: require('../assets/abyss/creatures/drifter.webp'),
+  needlefish: require('../assets/abyss/creatures/needlefish.webp'),
+  eel: require('../assets/abyss/creatures/eel.webp'),
+  crab: require('../assets/abyss/creatures/crab.webp'),
+  jelly: require('../assets/abyss/creatures/jelly.webp'),
+  angler: require('../assets/abyss/creatures/angler.webp'),
+  elite: require('../assets/abyss/creatures/elite.webp'),
+};
+
+const creatureBounds: Record<CreatureKind, { x: number; y: number; width: number; height: number }> =
+  require('../assets/abyss/creatures/bounds.json');
+
+export const CreatureDefinitions = memo(function CreatureDefinitions({ prefix, raster = true }: { prefix: string; raster?: boolean }) {
   return <Defs>
-    {creatureKinds.map(kind => <G id={`${prefix}-creature-${kind}`} key={kind}><Creature kind={kind} /></G>)}
+    {creatureKinds.map(kind => <G id={`${prefix}-creature-${kind}`} key={kind}>
+      {raster ? <SvgImage href={creatureSprites[kind]} {...creatureBounds[kind]} /> : <Creature kind={kind} />}
+    </G>)}
     {/* 减速标记：虚线环 + 三根冰棱。形状与颜色双通道，不只靠变蓝传达。 */}
     <G id={`${prefix}-slow-mark`}>
       <Circle r="30" fill="none" stroke={c.beacon} strokeWidth="2" strokeDasharray="4 5" strokeOpacity=".85" />

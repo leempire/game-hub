@@ -73,7 +73,7 @@ def isolated_backend():
                 loop.close()
 
 
-def use_backend(page, origin):
+def use_backend(page, origin, legacy=False):
     page.add_init_script(f'''
       const testOrigin = {json.dumps(origin)};
       function redirectGameHubUrl(url) {{
@@ -104,6 +104,11 @@ def use_backend(page, origin):
           : null;
       }};
       window.WebSocket = class extends AppSocket {{
+        send(data) {{
+          // The full regression deliberately keeps full-state transport to exercise old APK compatibility.
+          if ({str(legacy).lower()} && JSON.parse(data).type === 'abyss_stream') return;
+          super.send(data);
+        }}
         constructor(url, ...args) {{
           super(redirectGameHubUrl(url), ...args);
           if (new URL(url).pathname.startsWith('/ws/room/')) {{
@@ -145,8 +150,8 @@ def main(minutes):
 
         browser = p.chromium.launch(headless=True)
         host, guest = [browser.new_page(viewport={'width': 360, 'height': 720}) for _ in range(2)]
-        use_backend(host, origin)
-        use_backend(guest, origin)
+        use_backend(host, origin, legacy=True)
+        use_backend(guest, origin, legacy=True)
         # 默认开启的音频会在前面的移动/重连测试里持续解码和播放。这里先关掉，
         # 到声音专项再显式打开，避免音频负载把网络时序断言拖过截止时间。
         for page in (host, guest):

@@ -264,7 +264,8 @@ def threshold(gs):
 
 def snapshot_interval(gs):
     """Snapshot cadence in simulation frames (20 Hz tick)."""
-    return DENSE_SNAPSHOT_INTERVAL if len(gs["enemies"]) >= DENSE_SNAPSHOT_THRESHOLD else SNAPSHOT_INTERVAL
+    load = len(gs["enemies"]) + len(gs["shots"]) + len(gs["effects"])
+    return DENSE_SNAPSHOT_INTERVAL if load >= DENSE_SNAPSHOT_THRESHOLD else SNAPSHOT_INTERVAL
 
 
 def clamp_loadout(p):
@@ -765,32 +766,35 @@ def _grant_xp(gs, p, units):
 
 
 class _ProjectileTargets:
-    """Index horizontal bands during the projectile phase of a crowded tick."""
+    """Transient 2D broad phase; knockback updates cells during this same tick."""
 
-    band_width = 96
+    cell_width = 96
 
     def __init__(self, enemies):
         self.order = {enemy["id"]: index for index, enemy in enumerate(enemies)}
-        self.bands = {}
+        self.cells = {}
         for enemy in enemies:
-            self.bands.setdefault(self.band(enemy["x"]), {})[enemy["id"]] = enemy
+            self.cells.setdefault(self.cell(enemy["x"], enemy["y"]), {})[enemy["id"]] = enemy
 
-    def band(self, x):
-        return math.floor(x / self.band_width)
+    def cell(self, x, y):
+        return math.floor(x / self.cell_width), math.floor(y / self.cell_width)
 
-    def candidates(self, left, right):
-        for band in range(self.band(left), self.band(right) + 1):
-            occupants = self.bands.get(band)
-            if occupants:
-                yield from occupants.values()
+    def candidates(self, left, right, top, bottom):
+        x0, y0 = self.cell(left, top)
+        x1, y1 = self.cell(right, bottom)
+        for x in range(x0, x1 + 1):
+            for y in range(y0, y1 + 1):
+                occupants = self.cells.get((x, y))
+                if occupants:
+                    yield from occupants.values()
 
-    def moved(self, enemy, old_x):
-        previous = self.band(old_x)
-        current = self.band(enemy["x"])
+    def moved(self, enemy, old_x, old_y):
+        previous = self.cell(old_x, old_y)
+        current = self.cell(enemy["x"], enemy["y"])
         if previous != current:
             enemy_id = enemy["id"]
-            del self.bands[previous][enemy_id]
-            self.bands.setdefault(current, {})[enemy_id] = enemy
+            del self.cells[previous][enemy_id]
+            self.cells.setdefault(current, {})[enemy_id] = enemy
 
 
 def _projectile_contacts(enemies, max_enemy_radius, shot, start_x, start_y, targets=None):
@@ -806,7 +810,7 @@ def _projectile_contacts(enemies, max_enemy_radius, shot, start_x, start_y, targ
     bottom = max(start_y, end_y) + padding
     hit = shot["hit"]
     contacts = []
-    candidates = enemies if targets is None else targets.candidates(left, right)
+    candidates = enemies if targets is None else targets.candidates(left, right, top, bottom)
     for enemy in candidates:
         x = enemy["x"]
         if not left <= x <= right:
@@ -846,9 +850,6 @@ def _step_shots(gs):
     max_enemy_radius = max((enemy["radius"] for enemy in enemies), default=0) if gs["shots"] else 0
     targets = None
     indexed = len(enemies) * len(gs["shots"]) >= 2500
-    if indexed:
-        centers = [enemy["x"] for enemy in enemies]
-        indexed = max(centers) - min(centers) >= 3 * _ProjectileTargets.band_width
     remaining = []
     for shot in gs["shots"]:
         if shot["delay"] > 0:
@@ -911,20 +912,20 @@ def _step_shots(gs):
             if indexed and targets is None:
                 targets = _ProjectileTargets(enemies)
                 # A tightly packed horde is cheaper to scan in roster order.
-                if len(targets.bands) < 4:
+                if len(targets.cells) < 4:
                     indexed = False
                     targets = None
             for time, enemy in _projectile_contacts(enemies, max_enemy_radius, shot, start_x, start_y, targets):
                 x = start_x + (shot["x"] - start_x) * time
                 y = start_y + (shot["y"] - start_y) * time
                 mult = _roll(gs, shot)
-                old_x = enemy["x"] if targets is not None else None
+                old_x, old_y = enemy["x"], enemy["y"]
                 _damage(gs, owner, enemy, shot["damage"] * mult, src=(x, y),
                         knockback=shot["knockback"], crit=mult > 1, heal=shot["heal_on_crit"],
                         kb_stack=shot.get("kb_stack", 0.0),
                         slow=shot.get("slow", 0.0), slow_ticks=shot.get("slow_ticks", 0))
-                if targets is not None and old_x is not None and enemy["x"] != old_x:
-                    targets.moved(enemy, old_x)
+                if targets is not None and (enemy["x"] != old_x or enemy["y"] != old_y):
+                    targets.moved(enemy, old_x, old_y)
                 first_hit = not shot["hit"]
                 if width is None and shot["explode"] and owner and first_hit:
                     burst_at = (x, y)
