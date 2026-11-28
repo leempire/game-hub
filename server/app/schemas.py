@@ -1,11 +1,15 @@
 """Pydantic request/response models."""
 
-from pydantic import BaseModel
+from decimal import Decimal
+
+from pydantic import BaseModel, Field
 
 
 class RegisterRequest(BaseModel):
     username: str
     password: str
+    temporary_test: bool = False
+    test_batch: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class LoginRequest(BaseModel):
@@ -40,3 +44,7 @@ class CreateRoomRequest(BaseModel):
 
 class JoinRoomRequest(BaseModel):
     password: str | None = None
+
+
+class AICreditsRequest(BaseModel):
+    ai_credits: Decimal = Field(ge=-40000000, le=40000000, allow_inf_nan=False)

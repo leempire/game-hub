@@ -303,14 +303,15 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const isUno = room.game === 'uno';
   const isStasis = room.game === 'stasis';
   const isUndercover = room.game === 'undercover';
+  const isTurtleSoup = room.game === 'turtle_soup';
   const isConcentration = room.game === 'concentration';
-  const needsEveryoneOnline = isUndercover || isConcentration || room.game === 'doudizhu' || room.game === 'guandan';
+  const needsEveryoneOnline = isTurtleSoup || isUndercover || isConcentration || room.game === 'doudizhu' || room.game === 'guandan';
   // **房间级设置**（v1.15）：扫雷难度 / 军棋玩法 / 深空休眠地图 / 海战棋棋盘 /
   // UNO 档位与房规全部收进这一份结构，界面只按 `kind` 通用渲染 —— 客户端不认识
   // 任何 `key` 的语义，一行规则都不写。没有可调项的游戏（五子棋等）服务端不下发它。
   const settings = room.settings ?? [];
   // 深空休眠支持人机（stasis_ai.py 做人机队友，由 tick 循环按 1 秒间隔驱动，不是回合制调度）
-  const supportsBots = room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi' || room.game === 'uttt' || room.game === 'doudizhu' || room.game === 'guandan';
+  const supportsBots = isUndercover || room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi' || room.game === 'uttt' || room.game === 'doudizhu' || room.game === 'guandan';
   // 房间只有两种状态：非游戏中即大厅（对局结束的房间回到等待态，可续开）
   const isLobbyStatus = room.status !== 'playing';
   // 谁是卧底要求所有座位在线才能开局，等待时也需要显示离线成员。
@@ -318,7 +319,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   const canAddBot = isHost && !isFull && isLobbyStatus && supportsBots;
   // 人数要求：扫雷 1 人即可开（单机）；2048 / 俄罗斯方块 / 蜘蛛纸牌 1-4 人各自独立盘
   // （1 人即可开）；飞行棋 / UNO / 深空休眠 / 精神衰弱至少 2 人，谁是卧底至少 4 人。
-  const minPlayers = isUndercover ? 4 : (isLudo || isUno || isStasis || isConcentration) ? 2 : room.max_players;
+  const minPlayers = isTurtleSoup ? 1 : isUndercover ? 4 : (isLudo || isUno || isStasis || isConcentration) ? 2 : room.max_players;
   const needMorePlayers = isMine || is2048 || isTetris || room.game === 'spider' || room.game === 'abyss' || room.game === 'fish'
     ? false
     : room.players.length < minPlayers;
@@ -328,9 +329,9 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   // 这里先不显示按钮，免得用户点开才看到一句「不能邀请」。
   const canInvite = isLobbyStatus && !isFull && !room.has_password && !room.practice && !room.challenge;
 
-  // 全部支持人机的游戏都提供三档；合作游戏中代表队友执行力。
+  // 本地算法人机提供三档；在线 AI 人机不提供难度档位。
   // botDifficulty 的 useState 在组件顶部（提前返回之前），这里只做取值与展示。
-  const hasBotDifficulty = supportsBots;
+  const hasBotDifficulty = supportsBots && !isUndercover;
   const BOT_DIFFICULTIES: Array<{ key: string; label: string }> = [
     { key: 'easy', label: '简单' },
     { key: 'normal', label: '普通' },
@@ -441,7 +442,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
               </Text>
               {p.is_host && <Text style={styles.hostBadge}>房主</Text>}
               {p.is_bot && <Text style={styles.botBadge}>
-                {BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? '普通'}难度
+                {isUndercover ? 'AI' : `${BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? '普通'}难度`}
               </Text>}
               <View style={styles.playerSpacer} />
               {showOffline && !p.connected && <Text style={[styles.statusPill, styles.disconnectedPill]}>
@@ -528,6 +529,14 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
                 ))}
               </View>
             </View>
+          )}
+          {isTurtleSoup && isLobbyStatus && <Text style={{ color: colors.textSecondary }}>
+            AI 主持不占玩家席位；房主至少 100 AI 积分才能开局。抽题排除房内所有人已玩题。
+          </Text>}
+          {isUndercover && isLobbyStatus && (
+            <Text style={{ color: colors.textSecondary }}>
+              AI 人机由房主支付积分，开局需至少 100 积分；余额低于 0 后停止 AI。可在「我的」查看余额。
+            </Text>
           )}
           {canAddBot && (
             <TouchableOpacity style={[styles.actionBtn, styles.addBotBtn]} onPress={handleAddBot}>

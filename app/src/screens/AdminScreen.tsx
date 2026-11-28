@@ -3,8 +3,9 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
   ActivityIndicator,
 } from 'react-native';
+import { AppModal, FormInput } from '../ui';
 import { useAuth } from '../auth';
-import { adminListUsers, adminSetBanned, adminSetRole, User } from '../api';
+import { adminListUsers, adminSetAICredits, adminSetBanned, adminSetRole, User } from '../api';
 import { colors, spacing, radius, fontSize, shadow } from '../theme';
 import { notify } from '../utils';
 
@@ -12,6 +13,10 @@ const PAGE_SIZE = 20;
 
 export default function AdminScreen() {
   const { token, user: me } = useAuth();
+  const [creditUser, setCreditUser] = useState<User | null>(null);
+  const [creditValue, setCreditValue] = useState('');
+  const [creditError, setCreditError] = useState('');
+  const [savingCredits, setSavingCredits] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [total, setTotal] = useState(0);
@@ -75,6 +80,21 @@ export default function AdminScreen() {
     }
   };
 
+  const saveCredits = async () => {
+    if (!token || !creditUser || savingCredits) return;
+    setSavingCredits(true);
+    setCreditError('');
+    try {
+      const updated = await adminSetAICredits(token, creditUser.id, creditValue);
+      setUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+      setCreditUser(null);
+    } catch (err) {
+      setCreditError((err as Error).message);
+    } finally {
+      setSavingCredits(false);
+    }
+  };
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -126,6 +146,11 @@ export default function AdminScreen() {
                     )}
                   </View>
                 </View>
+                <Text style={styles.userSub}>AI 积分：{Math.floor(u.ai_credits ?? 0)}</Text>
+                <TouchableOpacity style={[styles.pageBtn, { minHeight: 44, marginTop: spacing.sm }]}
+                  onPress={() => { setCreditUser(u); setCreditValue(String(Math.floor(u.ai_credits ?? 0))); setCreditError(''); }}>
+                  <Text style={styles.pageBtnText}>设置 AI 积分</Text>
+                </TouchableOpacity>
                 <View style={styles.userActions}>
                   <TouchableOpacity
                     style={[styles.smallBtn, u.banned ? styles.unbanBtn : styles.banBtn]}
@@ -152,6 +177,21 @@ export default function AdminScreen() {
         </ScrollView>
       )}
 
+      <AppModal visible={creditUser !== null} onClose={() => { if (!savingCredits) setCreditUser(null); }}>
+        <Text style={styles.userName}>设置 {creditUser?.nickname || creditUser?.username} 的 AI 积分</Text>
+        <FormInput label="新的积分余额（覆盖当前余额）" value={creditValue}
+          onChangeText={setCreditValue} keyboardType="decimal-pad" editable={!savingCredits}
+          hint="仅管理员可设置，保存后覆盖当前余额。" error={creditError || undefined} />
+        <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+          <TouchableOpacity style={[styles.pageBtn, { flex: 1, minHeight: 44, backgroundColor: colors.bg }]}
+            disabled={savingCredits} onPress={() => setCreditUser(null)}>
+            <Text style={{ color: colors.text }}>取消</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.pageBtn, { flex: 1, minHeight: 44 }]} disabled={savingCredits} onPress={saveCredits}>
+            <Text style={styles.pageBtnText}>{savingCredits ? '保存中…' : '保存积分'}</Text>
+          </TouchableOpacity>
+        </View>
+      </AppModal>
       {/* Pagination */}
       <View style={styles.pagination}>
         <TouchableOpacity

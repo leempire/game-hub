@@ -64,7 +64,7 @@ export_client_env() {
     export EXPO_PUBLIC_WS_BASE="${EXPO_PUBLIC_WS_BASE:-${EXPO_PUBLIC_API_BASE/http/ws}}"
 }
 
-STOP_GRACE="${STOP_GRACE:-10}"        # TERM 后等待秒数，超时才 KILL
+STOP_GRACE="${STOP_GRACE:-35}"        # TERM 后等待秒数，超时才 KILL
 BACKEND_TIMEOUT="${BACKEND_TIMEOUT:-40}"
 WEB_TIMEOUT="${WEB_TIMEOUT:-120}"
 

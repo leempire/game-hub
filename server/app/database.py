@@ -9,7 +9,8 @@ import threading
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 
-from app import participants, competition_records, social_schema, talent_schema
+from app.ai_pricing import CREDIT_UNITS
+from app import turtle_soup_schema, ai_credit_schema, participants, competition_records, social_schema, talent_schema
 
 
 _db_path: str = "data/gamehub.db"
@@ -124,6 +125,15 @@ def _create_tables(conn: sqlite3.Connection):
             ended_at TEXT NOT NULL
         )
     """)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "ai_credit_units" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN ai_credit_units INTEGER NOT NULL DEFAULT 0")
+    if "temporary_test" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN temporary_test INTEGER NOT NULL DEFAULT 0")
+    if "test_batch" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN test_batch TEXT")
+    ai_credit_schema.create_schema(conn)
+    turtle_soup_schema.create_schema(conn)
     participants.create_schema(conn)
     competition_records.create_schema(conn)
     social_schema.create_schema(conn)
@@ -189,6 +199,7 @@ def row_to_user(row: sqlite3.Row) -> dict:
         "nickname": row["nickname"],
         "role": row["role"],
         "banned": bool(row["banned"]),
+        "ai_credits": row["ai_credit_units"] / CREDIT_UNITS,
         "created_at": row["created_at"],
     }
 
@@ -448,6 +459,13 @@ def _build_results_record(room: dict) -> list[dict]:
                  "result": "win" if (p["id"] == result["landlord_id"]) == (result["winner"] == "landlord") else "lose",
                  **({"score": scores[p["id"]]} if scores is not None else {})}
                 for p in room["_doudizhu_roster"]]
+    if room['game'] == 'turtle_soup':
+        summary = gs['summary']
+        outcome = 'win' if summary['reason'] == 'solved' else (
+            'end' if summary['reason'] == 'payer_left' else 'lose')
+        return [{'username': p['username'],
+                 'result': 'lose' if p['id'] in summary['forfeited'] else outcome}
+                for p in room['_turtle_soup_roster']]
     if room["game"] == "undercover":
         summary = gs["summary"]
         roles = {entry["user_id"]: entry["role"] for entry in summary["roles"]}
@@ -570,7 +588,7 @@ def _build_results_record(room: dict) -> list[dict]:
 def _build_snapshot(room: dict) -> dict:
     """Build the final-position snapshot stored with each record."""
     gs = room.get("game_state") or {}
-    if room["game"] == "undercover":
+    if room["game"] in ("undercover", "turtle_soup"):
         return gs["summary"]
     game = room["game"]
     if game == "concentration":

@@ -122,7 +122,7 @@ def browser_checks(api):
             page.get_by_placeholder("输入6位房间号").fill(code)
             page.get_by_text("加入", exact=True).click()
             page.get_by_text("房间号", exact=True).wait_for()
-        expect(host.get_by_text("添加人机", exact=True)).to_have_count(0)
+        expect(host.get_by_text("添加人机", exact=True)).to_be_visible()
         opening = start()
         match_id = opening[0]["match_id"]
         words = [game["your_word"] for game in opening]

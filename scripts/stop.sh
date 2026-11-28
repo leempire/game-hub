@@ -7,7 +7,7 @@
 #   scripts/stop.sh web          # 只停前端 web dev server（50540）
 #
 # 定位方式见 lib.sh 顶部注释（端口 + 工作目录 + 命令行三重指纹）。
-# 先 TERM 整棵进程树，STOP_GRACE（默认 10s）后仍有存活才 KILL；
+# 先 TERM 整棵进程树，STOP_GRACE（默认 35s，覆盖 AI 在途结算窗口）后仍有存活才 KILL；
 # 停完校验端口已释放。未在运行的服务按「已停止」处理（幂等）。
 
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

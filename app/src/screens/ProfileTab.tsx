@@ -7,7 +7,7 @@ import { AppModal, FormInput } from '../ui';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../auth';
-import { updateNickname, changePassword, fetchMyStats, MyStats } from '../api';
+import { getMe, updateNickname, changePassword, fetchMyStats, MyStats } from '../api';
 import { colors, spacing, radius, fontSize, shadow } from '../theme';
 import { notify, formatDate } from '../utils';
 import { isNative, isMobileWeb } from '../platform';
@@ -51,13 +51,15 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
   const loadStats = useCallback(async () => {
     if (!token) return;
     try {
-      setStats(await fetchMyStats(token));
+      const [nextStats, currentUser] = await Promise.all([fetchMyStats(token), getMe(token)]);
+      setStats(nextStats);
+      updateUser(currentUser);
     } catch {
       // 网络失败保留上一次的数字；首次失败显示「暂时无法加载」
     } finally {
       setStatsLoading(false);
     }
-  }, [token]);
+  }, [token, updateUser]);
 
   useEffect(() => {
     if (isFocused) void loadStats();
@@ -246,6 +248,7 @@ export default function ProfileTab({ onNavigateToAdmin, onNavigateToHistory }: P
         <View style={styles.roleBadge}>
           <Text style={styles.roleText}>{user.role === 'admin' ? '管理员' : '用户'}</Text>
         </View>
+        <Text style={styles.joinDate}>AI 积分：{Math.floor(user.ai_credits ?? 0)}</Text>
         <Text style={styles.joinDate}>注册于 {formatDate(user.created_at)}</Text>
       </View>
 

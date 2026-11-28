@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_conn, row_to_user
 from app.security import get_current_user_id
-from app.schemas import BanRequest, RoleRequest
-from app import ws
+from app.schemas import AICreditsRequest, BanRequest, RoleRequest
+from app import ai_credits, ws
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -94,5 +94,20 @@ def change_role(uid: int, req: RoleRequest, admin_id: int = Depends(_require_adm
         conn.commit()
         row = conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone()
         return row_to_user(row)
+    finally:
+        conn.close()
+
+
+@router.post("/users/{uid}/ai-credits")
+def set_ai_credits(uid: int, req: AICreditsRequest, admin_id: int = Depends(_require_admin)):
+    try:
+        ai_credits.set_balance(uid, req.ai_credits, admin_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    conn = get_conn()
+    try:
+        return row_to_user(conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone())
     finally:
         conn.close()

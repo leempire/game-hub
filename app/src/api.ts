@@ -50,6 +50,7 @@ export interface User {
   username: string;
   nickname: string | null;
   role: 'admin' | 'user';
+  ai_credits: number;
   banned: boolean;
   created_at: string;
 }
@@ -439,11 +440,11 @@ export type AbyssSnapshot = { game: 'abyss' } & import('./abyss').AbyssSummary;
 
 export type FishSnapshot = { game: 'fish'; ranking: import('./fish').FishRank[]; reason: string };
 
-export type GameSnapshot = FishSnapshot | AbyssSnapshot | GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot | import('./undercover').UndercoverSnapshot | (import('./doudizhu').DoudizhuSnapshot & { game: 'doudizhu' }) | (import('./guandan').GuandanSnapshot & { game: 'guandan' }) | import('./concentration').ConcentrationSnapshot;
+export type GameSnapshot = FishSnapshot | AbyssSnapshot | GomokuSnapshot | ReversiSnapshot | MinesweeperSnapshot | BattleshipSnapshot | DotsSnapshot | LudoSnapshot | Game2048Snapshot | XiangqiSnapshot | ConnectFourSnapshot | TetrisSnapshot | UnoSnapshot | LuzhanqiSnapshot | SpiderSnapshot | UtttSnapshot | import('./undercover').UndercoverSnapshot | (import('./doudizhu').DoudizhuSnapshot & { game: 'doudizhu' }) | (import('./guandan').GuandanSnapshot & { game: 'guandan' }) | import('./concentration').ConcentrationSnapshot | import('./turtleSoup').SoupSnapshot;
 
 export interface GameRecord {
   id: number;
-  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis' | 'uttt' | 'abyss' | 'undercover' | 'doudizhu' | 'guandan' | 'fish' | 'concentration';
+  game: 'gomoku' | 'reversi' | 'minesweeper' | 'battleship' | 'dots' | 'ludo' | '2048' | 'xiangqi' | 'connect4' | 'tetris' | 'uno' | 'luzhanqi' | 'stasis' | 'uttt' | 'abyss' | 'turtle_soup' | 'undercover' | 'doudizhu' | 'guandan' | 'fish' | 'concentration';
   room_code: string;
   players: HistoryPlayer[];
   results: HistoryResult[];
@@ -554,5 +555,11 @@ export function allocateTalent(token: string, node: string): Promise<TalentProfi
 export function resetTalents(token: string): Promise<TalentProfile> {
   return apiFetch<TalentProfile>('/api/talents/reset', {
     method: 'POST',
+  }, token);
+}
+
+export function adminSetAICredits(token: string, userId: number, aiCredits: string): Promise<User> {
+  return apiFetch<User>(`/api/admin/users/${userId}/ai-credits`, {
+    method: 'POST', body: JSON.stringify({ ai_credits: aiCredits }),
   }, token);
 }

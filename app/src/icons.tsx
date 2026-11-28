@@ -736,6 +736,18 @@ export function AbyssIcon({ size = 56 }: { size?: number }) {
   </Svg>;
 }
 
+export function TurtleSoupIcon({ size = 56 }: { size?: number }) {
+  return <Svg width={size} height={size} viewBox="0 0 64 64">
+    <Rect x="3" y="3" width="58" height="58" rx="14" fill={colors.primaryDark} />
+    <Path d="M12 33h40c-1 13-9 21-20 21S13 46 12 33Z" fill={colors.white} />
+    <Path d="M20 27c-5-6 5-7 0-13m12 13c-5-6 5-7 0-13m12 13c-5-6 5-7 0-13"
+      stroke={colors.white} strokeWidth="3" strokeLinecap="round" fill="none" />
+    <Path d="M27 40a5 5 0 0 1 10 0c0 4-5 3-5 7" stroke={colors.primaryDark}
+      strokeWidth="3" strokeLinecap="round" fill="none" />
+    <Circle cx="32" cy="50" r="1.5" fill={colors.primaryDark} />
+  </Svg>;
+}
+
 export function UndercoverIcon({ size = 56 }: { size?: number }) {
   return <Svg width={size} height={size} viewBox="0 0 64 64">
     <Rect x="3" y="3" width="58" height="58" rx="14" fill={colors.primaryDark} />

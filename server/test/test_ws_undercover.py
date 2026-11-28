@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from app import database, persistence, room_manager as rm, room_timing
+from app import ai_credits, database, persistence, room_manager as rm, room_timing
 from app import ws as ws_module
 
 
@@ -99,10 +99,15 @@ def test_minimum_and_bot_restrictions(client):
     with ExitStack() as stack:
         code, players, sockets = _lobby(client, stack, count=3)
         host = sockets[next(iter(players))]
-        host.send_json({"type": "add_bot"})
-        assert "人机" in _recv(host, "error")["message"]
         host.send_json({"type": "start"})
         assert "4" in _recv(host, "error")["message"]
+        host.send_json({"type": "add_bot"})
+        assert _recv(host, "error")["message"] == "AI积分不足"
+        owner = next(iter(players))
+        ai_credits.set_balance(owner, 100, owner)
+        host.send_json({"type": "add_bot"})
+        lobby = _recv(host, "lobby")
+        assert any(p.get("is_bot") for p in lobby["room"]["players"])
         assert rm.get_room(code)["status"] == "waiting"
 
 

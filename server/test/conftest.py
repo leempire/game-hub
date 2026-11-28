@@ -15,8 +15,18 @@ from starlette.testclient import WebSocketTestSession
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.main import app
+from app import database
 
 collect_ignore = ['test_ws_game.py', 'test_ws_battleship_live.py', 'test_bot_live.py']
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_session_database(tmp_path_factory):
+    """Run migrations on a temporary DB, never the running service's database."""
+    previous = database._db_path
+    database.init_db(str(tmp_path_factory.mktemp("session-db") / "gamehub.db"))
+    yield
+    database._db_path = previous
 
 
 @pytest.fixture
