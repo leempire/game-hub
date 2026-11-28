@@ -49,8 +49,12 @@ def initialize(room: dict):
 
 
 def undercover_online(room: dict) -> bool:
-    alive = (room.get("game_state") or {}).get("alive", ())
-    return any(p["connected"] and p["id"] in alive for p in room["players"])
+    gs = room.get("game_state") or {}
+    alive = gs.get("alive", ())
+    if gs.get("ai_owner_id"):
+        alive = set(gs.get("player_ids", ())) - set(gs.get("forfeited", ()))
+    return any(p["connected"] and not p.get("is_bot") and p["id"] in alive
+               for p in room["players"])
 
 
 def reset_deadline(room: dict):

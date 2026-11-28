@@ -9,7 +9,8 @@ import threading
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 
-from app import participants, competition_records, social_schema, talent_schema
+from app.ai_pricing import CREDIT_UNITS
+from app import ai_credit_schema, participants, competition_records, social_schema, talent_schema
 
 
 _db_path: str = "data/gamehub.db"
@@ -124,6 +125,10 @@ def _create_tables(conn: sqlite3.Connection):
             ended_at TEXT NOT NULL
         )
     """)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "ai_credit_units" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN ai_credit_units INTEGER NOT NULL DEFAULT 0")
+    ai_credit_schema.create_schema(conn)
     participants.create_schema(conn)
     competition_records.create_schema(conn)
     social_schema.create_schema(conn)
@@ -189,6 +194,7 @@ def row_to_user(row: sqlite3.Row) -> dict:
         "nickname": row["nickname"],
         "role": row["role"],
         "banned": bool(row["banned"]),
+        "ai_credits": row["ai_credit_units"] / CREDIT_UNITS,
         "created_at": row["created_at"],
     }
 

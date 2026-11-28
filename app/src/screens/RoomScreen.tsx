@@ -310,7 +310,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
   // 任何 `key` 的语义，一行规则都不写。没有可调项的游戏（五子棋等）服务端不下发它。
   const settings = room.settings ?? [];
   // 深空休眠支持人机（stasis_ai.py 做人机队友，由 tick 循环按 1 秒间隔驱动，不是回合制调度）
-  const supportsBots = room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi' || room.game === 'uttt' || room.game === 'doudizhu' || room.game === 'guandan';
+  const supportsBots = isUndercover || room.game === 'gomoku' || room.game === 'reversi' || room.game === 'battleship' || room.game === 'dots' || room.game === 'ludo' || room.game === 'xiangqi' || room.game === 'connect4' || room.game === 'uno' || room.game === 'stasis' || room.game === 'luzhanqi' || room.game === 'uttt' || room.game === 'doudizhu' || room.game === 'guandan';
   // 房间只有两种状态：非游戏中即大厅（对局结束的房间回到等待态，可续开）
   const isLobbyStatus = room.status !== 'playing';
   // 谁是卧底要求所有座位在线才能开局，等待时也需要显示离线成员。
@@ -330,7 +330,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
 
   // 全部支持人机的游戏都提供三档；合作游戏中代表队友执行力。
   // botDifficulty 的 useState 在组件顶部（提前返回之前），这里只做取值与展示。
-  const hasBotDifficulty = supportsBots;
+  const hasBotDifficulty = supportsBots && !isUndercover;
   const BOT_DIFFICULTIES: Array<{ key: string; label: string }> = [
     { key: 'easy', label: '简单' },
     { key: 'normal', label: '普通' },
@@ -441,7 +441,7 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
               </Text>
               {p.is_host && <Text style={styles.hostBadge}>房主</Text>}
               {p.is_bot && <Text style={styles.botBadge}>
-                {BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? '普通'}难度
+                {isUndercover ? 'AI' : `${BOT_DIFFICULTIES.find((d) => d.key === p.ai_difficulty)?.label ?? '普通'}难度`}
               </Text>}
               <View style={styles.playerSpacer} />
               {showOffline && !p.connected && <Text style={[styles.statusPill, styles.disconnectedPill]}>
@@ -528,6 +528,11 @@ export default function RoomScreen({ code, onLeave, onGameStart }: Props) {
                 ))}
               </View>
             </View>
+          )}
+          {isUndercover && isLobbyStatus && (
+            <Text style={{ color: colors.textSecondary }}>
+              AI 人机由房主支付积分，开局需至少 100 积分；余额低于 0 后停止 AI。可在「我的」查看余额。
+            </Text>
           )}
           {canAddBot && (
             <TouchableOpacity style={[styles.actionBtn, styles.addBotBtn]} onPress={handleAddBot}>

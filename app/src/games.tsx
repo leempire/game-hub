@@ -86,7 +86,7 @@ export const GAMES: GameEntry[] = [
   { key: 'ludo', title: '飞行棋', short: '飞行棋', desc: '掷骰起飞，撞敌回基地抢先终点',
     badge: '2–4 人 · 对战', category: 'table', ionicon: 'airplane', Icon: LudoIcon },
   { key: 'undercover', title: '谁是卧底', short: '谁是卧底', desc: '偷偷看词，轮流给线索，投票找卧底',
-    badge: '4–8 人 · 文字推理', category: 'table', ionicon: 'search-outline', Icon: UndercoverIcon },
+    badge: '4–8 人 · AI 人机', category: 'table', ionicon: 'search-outline', Icon: UndercoverIcon },
 
   { key: '2048', title: '2048 竞速', short: '2048', desc: '同序列公平竞速，比谁先合成 2048',
     badge: '1–4 人 · 竞速', category: 'solo', ionicon: 'calculator-outline', Icon: Game2048Icon },

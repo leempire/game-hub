@@ -18,6 +18,7 @@ from app import room_timing
 from app.competition_rules import challenge_seed, challenge_info
 from app.game import spider, uttt, uttt_ai, xiangqi as xiangqi_engine
 from app.game import stasis as stasis_engine
+from app import ai_service
 from app.game import abyss, concentration, doudizhu, fish, guandan, stasis_ai, undercover
 
 # Room idle TTL in seconds. Sweeper deletes rooms exceeding this.
@@ -637,7 +638,7 @@ def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
     if room["status"] == "playing":
         raise ValueError("只能在等待大厅添加人机")
     if room["game"] not in ("gomoku", "reversi", "battleship", "dots", "ludo", "xiangqi",
-                            "connect4", "uno", "stasis", "luzhanqi", "uttt", "doudizhu", "guandan"):
+                            "connect4", "uno", "stasis", "luzhanqi", "uttt", "doudizhu", "guandan", "undercover"):
         raise ValueError("该游戏不支持人机")
     # 满员即止：双人游戏 max_players=2，加一个 bot 后自然无法再加；
     # 飞行棋/UNO max_players=4，可连加 3 个凑满 4 人局
@@ -646,6 +647,8 @@ def add_bot(code: str, host_id: int, difficulty: str | None = None) -> dict:
     bot_names = {p.get("nickname") for p in room["players"] if p.get("is_bot")}
     seq = next(i for i in range(1, room["max_players"] + 1) if _bot_nickname(i) not in bot_names)
     bot = _make_bot_player(code, seq)
+    if room["game"] == "undercover":
+        bot["username"] = f"bot_{code}_{abs(bot['id'])}"
     bot["ai_difficulty"] = normalize_difficulty(difficulty)
     room["players"].append(bot)
     _touch_activity(room)
@@ -973,6 +976,7 @@ def _start_game_engine(code: str, user_id: int, *, prepared_spider: dict | None 
     # 房主点击开始即视为就绪，不要求房主 ready（与前端 UX 一致）
     if not all(p["ready"] for p in room["players"] if p["id"] != room["host_id"]):
         return None
+    ai_service.require_game_start(room)
     # 开局后座位就锁死了：还挂着的换位请求一律作废（否则下一局回到大厅时
     # 会有一条「上一局之前」的请求突然生效）
     room["swap_requests"] = []
@@ -1544,15 +1548,19 @@ def _start_undercover(room: dict) -> dict:
     players = room["players"]
     if not undercover.MIN_PLAYERS <= len(players) <= undercover.MAX_PLAYERS:
         raise ValueError("「谁是卧底」需要 4–8 名玩家")
-    if any(not p["connected"] or p.get("is_bot") for p in players):
+    if any(not p["connected"] for p in players):
         raise ValueError("请等待所有玩家上线后再开始")
+    uses_ai = ai_service.uses_paid_ai(room)
     previous = (room.get("game_state") or {}).get("summary", {}).get("word_pair")
     rng = random.SystemRandom()
     word_pair = undercover.choose_word_pair(rng, tuple(previous.values()) if previous else None)
     gs = undercover.create_game([p["id"] for p in players], word_pair, uuid4().hex, rng)
     gs["_receipts"] = {}
+    if uses_ai:
+        gs["ai_owner_id"] = room["host_id"]
     room["_undercover_roster"] = [
-        {"id": p["id"], "username": p["username"], "nickname": p["nickname"]} for p in players
+        {"id": p["id"], "username": p["username"], "nickname": p["nickname"],
+         "is_bot": p.get("is_bot", False)} for p in players
     ]
     room.update(status="playing", game_started_at=_now_iso(), empty_since=None, game_state=gs)
     return gs
@@ -3907,7 +3915,9 @@ def handle_player_reconnect(code: str, user_id: int):
                 task.cancel()
             _on_dc_timeout(code, user_id)
             return False
-        resume = user_in_game(room, user_id) and not room_timing.undercover_online(room)
+        gs = room["game_state"]
+        observing_ai = gs.get("ai_owner_id") and user_id not in gs.get("forfeited", ())
+        resume = (user_in_game(room, user_id) or observing_ai) and not room_timing.undercover_online(room)
     else:
         resume = False
     key = (code, user_id)

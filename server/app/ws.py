@@ -9,7 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.security import decode_token_ws
 from app.database import get_conn, row_to_user
-from app import abyss_stream, room_manager as rm, spectating
+from app import undercover_bots, abyss_stream, room_manager as rm, spectating
 from app.game.minesweeper import game_to_sync as mine_game_to_sync
 from app.game.reversi import game_to_sync as reversi_game_to_sync
 from app.game.battleship import game_to_sync as bs_game_to_sync
@@ -1480,6 +1480,9 @@ def _undercover_result(room: dict, user_id: int) -> dict | None:
 
 
 def _send_undercover_update(room: dict, *, only=None, exclude=(), kind="undercover_state", lobby=False):
+    undercover_bots.schedule(
+        room, _send_undercover_update,
+        lambda uid, message: _report_undercover_ai(room, uid, message))
     # Enqueue every projection in the same turn of the event loop as the committed revision.
     conns = _connections.get(room["code"], {})
     members = {p["id"] for p in room["players"]}
@@ -1497,6 +1500,12 @@ def _send_undercover_update(room: dict, *, only=None, exclude=(), kind="undercov
             _stasis_enqueue(ws, result)
         if (lobby or not playing) and uid in members:
             _stasis_enqueue(ws, {"type": "lobby", "room": room_view})
+
+
+def _report_undercover_ai(room, uid, message):
+    connection = _connections.get(room['code'], {}).get(uid)
+    if connection:
+        _stasis_enqueue(connection, {'type': 'error', 'message': message})
 
 
 def _game_state_for_sync(gs: dict, user_id: int) -> dict:
@@ -3397,6 +3406,9 @@ async def _on_room_deadline(code: str, room: dict, event: str):
     if rm.get_room(code) is not room:
         return
     gs = room.get("game_state") or {}
+    if room["game"] == "undercover":
+        undercover_bots.schedule(room, _send_undercover_update,
+                                 lambda uid, message: _report_undercover_ai(room, uid, message))
     if event == "clock":
         if room["status"] != "playing":
             return

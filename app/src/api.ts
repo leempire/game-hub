@@ -50,6 +50,7 @@ export interface User {
   username: string;
   nickname: string | null;
   role: 'admin' | 'user';
+  ai_credits: number;
   banned: boolean;
   created_at: string;
 }
@@ -554,5 +555,11 @@ export function allocateTalent(token: string, node: string): Promise<TalentProfi
 export function resetTalents(token: string): Promise<TalentProfile> {
   return apiFetch<TalentProfile>('/api/talents/reset', {
     method: 'POST',
+  }, token);
+}
+
+export function adminSetAICredits(token: string, userId: number, aiCredits: string): Promise<User> {
+  return apiFetch<User>(`/api/admin/users/${userId}/ai-credits`, {
+    method: 'POST', body: JSON.stringify({ ai_credits: aiCredits }),
   }, token);
 }

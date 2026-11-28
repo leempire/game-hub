@@ -99,10 +99,13 @@ def test_minimum_and_bot_restrictions(client):
     with ExitStack() as stack:
         code, players, sockets = _lobby(client, stack, count=3)
         host = sockets[next(iter(players))]
-        host.send_json({"type": "add_bot"})
-        assert "人机" in _recv(host, "error")["message"]
         host.send_json({"type": "start"})
         assert "4" in _recv(host, "error")["message"]
+        host.send_json({"type": "add_bot"})
+        lobby = _recv(host, "lobby")
+        assert any(p.get("is_bot") for p in lobby["room"]["players"])
+        host.send_json({"type": "start"})
+        assert "AI" in _recv(host, "error")["message"]
         assert rm.get_room(code)["status"] == "waiting"
 
 
